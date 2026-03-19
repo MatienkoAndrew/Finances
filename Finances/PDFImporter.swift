@@ -18,7 +18,11 @@ enum PDFImporterError: LocalizedError {
 }
 
 enum PDFImporter {
-    static func importExpenses(from url: URL, existingExpenses: [Expense]) throws -> [Expense] {
+    static func importExpenses(
+        from url: URL,
+        existingExpenses: [Expense],
+        rules: [CategoryRule]
+    ) throws -> [Expense] {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess {
@@ -53,9 +57,10 @@ enum PDFImporter {
                 details: row.details,
                 foreignAmount: row.foreignAmount,
                 foreignCurrency: row.foreignCurrency,
-                category: ExpenseCategoryGuesser.guessCategory(
-                    for: row.operationType,
-                    details: row.details
+                category: CategoryRuleEngine.matchCategory(
+                    operationType: row.operationType,
+                    details: row.details,
+                    rules: rules
                 ),
                 note: nil,
                 fingerprint: row.fingerprint,

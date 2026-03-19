@@ -7,6 +7,9 @@ struct ContentView: View {
 
     @Query(sort: \Expense.date, order: .reverse)
     private var expenses: [Expense]
+    
+    @Query(sort: \CategoryRule.priority, order: .reverse)
+    private var categoryRules: [CategoryRule]
 
     @State private var isShowingAddExpense = false
     @State private var isShowingImporter = false
@@ -181,9 +184,10 @@ struct ContentView: View {
         for expense in expenses {
             guard expense.category == nil else { continue }
 
-            let guessed = ExpenseCategoryGuesser.guessCategory(
-                for: expense.operationType,
-                details: expense.details
+            let guessed = CategoryRuleEngine.matchCategory(
+                operationType: expense.operationType,
+                details: expense.details,
+                rules: categoryRules
             )
 
             if let guessed {
@@ -213,7 +217,11 @@ struct ContentView: View {
             guard let url = urls.first else { return }
 
             do {
-                let importedExpenses = try PDFImporter.importExpenses(from: url, existingExpenses: expenses)
+                let importedExpenses = try PDFImporter.importExpenses(
+                    from: url,
+                    existingExpenses: expenses,
+                    rules: categoryRules
+                )
 
                 for expense in importedExpenses {
                     modelContext.insert(expense)

@@ -1,11 +1,3 @@
-//
-//  RootTabView.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 19.03.2026.
-//
-
-
 import SwiftUI
 
 struct RootTabView: View {
@@ -19,6 +11,11 @@ struct RootTabView: View {
             AnalyticsView()
                 .tabItem {
                     Label("Аналитика", systemImage: "chart.bar")
+                }
+
+            RulesView()
+                .tabItem {
+                    Label("Правила", systemImage: "wand.and.stars")
                 }
         }
     }
