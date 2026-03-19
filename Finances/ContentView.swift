@@ -40,8 +40,13 @@ struct ContentView: View {
                         ForEach(groupedExpenses, id: \.date) { section in
                             Section {
                                 ForEach(section.expenses) { expense in
-                                    ExpenseRowView(expense: expense)
-                                        .listRowSeparator(.hidden)
+                                    NavigationLink {
+                                        ExpenseDetailView(expense: expense)
+                                    } label: {
+                                        ExpenseRowView(expense: expense)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .listRowSeparator(.hidden)
                                 }
                                 .onDelete { offsets in
                                     deleteExpenses(offsets, in: section.expenses)
