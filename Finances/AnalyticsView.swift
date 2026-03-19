@@ -53,10 +53,10 @@ struct AnalyticsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     periodPicker
-
                     summaryCards
-
+                    dailySection
                     categorySection
+                    merchantSection
                 }
                 .padding()
             }
@@ -134,6 +134,140 @@ struct AnalyticsView: View {
                 }
             }
         }
+    }
+    
+    private var dailyExpenseTotals: [(date: Date, total: Double)] {
+        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+
+        let grouped = Dictionary(grouping: onlyExpenses) {
+            Calendar.current.startOfDay(for: $0.date)
+        }
+
+        return grouped
+            .map { date, expenses in
+                let total = expenses.reduce(0) { $0 + abs($1.amount) }
+                return (date: date, total: total)
+            }
+            .sorted { $0.date > $1.date }
+    }
+    
+    private var dailySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("По дням")
+                .font(.title3.bold())
+
+            if dailyExpenseTotals.isEmpty {
+                Text("Нет расходов для выбранного периода")
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(dailyExpenseTotals, id: \.date) { item in
+                        HStack {
+                            Text(formattedShortDate(item.date))
+                            Spacer()
+                            Text(formattedAmount(item.total))
+                                .fontWeight(.semibold)
+                        }
+                        .padding()
+                        .background(Color.gray.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+            }
+        }
+    }
+    
+    private var merchantTotals: [(merchant: String, total: Double)] {
+        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+
+        let grouped = Dictionary(grouping: onlyExpenses) { expense in
+            normalizedMerchantName(expense.details)
+        }
+
+        return grouped
+            .map { merchant, expenses in
+                let total = expenses.reduce(0) { $0 + abs($1.amount) }
+                return (merchant: merchant, total: total)
+            }
+            .sorted { $0.total > $1.total }
+            .prefix(10)
+            .map { $0 }
+    }
+    
+    private var merchantSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Топ мест и сервисов")
+                .font(.title3.bold())
+
+            if merchantTotals.isEmpty {
+                Text("Нет расходов для выбранного периода")
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(merchantTotals.enumerated()), id: \.offset) { index, item in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.merchant)
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                                    .lineLimit(2)
+
+                                Text(formattedAmount(item.total))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+                        }
+                        .padding()
+                        .background(Color.gray.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+            }
+        }
+    }
+    
+    private func normalizedMerchantName(_ details: String) -> String {
+        let uppercased = details.uppercased()
+
+        if uppercased.hasPrefix("GRAB ") {
+            return "GRAB"
+        }
+
+        if uppercased.hasPrefix("PAYOO MCDONALDS") {
+            return "PAYOO MCDONALDS"
+        }
+
+        if uppercased.hasPrefix("OPENAI CHATGPT SUBSCR") {
+            return "OPENAI CHATGPT SUBSCR"
+        }
+
+        if uppercased.hasPrefix("APPLE.COM BILL") {
+            return "APPLE.COM BILL"
+        }
+
+        if uppercased.hasPrefix("VNPAY 43 FACTORY") {
+            return "VNPAY 43 FACTORY"
+        }
+
+        if uppercased.hasPrefix("VNPAY XLIII COFFEE") {
+            return "VNPAY XLIII COFFEE"
+        }
+
+        return uppercased
+    }
+    
+    private func formattedShortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d MMM yyyy"
+        return formatter.string(from: date)
     }
 
     private func formattedAmount(_ value: Double) -> String {
