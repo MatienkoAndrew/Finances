@@ -1,61 +1,104 @@
-//
-//  ContentView.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 19.03.2026.
-//
-
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+
+    @Query(sort: \Expense.date, order: .reverse)
+    private var expenses: [Expense]
+
+    @State private var isShowingAddExpense = false
+    @State private var isShowingImporter = false
+    @State private var importErrorMessage: String?
+    @State private var importResultMessage: String?
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        NavigationStack {
+            Group {
+                if expenses.isEmpty {
+                    ContentUnavailableView(
+                        "Нет операций",
+                        systemImage: "tray",
+                        description: Text("Добавь первую операцию вручную или импортируй PDF.")
+                    )
+                } else {
+                    List {
+                        ForEach(expenses) { expense in
+                            ExpenseRowView(expense: expense)
+                        }
+                        .onDelete(perform: deleteExpenses)
                     }
                 }
-                .onDelete(perform: deleteItems)
             }
+            .navigationTitle("Операции")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        isShowingImporter = true
+                    } label: {
+                        Image(systemName: "doc.badge.plus")
+                    }
+
+                    Button {
+                        isShowingAddExpense = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
                 }
             }
-        } detail: {
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+            .sheet(isPresented: $isShowingAddExpense) {
+                AddExpenseView()
+            }
+            .fileImporter(
+                isPresented: $isShowingImporter,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: false
+            ) { result in
+                handleImport(result)
+            }
+            .alert("Ошибка импорта", isPresented: .constant(importErrorMessage != nil)) {
+                Button("OK") {
+                    importErrorMessage = nil
+                }
+            } message: {
+                Text(importErrorMessage ?? "")
+            }
+            .alert("Импорт завершен", isPresented: .constant(importResultMessage != nil)) {
+                Button("OK") {
+                    importResultMessage = nil
+                }
+            } message: {
+                Text(importResultMessage ?? "")
             }
         }
     }
-}
 
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+    private func deleteExpenses(offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(expenses[index])
+        }
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            importErrorMessage = error.localizedDescription
+
+        case .success(let urls):
+            guard let url = urls.first else { return }
+
+            do {
+                let importedExpenses = try PDFImporter.importExpenses(from: url)
+
+                for expense in importedExpenses {
+                    modelContext.insert(expense)
+                }
+
+                importResultMessage = "Импортировано \(importedExpenses.count) операций"
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
 }
