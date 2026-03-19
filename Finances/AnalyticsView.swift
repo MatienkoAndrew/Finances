@@ -124,15 +124,20 @@ struct AnalyticsView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(categoryTotals, id: \.category) { item in
-                        HStack {
-                            Text(item.category)
-                            Spacer()
-                            Text(formattedAmount(item.total))
-                                .fontWeight(.semibold)
+                        NavigationLink {
+                            ExpenseListByCategoryView(categoryTitle: item.category)
+                        } label: {
+                            HStack {
+                                Text(item.category)
+                                Spacer()
+                                Text(formattedAmount(item.total))
+                                    .fontWeight(.semibold)
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
-                        .padding()
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -165,15 +170,20 @@ struct AnalyticsView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(dailyExpenseTotals, id: \.date) { item in
-                        HStack {
-                            Text(formattedShortDate(item.date))
-                            Spacer()
-                            Text(formattedAmount(item.total))
-                                .fontWeight(.semibold)
+                        NavigationLink {
+                            ExpenseListByDateView(date: item.date)
+                        } label: {
+                            HStack {
+                                Text(formattedShortDate(item.date))
+                                Spacer()
+                                Text(formattedAmount(item.total))
+                                    .fontWeight(.semibold)
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
-                        .padding()
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -208,28 +218,33 @@ struct AnalyticsView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(Array(merchantTotals.enumerated()), id: \.offset) { index, item in
-                        HStack(alignment: .top, spacing: 12) {
-                            Text("\(index + 1)")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.merchant)
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                                    .lineLimit(2)
-
-                                Text(formattedAmount(item.total))
-                                    .font(.subheadline)
+                        NavigationLink {
+                            ExpenseListByMerchantView(merchantTitle: item.merchant)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text("\(index + 1)")
+                                    .font(.subheadline.bold())
                                     .foregroundStyle(.secondary)
-                            }
+                                    .frame(width: 24)
 
-                            Spacer()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.merchant)
+                                        .font(.body)
+                                        .fontWeight(.medium)
+                                        .lineLimit(2)
+
+                                    Text(formattedAmount(item.total))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
-                        .padding()
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .buttonStyle(.plain)
                     }
                 }
             }
