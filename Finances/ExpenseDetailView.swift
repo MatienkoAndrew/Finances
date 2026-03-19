@@ -1,36 +1,70 @@
-//
-//  ExpenseDetailView.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 19.03.2026.
-//
-
-
 import SwiftUI
 import SwiftData
 
 struct ExpenseDetailView: View {
     @Bindable var expense: Expense
 
+    @State private var isEditing = false
+
+    @State private var editedDate: Date = .now
+    @State private var editedAmountText: String = ""
+    @State private var editedOperationType: String = ""
+    @State private var editedDetails: String = ""
+    @State private var editedForeignAmountText: String = ""
+    @State private var editedForeignCurrency: String = ""
     @State private var selectedCategory: ExpenseCategory?
     @State private var noteText: String = ""
 
+    private let operationTypes = ["Покупка", "Пополнение", "Перевод", "Снятие", "Разное"]
+
     var body: some View {
         Form {
-            Section("Основная информация") {
-                detailRow(title: "Дата", value: formattedDate(expense.date))
-                detailRow(title: "Сумма", value: formattedAmount(expense.amount, currency: expense.accountCurrency))
-                detailRow(title: "Тип операции", value: expense.operationType)
-                detailRow(title: "Детали", value: expense.details)
+            if expense.sourceFileName != nil {
+                Section {
+                    Label("Операция импортирована из PDF", systemImage: "doc.text")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            if let foreignAmount = expense.foreignAmount,
-               let foreignCurrency = expense.foreignCurrency {
-                Section("Иностранная валюта") {
+            Section("Основная информация") {
+                if isEditing {
+                    DatePicker("Дата", selection: $editedDate, displayedComponents: .date)
+
+                    TextField("Сумма", text: $editedAmountText)
+                        .keyboardType(.decimalPad)
+
+                    Picker("Тип операции", selection: $editedOperationType) {
+                        ForEach(operationTypes, id: \.self) { type in
+                            Text(type).tag(type)
+                        }
+                    }
+
+                    TextField("Детали", text: $editedDetails, axis: .vertical)
+                        .lineLimit(2...5)
+                } else {
+                    detailRow(title: "Дата", value: formattedDate(expense.date))
+                    detailRow(title: "Сумма", value: formattedAmount(expense.amount, currency: expense.accountCurrency))
+                    detailRow(title: "Тип операции", value: expense.operationType)
+                    detailRow(title: "Детали", value: expense.details)
+                }
+            }
+
+            Section("Иностранная валюта") {
+                if isEditing {
+                    TextField("Сумма", text: $editedForeignAmountText)
+                        .keyboardType(.decimalPad)
+
+                    TextField("Валюта", text: $editedForeignCurrency)
+                } else if let foreignAmount = expense.foreignAmount,
+                          let foreignCurrency = expense.foreignCurrency {
                     detailRow(
                         title: "Сумма",
                         value: formattedAmount(foreignAmount, currency: foreignCurrency)
                     )
+                } else {
+                    Text("Нет данных")
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -51,9 +85,6 @@ struct ExpenseDetailView: View {
             Section("Заметка") {
                 TextField("Добавь заметку", text: $noteText, axis: .vertical)
                     .lineLimit(3...8)
-                    .onAppear {
-                        noteText = expense.note ?? ""
-                    }
                     .onChange(of: noteText) { _, newValue in
                         let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                         expense.note = trimmed.isEmpty ? nil : trimmed
@@ -65,10 +96,6 @@ struct ExpenseDetailView: View {
                     detailRow(title: "Источник", value: sourceFileName)
                 }
 
-                if let fingerprint = expense.fingerprint {
-                    detailRow(title: "Fingerprint", value: fingerprint)
-                }
-
                 if let importedAt = expense.importedAt {
                     detailRow(title: "Импортировано", value: formattedDateTime(importedAt))
                 }
@@ -78,10 +105,64 @@ struct ExpenseDetailView: View {
         }
         .navigationTitle("Операция")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if isEditing {
+                    Button("Сохранить") {
+                        saveChanges()
+                    }
+                } else {
+                    Button("Редактировать") {
+                        startEditing()
+                    }
+                }
+            }
+        }
         .onAppear {
             selectedCategory = expense.category
             noteText = expense.note ?? ""
         }
+    }
+
+    private func startEditing() {
+        editedDate = expense.date
+        editedAmountText = stringFromDouble(abs(expense.amount))
+        editedOperationType = expense.operationType
+        editedDetails = expense.details
+        editedForeignAmountText = expense.foreignAmount.map { stringFromDouble(abs($0)) } ?? ""
+        editedForeignCurrency = expense.foreignCurrency ?? ""
+        isEditing = true
+    }
+
+    private func saveChanges() {
+        guard let parsedAmount = parseNumber(editedAmountText) else { return }
+
+        let signedAmount: Double
+        if editedOperationType == "Пополнение" {
+            signedAmount = abs(parsedAmount)
+        } else {
+            signedAmount = -abs(parsedAmount)
+        }
+
+        expense.date = editedDate
+        expense.amount = signedAmount
+        expense.operationType = editedOperationType
+        expense.details = editedDetails.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let parsedForeign = parseNumber(editedForeignAmountText),
+           !editedForeignCurrency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if editedOperationType == "Пополнение" {
+                expense.foreignAmount = abs(parsedForeign)
+            } else {
+                expense.foreignAmount = -abs(parsedForeign)
+            }
+            expense.foreignCurrency = editedForeignCurrency.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            expense.foreignAmount = nil
+            expense.foreignCurrency = nil
+        }
+
+        isEditing = false
     }
 
     @ViewBuilder
@@ -96,6 +177,28 @@ struct ExpenseDetailView: View {
                 .textSelection(.enabled)
         }
         .padding(.vertical, 2)
+    }
+
+    private func parseNumber(_ string: String) -> Double? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let normalized = trimmed
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+
+        return Double(normalized)
+    }
+
+    private func stringFromDouble(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     private func formattedDate(_ date: Date) -> String {

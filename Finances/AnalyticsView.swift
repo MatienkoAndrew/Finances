@@ -15,6 +15,32 @@ struct AnalyticsView: View {
     private var expenses: [Expense]
 
     @State private var selectedPeriod: AnalyticsPeriod = .month
+    
+    @State private var selectedBreakdown: AnalyticsBreakdown = .daily
+    
+    private var breakdownPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(AnalyticsBreakdown.allCases, id: \.self) { breakdown in
+                    Button {
+                        selectedBreakdown = breakdown
+                    } label: {
+                        Text(breakdown.rawValue)
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                selectedBreakdown == breakdown
+                                ? Color.primary.opacity(0.1)
+                                : Color.gray.opacity(0.1)
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
 
     private var filteredExpenses: [Expense] {
         expenses.filter { selectedPeriod.contains($0.date) }
@@ -56,14 +82,29 @@ struct AnalyticsView: View {
                     periodPicker
                     summaryCards
                     chartSection
-                    categoryChartSection
-                    dailySection
-                    categorySection
-                    merchantSection
+                    breakdownPicker
+                    selectedBreakdownSection
                 }
                 .padding()
             }
             .navigationTitle("Аналитика")
+        }
+    }
+    
+    @ViewBuilder
+    private var selectedBreakdownSection: some View {
+        switch selectedBreakdown {
+        case .daily:
+            dailySection
+
+        case .category:
+            VStack(spacing: 16) {
+                categoryChartSection
+                categorySection
+            }
+
+        case .merchant:
+            merchantSection
         }
     }
 
