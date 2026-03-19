@@ -10,8 +10,21 @@ struct ContentView: View {
 
     @State private var isShowingAddExpense = false
     @State private var isShowingImporter = false
+
     @State private var importErrorMessage: String?
     @State private var importResultMessage: String?
+
+    @State private var isShowingDeleteAllConfirmation = false
+
+    private var groupedExpenses: [(date: Date, expenses: [Expense])] {
+        let grouped = Dictionary(grouping: expenses) {
+            Calendar.current.startOfDay(for: $0.date)
+        }
+
+        return grouped
+            .map { (date: $0.key, expenses: $0.value.sorted { $0.date > $1.date }) }
+            .sorted { $0.date > $1.date }
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,11 +37,24 @@ struct ContentView: View {
                     )
                 } else {
                     List {
-                        ForEach(expenses) { expense in
-                            ExpenseRowView(expense: expense)
+                        ForEach(groupedExpenses, id: \.date) { section in
+                            Section {
+                                ForEach(section.expenses) { expense in
+                                    ExpenseRowView(expense: expense)
+                                        .listRowSeparator(.hidden)
+                                }
+                                .onDelete { offsets in
+                                    deleteExpenses(offsets, in: section.expenses)
+                                }
+                            } header: {
+                                Text(section.date, format: .dateTime.day().month().year())
+                                    .font(.title3.bold())
+                                    .textCase(nil)
+                                    .padding(.top, 8)
+                            }
                         }
-                        .onDelete(perform: deleteExpenses)
                     }
+                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Операции")
@@ -45,6 +71,14 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+
+                    if !expenses.isEmpty {
+                        Button(role: .destructive) {
+                            isShowingDeleteAllConfirmation = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $isShowingAddExpense) {
@@ -57,26 +91,46 @@ struct ContentView: View {
             ) { result in
                 handleImport(result)
             }
-            .alert("Ошибка импорта", isPresented: .constant(importErrorMessage != nil)) {
-                Button("OK") {
+            .alert("Ошибка импорта", isPresented: Binding(
+                get: { importErrorMessage != nil },
+                set: { if !$0 { importErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {
                     importErrorMessage = nil
                 }
             } message: {
                 Text(importErrorMessage ?? "")
             }
-            .alert("Импорт завершен", isPresented: .constant(importResultMessage != nil)) {
-                Button("OK") {
+            .alert("Импорт завершен", isPresented: Binding(
+                get: { importResultMessage != nil },
+                set: { if !$0 { importResultMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {
                     importResultMessage = nil
                 }
             } message: {
                 Text(importResultMessage ?? "")
             }
+            .alert("Удалить все операции?", isPresented: $isShowingDeleteAllConfirmation) {
+                Button("Удалить все", role: .destructive) {
+                    deleteAllExpenses()
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: {
+                Text("Это действие нельзя отменить.")
+            }
         }
     }
 
-    private func deleteExpenses(offsets: IndexSet) {
+    private func deleteExpenses(_ offsets: IndexSet, in sectionExpenses: [Expense]) {
         for index in offsets {
-            modelContext.delete(expenses[index])
+            modelContext.delete(sectionExpenses[index])
+        }
+    }
+
+    private func deleteAllExpenses() {
+        for expense in expenses {
+            modelContext.delete(expense)
         }
     }
 
@@ -89,13 +143,13 @@ struct ContentView: View {
             guard let url = urls.first else { return }
 
             do {
-                let importedExpenses = try PDFImporter.importExpenses(from: url)
+                let importedExpenses = try PDFImporter.importExpenses(from: url, existingExpenses: expenses)
 
                 for expense in importedExpenses {
                     modelContext.insert(expense)
                 }
 
-                importResultMessage = "Импортировано \(importedExpenses.count) операций"
+                importResultMessage = "Импортировано \(importedExpenses.count) новых операций"
             } catch {
                 importErrorMessage = error.localizedDescription
             }
