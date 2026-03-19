@@ -15,9 +15,15 @@ struct ContentView: View {
     @State private var importResultMessage: String?
 
     @State private var isShowingDeleteAllConfirmation = false
+    
+    @State private var selectedFilter: ExpenseFilter = .all
+
+    private var filteredExpenses: [Expense] {
+        expenses.filter { selectedFilter.matches($0) }
+    }
 
     private var groupedExpenses: [(date: Date, expenses: [Expense])] {
-        let grouped = Dictionary(grouping: expenses) {
+        let grouped = Dictionary(grouping: filteredExpenses) {
             Calendar.current.startOfDay(for: $0.date)
         }
 
@@ -63,6 +69,32 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Операции")
+            .safeAreaInset(edge: .top) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ExpenseFilter.allCases, id: \.self) { filter in
+                            Button {
+                                selectedFilter = filter
+                            } label: {
+                                Text(filter.rawValue)
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        selectedFilter == filter
+                                        ? Color.primary.opacity(0.1)
+                                        : Color.gray.opacity(0.1)
+                                    )
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                }
+            }
+            .navigationTitle("Операции (\(filteredExpenses.count))")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
