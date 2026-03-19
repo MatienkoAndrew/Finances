@@ -8,6 +8,7 @@
 
 import SwiftUI
 import SwiftData
+import Charts
 
 struct AnalyticsView: View {
     @Query(sort: \Expense.date, order: .reverse)
@@ -54,6 +55,8 @@ struct AnalyticsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     periodPicker
                     summaryCards
+                    chartSection
+                    categoryChartSection
                     dailySection
                     categorySection
                     merchantSection
@@ -230,6 +233,120 @@ struct AnalyticsView: View {
                     }
                 }
             }
+        }
+    }
+    
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("График расходов")
+                .font(.title3.bold())
+
+            if dailyExpenseTotals.isEmpty {
+                Text("Нет расходов для выбранного периода")
+                    .foregroundStyle(.secondary)
+            } else {
+                Chart {
+                    ForEach(dailyExpenseTotals, id: \.date) { item in
+                        BarMark(
+                            x: .value("Дата", item.date),
+                            y: .value("Расходы", item.total)
+                        )
+                        .annotation(position: .top, alignment: .center) {
+                            if dailyExpenseTotals.count <= 7 {
+                                Text(shortAmount(item.total))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 240)
+                .chartXAxis {
+                    AxisMarks(values: .automatic) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let date = value.as(Date.self) {
+                                Text(chartShortDate(date))
+                            }
+                        }
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+        }
+    }
+    
+    private var categoryChartSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("График по категориям")
+                .font(.title3.bold())
+
+            if categoryTotals.isEmpty {
+                Text("Нет данных для выбранного периода")
+                    .foregroundStyle(.secondary)
+            } else {
+                Chart {
+                    ForEach(categoryTotals, id: \.category) { item in
+                        BarMark(
+                            x: .value("Сумма", item.total),
+                            y: .value("Категория", item.category)
+                        )
+                        .annotation(position: .trailing) {
+                            Text(shortAmount(item.total))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(height: chartHeightForCategories)
+                .chartXAxis {
+                    AxisMarks(position: .bottom)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+        }
+    }
+    
+    private var chartHeightForCategories: CGFloat {
+        let count = max(categoryTotals.count, 1)
+        let base = CGFloat(count) * 44
+        return min(max(base, 180), 420)
+    }
+    
+    private func chartShortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+
+        switch selectedPeriod {
+        case .day:
+            formatter.dateFormat = "HH:mm"
+        case .week, .month:
+            formatter.dateFormat = "d MMM"
+        case .all:
+            formatter.dateFormat = "d MMM"
+        }
+
+        return formatter.string(from: date)
+    }
+
+    private func shortAmount(_ value: Double) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", value / 1_000_000)
+        } else if value >= 1_000 {
+            return String(format: "%.0fK", value / 1_000)
+        } else {
+            return String(format: "%.0f", value)
         }
     }
     
