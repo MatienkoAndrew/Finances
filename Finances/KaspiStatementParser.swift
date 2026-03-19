@@ -103,19 +103,19 @@ enum KaspiStatementParser {
         details: String
     )? {
         let parts = line.split(separator: " ").map(String.init)
-        guard parts.count >= 5 else { return nil }
+        guard parts.count >= 4 else { return nil }
 
         let dateString = parts[0]
         guard let date = dateFormatter.date(from: dateString) else { return nil }
 
-        // Найти operationType среди токенов
         guard let operationIndex = parts.firstIndex(where: { operationTypes.contains($0) }) else {
             return nil
         }
 
-        // Между date и operationType идут amount + currency
-        let middleTokens = Array(parts[1..<operationIndex])
-        guard let parsedAmountCurrency = parseAmountAndCurrency(tokens: middleTokens) else {
+        let amountTokens = Array(parts[1..<operationIndex])
+        let amountString = amountTokens.joined(separator: " ")
+
+        guard let parsedAmount = parseNumber(amountString) else {
             return nil
         }
 
@@ -125,34 +125,21 @@ enum KaspiStatementParser {
 
         let signedAmount: Double
         if operationType == "Пополнение" {
-            signedAmount = abs(parsedAmountCurrency.amount)
+            signedAmount = abs(parsedAmount)
         } else {
-            signedAmount = -abs(parsedAmountCurrency.amount)
+            signedAmount = -abs(parsedAmount)
         }
 
         return (
             date: date,
             amount: signedAmount,
-            accountCurrency: parsedAmountCurrency.currency,
+            accountCurrency: "₸",
             operationType: operationType,
             details: details
         )
     }
 
-    private static func parseAmountAndCurrency(tokens: [String]) -> (amount: Double, currency: String)? {
-        guard tokens.count >= 2 else { return nil }
-
-        // currency — обычно последний токен
-        let currency = tokens.last!
-
-        // amount — все до него
-        let amountTokens = tokens.dropLast()
-        let amountString = amountTokens.joined(separator: " ")
-
-        guard let amount = parseNumber(amountString) else { return nil }
-        return (amount, currency)
-    }
-
+    
     private static func parseForeignAmountLine(_ line: String) -> (amount: Double, currency: String)? {
         let parts = line.split(separator: " ").map(String.init)
         guard parts.count >= 2 else { return nil }
