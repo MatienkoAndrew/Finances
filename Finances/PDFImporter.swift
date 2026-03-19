@@ -18,7 +18,7 @@ enum PDFImporterError: LocalizedError {
 }
 
 enum PDFImporter {
-    static func importExpenses(from url: URL) throws -> [Expense] {
+    static func importExpenses(from url: URL, existingExpenses: [Expense]) throws -> [Expense] {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess {
@@ -33,10 +33,18 @@ enum PDFImporter {
             throw PDFImporterError.noTransactionsFound
         }
 
+        let existingFingerprints = Set(
+            existingExpenses.compactMap { $0.fingerprint }
+        )
+
+        let newRows = parsedRows.filter { row in
+            !existingFingerprints.contains(row.fingerprint)
+        }
+
         let fileName = url.lastPathComponent
         let importedAt = Date()
 
-        return parsedRows.map { row in
+        return newRows.map { row in
             Expense(
                 date: row.date,
                 amount: row.amount,
