@@ -53,7 +53,10 @@ enum PDFImporter {
                 details: row.details,
                 foreignAmount: row.foreignAmount,
                 foreignCurrency: row.foreignCurrency,
-                category: nil,
+                category: ExpenseCategoryGuesser.guessCategory(
+                    for: row.operationType,
+                    details: row.details
+                ),
                 note: nil,
                 fingerprint: row.fingerprint,
                 sourceFileName: fileName,

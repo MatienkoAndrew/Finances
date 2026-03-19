@@ -17,6 +17,8 @@ struct ContentView: View {
     @State private var isShowingDeleteAllConfirmation = false
     
     @State private var selectedFilter: ExpenseFilter = .all
+    
+    @State private var isShowingAutoCategorizeConfirmation = false
 
     private var filteredExpenses: [Expense] {
         expenses.filter { selectedFilter.matches($0) }
@@ -108,6 +110,14 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    
+                    if !expenses.isEmpty {
+                        Button {
+                            isShowingAutoCategorizeConfirmation = true
+                        } label: {
+                            Image(systemName: "wand.and.stars")
+                        }
+                    }
 
                     if !expenses.isEmpty {
                         Button(role: .destructive) {
@@ -127,6 +137,14 @@ struct ContentView: View {
                 allowsMultipleSelection: false
             ) { result in
                 handleImport(result)
+            }
+            .alert("Автоматически расставить категории?", isPresented: $isShowingAutoCategorizeConfirmation) {
+                Button("Применить") {
+                    autoCategorizeExpenses()
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: {
+                Text("Категории будут выставлены только там, где они ещё не указаны вручную.")
             }
             .alert("Ошибка импорта", isPresented: Binding(
                 get: { importErrorMessage != nil },
@@ -155,6 +173,21 @@ struct ContentView: View {
                 Button("Отмена", role: .cancel) {}
             } message: {
                 Text("Это действие нельзя отменить.")
+            }
+        }
+    }
+    
+    private func autoCategorizeExpenses() {
+        for expense in expenses {
+            guard expense.category == nil else { continue }
+
+            let guessed = ExpenseCategoryGuesser.guessCategory(
+                for: expense.operationType,
+                details: expense.details
+            )
+
+            if let guessed {
+                expense.category = guessed
             }
         }
     }
