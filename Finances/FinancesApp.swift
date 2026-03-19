@@ -5,7 +5,7 @@ import SwiftData
 struct FinancesApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootTabView()
         }
         .modelContainer(for: Expense.self)
     }
