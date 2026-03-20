@@ -3,6 +3,13 @@ import SwiftData
 
 struct ExpenseDetailView: View {
     @Bindable var expense: Expense
+    
+    @Query
+    private var settingsList: [AppSettings]
+
+    private var settings: AppSettings? {
+        settingsList.first
+    }
 
     @State private var isEditing = false
 
@@ -45,6 +52,14 @@ struct ExpenseDetailView: View {
                 } else {
                     detailRow(title: "Дата", value: formattedDate(expense.date))
                     detailRow(title: "Сумма", value: formattedAmount(expense.amount, currency: expense.accountCurrency))
+                    if let settings {
+                        detailRow(
+                            title: "Сумма в рублях",
+                            value: formattedRubAmount(
+                                CurrencyConverter.kztToRub(expense.amount, kztPerRub: settings.kztPerRub)
+                            )
+                        )
+                    }
                     detailRow(title: "Тип операции", value: expense.operationType)
                     detailRow(title: "Детали", value: expense.details)
                 }
@@ -122,6 +137,21 @@ struct ExpenseDetailView: View {
             selectedCategory = expense.category
             noteText = expense.note ?? ""
         }
+    }
+    
+    private func formattedRubAmount(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+
+        let sign = amount < 0 ? "-" : "+"
+        let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
+
+        return "\(sign) \(number) ₽"
     }
 
     private func startEditing() {

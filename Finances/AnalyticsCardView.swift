@@ -1,16 +1,9 @@
-//
-//  AnalyticsCardView.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 19.03.2026.
-//
-
-
 import SwiftUI
 
 struct AnalyticsCardView: View {
     let title: String
     let value: String
+    let secondaryValue: String?
     let systemImage: String
 
     var body: some View {
@@ -25,6 +18,12 @@ struct AnalyticsCardView: View {
 
                 Text(value)
                     .font(.title3.bold())
+
+                if let secondaryValue {
+                    Text(secondaryValue)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()

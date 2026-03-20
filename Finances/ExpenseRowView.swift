@@ -1,7 +1,15 @@
 import SwiftUI
+import SwiftData
 
 struct ExpenseRowView: View {
     let expense: Expense
+
+    @Query
+    private var settingsList: [AppSettings]
+
+    private var settings: AppSettings? {
+        settingsList.first
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -12,10 +20,20 @@ struct ExpenseRowView: View {
 
                 Spacer()
 
-                Text(formattedAmount(expense.amount, currency: expense.accountCurrency))
-                    .font(.headline)
-                    .foregroundStyle(amountColor(expense.amount))
-                    .multilineTextAlignment(.trailing)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(formattedAmount(expense.amount, currency: expense.accountCurrency))
+                        .font(.headline)
+                        .foregroundStyle(amountColor(expense.amount))
+                        .multilineTextAlignment(.trailing)
+
+                    if let settings {
+                        Text(formattedRubAmount(
+                            CurrencyConverter.kztToRub(expense.amount, kztPerRub: settings.kztPerRub)
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             HStack {
@@ -66,6 +84,21 @@ struct ExpenseRowView: View {
         let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
 
         return "\(sign) \(number) \(currency)"
+    }
+
+    private func formattedRubAmount(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+
+        let sign = amount < 0 ? "-" : "+"
+        let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
+
+        return "\(sign) \(number) ₽"
     }
 
     private func amountColor(_ amount: Double) -> Color {

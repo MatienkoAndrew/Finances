@@ -18,6 +18,32 @@ struct AnalyticsView: View {
     
     @State private var selectedBreakdown: AnalyticsBreakdown = .daily
     
+    @State private var selectedMode: AnalyticsMode = .quick
+    @State private var selectedMonth: MonthSelection?
+    @State private var selectedRange = DateRangeSelection()
+    @State private var isShowingRangePicker = false
+    
+    @Query
+    private var settingsList: [AppSettings]
+    
+    private var settings: AppSettings? {
+        settingsList.first
+    }
+    
+    private var availableMonths: [MonthSelection] {
+        let calendar = Calendar.current
+
+        let months = expenses.map {
+            let comps = calendar.dateComponents([.year, .month], from: $0.date)
+            return MonthSelection(year: comps.year ?? 2000, month: comps.month ?? 1)
+        }
+
+        return Array(Set(months)).sorted {
+            if $0.year != $1.year { return $0.year > $1.year }
+            return $0.month > $1.month
+        }
+    }
+    
     private var breakdownPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -43,9 +69,92 @@ struct AnalyticsView: View {
     }
 
     private var filteredExpenses: [Expense] {
-        expenses.filter { selectedPeriod.contains($0.date) }
-    }
+        switch selectedMode {
+        case .quick:
+            return expenses.filter { selectedPeriod.contains($0.date) }
 
+        case .month:
+            guard let selectedMonth else { return expenses }
+            return expenses.filter { selectedMonth.contains($0.date) }
+
+        case .range:
+            guard selectedRange.isComplete else { return expenses }
+            return expenses.filter { selectedRange.contains($0.date) }
+        }
+    }
+    
+    private var modePicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(AnalyticsMode.allCases, id: \.self) { mode in
+                    Button {
+                        selectedMode = mode
+                    } label: {
+                        Text(mode.rawValue)
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                selectedMode == mode
+                                ? Color.primary.opacity(0.1)
+                                : Color.gray.opacity(0.1)
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var periodControls: some View {
+        switch selectedMode {
+        case .quick:
+            periodPicker
+
+        case .month:
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(availableMonths) { month in
+                        Button {
+                            selectedMonth = month
+                        } label: {
+                            Text(month.title)
+                                .font(.subheadline)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    selectedMonth == month
+                                    ? Color.primary.opacity(0.1)
+                                    : Color.gray.opacity(0.1)
+                                )
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+        case .range:
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    isShowingRangePicker = true
+                } label: {
+                    HStack {
+                        Image(systemName: "calendar")
+                        Text(selectedRange.title)
+                        Spacer()
+                    }
+                    .padding()
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+    
     private var totalExpenses: Double {
         filteredExpenses
             .filter { $0.amount < 0 }
@@ -56,6 +165,21 @@ struct AnalyticsView: View {
         filteredExpenses
             .filter { $0.amount > 0 }
             .reduce(0) { $0 + $1.amount }
+    }
+    
+    private var totalExpensesRub: Double {
+        guard let settings else { return 0 }
+        return CurrencyConverter.kztToRub(totalExpenses, kztPerRub: settings.kztPerRub)
+    }
+
+    private var totalIncomeRub: Double {
+        guard let settings else { return 0 }
+        return CurrencyConverter.kztToRub(totalIncome, kztPerRub: settings.kztPerRub)
+    }
+
+    private var netFlowRub: Double {
+        guard let settings else { return 0 }
+        return CurrencyConverter.kztToRub(netFlow, kztPerRub: settings.kztPerRub)
     }
 
     private var netFlow: Double {
@@ -79,7 +203,8 @@ struct AnalyticsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    periodPicker
+                    modePicker
+                    periodControls
                     summaryCards
                     chartSection
                     breakdownPicker
@@ -88,6 +213,17 @@ struct AnalyticsView: View {
                 .padding()
             }
             .navigationTitle("Аналитика")
+            .sheet(isPresented: $isShowingRangePicker) {
+                DateRangePickerView(
+                    selection: $selectedRange,
+                    availableDates: expenses.map(\.date)
+                )
+            }
+            .onAppear {
+                if selectedMonth == nil {
+                    selectedMonth = availableMonths.first
+                }
+            }
         }
     }
     
@@ -137,23 +273,44 @@ struct AnalyticsView: View {
             AnalyticsCardView(
                 title: "Расходы",
                 value: formattedAmount(totalExpenses),
+                secondaryValue: settings != nil ? formattedRubAmount(totalExpensesRub) : nil,
                 systemImage: "arrow.up.circle.fill"
             )
 
             AnalyticsCardView(
                 title: "Пополнения",
                 value: formattedAmount(totalIncome),
+                secondaryValue: settings != nil ? formattedRubAmount(totalIncomeRub) : nil,
                 systemImage: "arrow.down.circle.fill"
             )
 
             AnalyticsCardView(
                 title: "Итог",
                 value: signedFormattedAmount(netFlow),
+                secondaryValue: settings != nil ? signedFormattedRubAmount(netFlowRub) : nil,
                 systemImage: "equal.circle.fill"
             )
         }
     }
+    
+    private func formattedRubAmount(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
 
+        let number = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        return "\(number) ₽"
+    }
+
+    private func signedFormattedRubAmount(_ value: Double) -> String {
+        let sign = value < 0 ? "-" : "+"
+        return "\(sign) \(formattedRubAmount(abs(value)))"
+    }
+    
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("По категориям")
@@ -169,8 +326,20 @@ struct AnalyticsView: View {
                             ExpenseListByCategoryView(categoryTitle: item.category)
                         } label: {
                             HStack {
-                                Text(item.category)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.category)
+
+                                    if let settings {
+                                        Text(formattedRubAmount(
+                                            CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
+                                        ))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
+
                                 Spacer()
+
                                 Text(formattedAmount(item.total))
                                     .fontWeight(.semibold)
                             }
@@ -215,8 +384,20 @@ struct AnalyticsView: View {
                             ExpenseListByDateView(date: item.date)
                         } label: {
                             HStack {
-                                Text(formattedShortDate(item.date))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(formattedShortDate(item.date))
+
+                                    if let settings {
+                                        Text(formattedRubAmount(
+                                            CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
+                                        ))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
+
                                 Spacer()
+
                                 Text(formattedAmount(item.total))
                                     .fontWeight(.semibold)
                             }
@@ -277,6 +458,14 @@ struct AnalyticsView: View {
                                     Text(formattedAmount(item.total))
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
+
+                                    if let settings {
+                                        Text(formattedRubAmount(
+                                            CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
+                                        ))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
                                 }
 
                                 Spacer()
