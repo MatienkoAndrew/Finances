@@ -67,6 +67,38 @@ struct AnalyticsView: View {
             }
         }
     }
+    
+    private var currentAnalyticsScope: AnalyticsScope {
+        switch selectedMode {
+        case .quick:
+            return AnalyticsScope(
+                title: selectedPeriod.rawValue,
+                contains: { date in
+                    selectedPeriod.contains(date)
+                }
+            )
+
+        case .month:
+            let month = selectedMonth
+            return AnalyticsScope(
+                title: month?.title ?? "Месяц",
+                contains: { date in
+                    guard let month else { return true }
+                    return month.contains(date)
+                }
+            )
+
+        case .range:
+            let range = selectedRange
+            return AnalyticsScope(
+                title: range.title,
+                contains: { date in
+                    guard range.isComplete else { return true }
+                    return range.contains(date)
+                }
+            )
+        }
+    }
 
     private var filteredExpenses: [Expense] {
         switch selectedMode {
@@ -270,25 +302,63 @@ struct AnalyticsView: View {
 
     private var summaryCards: some View {
         VStack(spacing: 12) {
-            AnalyticsCardView(
-                title: "Расходы",
-                value: formattedAmount(totalExpenses),
-                secondaryValue: settings != nil ? formattedRubAmount(totalExpensesRub) : nil,
-                systemImage: "arrow.up.circle.fill"
-            )
+            NavigationLink {
+                ExpenseListByCashFlowView(
+                    flowType: .expenses,
+                    scope: currentAnalyticsScope
+                )
+            } label: {
+                AnalyticsCardView(
+                    title: "Расходы",
+                    value: formattedAmount(totalExpenses),
+                    secondaryValue: settings != nil ? formattedRubAmount(totalExpensesRub) : nil,
+                    systemImage: "arrow.up.circle.fill"
+                )
+            }
+            .buttonStyle(.plain)
 
-            AnalyticsCardView(
-                title: "Пополнения",
-                value: formattedAmount(totalIncome),
-                secondaryValue: settings != nil ? formattedRubAmount(totalIncomeRub) : nil,
-                systemImage: "arrow.down.circle.fill"
-            )
+            NavigationLink {
+                ExpenseListByCashFlowView(
+                    flowType: .income,
+                    scope: currentAnalyticsScope
+                )
+            } label: {
+                AnalyticsCardView(
+                    title: "Пополнения",
+                    value: formattedAmount(totalIncome),
+                    secondaryValue: settings != nil ? formattedRubAmount(totalIncomeRub) : nil,
+                    systemImage: "arrow.down.circle.fill"
+                )
+            }
+            .buttonStyle(.plain)
 
             AnalyticsCardView(
                 title: "Итог",
                 value: signedFormattedAmount(netFlow),
                 secondaryValue: settings != nil ? signedFormattedRubAmount(netFlowRub) : nil,
                 systemImage: "equal.circle.fill"
+            )
+        }
+    }
+    
+    private var dailyExpenseTotalsRub: [(date: Date, total: Double)] {
+        guard let settings else { return [] }
+
+        return dailyExpenseTotals.map { item in
+            (
+                date: item.date,
+                total: CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
+            )
+        }
+    }
+    
+    private var categoryTotalsRub: [(category: String, total: Double)] {
+        guard let settings else { return [] }
+
+        return categoryTotals.map { item in
+            (
+                category: item.category,
+                total: CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
             )
         }
     }
@@ -486,18 +556,18 @@ struct AnalyticsView: View {
             Text("График расходов")
                 .font(.title3.bold())
 
-            if dailyExpenseTotals.isEmpty {
+            if dailyExpenseTotalsRub.isEmpty {
                 Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
                 Chart {
-                    ForEach(dailyExpenseTotals, id: \.date) { item in
+                    ForEach(dailyExpenseTotalsRub, id: \.date) { item in
                         BarMark(
                             x: .value("Дата", item.date),
                             y: .value("Расходы", item.total)
                         )
                         .annotation(position: .top, alignment: .center) {
-                            if dailyExpenseTotals.count <= 7 {
+                            if dailyExpenseTotalsRub.count <= 7 {
                                 Text(shortAmount(item.total))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
@@ -532,12 +602,12 @@ struct AnalyticsView: View {
             Text("График по категориям")
                 .font(.title3.bold())
 
-            if categoryTotals.isEmpty {
+            if categoryTotalsRub.isEmpty {
                 Text("Нет данных для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
                 Chart {
-                    ForEach(categoryTotals, id: \.category) { item in
+                    ForEach(categoryTotalsRub, id: \.category) { item in
                         BarMark(
                             x: .value("Сумма", item.total),
                             y: .value("Категория", item.category)
@@ -587,11 +657,11 @@ struct AnalyticsView: View {
 
     private func shortAmount(_ value: Double) -> String {
         if value >= 1_000_000 {
-            return String(format: "%.1fM", value / 1_000_000)
+            return String(format: "%.1fM ₽", value / 1_000_000)
         } else if value >= 1_000 {
-            return String(format: "%.0fK", value / 1_000)
+            return String(format: "%.0fK ₽", value / 1_000)
         } else {
-            return String(format: "%.0f", value)
+            return String(format: "%.0f ₽", value)
         }
     }
     
