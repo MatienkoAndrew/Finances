@@ -23,7 +23,16 @@ struct CategoriesView: View {
                 NavigationLink {
                     CategoryDetailView(category: category)
                 } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(Color(hex: category.colorHex) ?? .gray)
+                            .frame(width: 28, height: 28)
+                            .overlay {
+                                Image(systemName: category.iconName)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+
                         VStack(alignment: .leading, spacing: 4) {
                             Text(category.name)
                                 .font(.headline)

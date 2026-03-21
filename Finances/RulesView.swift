@@ -11,6 +11,9 @@ import SwiftData
 
 struct RulesView: View {
     @Environment(\.modelContext) private var modelContext
+    
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
 
     @Query(sort: \CategoryRule.priority, order: .reverse)
     private var rules: [CategoryRule]
@@ -37,9 +40,26 @@ struct RulesView: View {
                                         Text(rule.pattern)
                                             .font(.headline)
 
-                                        Text(rule.categoryName)
+                                        if let categoryItem = CategoryLookup.findCategory(named: rule.categoryName, in: categories) {
+                                            HStack(spacing: 6) {
+                                                Circle()
+                                                    .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                                                    .frame(width: 16, height: 16)
+                                                    .overlay {
+                                                        Image(systemName: categoryItem.iconName)
+                                                            .font(.system(size: 8, weight: .bold))
+                                                            .foregroundStyle(.white)
+                                                    }
+
+                                                Text(rule.categoryName)
+                                            }
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
+                                        } else {
+                                            Text(rule.categoryName)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        }
 
                                         HStack(spacing: 8) {
                                             Text("Приоритет: \(rule.priority)")

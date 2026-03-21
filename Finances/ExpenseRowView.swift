@@ -7,8 +7,15 @@ struct ExpenseRowView: View {
     @Query
     private var settingsList: [AppSettings]
 
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
+
     private var settings: AppSettings? {
         settingsList.first
+    }
+
+    private var categoryItem: ExpenseCategoryItem? {
+        CategoryLookup.findCategory(named: expense.categoryName, in: categories)
     }
 
     var body: some View {
@@ -42,9 +49,26 @@ struct ExpenseRowView: View {
                     .foregroundStyle(.secondary)
 
                 if let categoryName = expense.categoryName {
-                    Text("• \(categoryName)")
+                    if let categoryItem {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                                .frame(width: 16, height: 16)
+                                .overlay {
+                                    Image(systemName: categoryItem.iconName)
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
+
+                            Text(categoryName)
+                        }
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    } else {
+                        Text("• \(categoryName)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()
