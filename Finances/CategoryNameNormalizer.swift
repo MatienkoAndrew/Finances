@@ -1,3 +1,11 @@
+//
+//  CategoryNameNormalizer.swift
+//  Finances
+//
+//  Created by Андрей Матиенко on 21.03.2026.
+//
+
+
 import Foundation
 
 enum CategoryNameNormalizer {
