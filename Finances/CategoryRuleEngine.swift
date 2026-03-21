@@ -1,19 +1,11 @@
-//
-//  CategoryRuleEngine.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 20.03.2026.
-//
-
-
 import Foundation
 
 enum CategoryRuleEngine {
-    static func matchCategory(
+    static func matchCategoryName(
         operationType: String,
         details: String,
         rules: [CategoryRule]
-    ) -> ExpenseCategory? {
+    ) -> String? {
         let normalizedDetails = details.uppercased()
 
         let sortedRules = rules
@@ -33,11 +25,11 @@ enum CategoryRuleEngine {
             guard !pattern.isEmpty else { continue }
 
             if normalizedDetails.contains(pattern) {
-                return rule.category
+                return rule.categoryName
             }
         }
 
-        return ExpenseCategoryGuesser.guessCategory(
+        return ExpenseCategoryGuesser.guessCategoryName(
             for: operationType,
             details: details
         )

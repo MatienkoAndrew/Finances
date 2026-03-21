@@ -11,9 +11,12 @@ import SwiftData
 
 struct RuleDetailView: View {
     @Bindable var rule: CategoryRule
+    
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
 
     @State private var pattern: String = ""
-    @State private var selectedCategory: ExpenseCategory = .other
+    @State private var selectedCategoryName: String = "Другое"
     @State private var priorityText: String = "0"
     @State private var isEnabled: Bool = true
 
@@ -28,13 +31,13 @@ struct RuleDetailView: View {
             }
 
             Section("Категория") {
-                Picker("Категория", selection: $selectedCategory) {
-                    ForEach(ExpenseCategory.allCases, id: \.self) { category in
-                        Text(category.title).tag(category)
+                Picker("Категория", selection: $selectedCategoryName) {
+                    ForEach(categories) { category in
+                        Text(category.name).tag(category.name)
                     }
                 }
-                .onChange(of: selectedCategory) { _, newValue in
-                    rule.category = newValue
+                .onChange(of: selectedCategoryName) { _, newValue in
+                    rule.categoryName = newValue
                 }
             }
 
@@ -62,7 +65,7 @@ struct RuleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             pattern = rule.pattern
-            selectedCategory = rule.category
+            selectedCategoryName = rule.categoryName
             priorityText = String(rule.priority)
             isEnabled = rule.isEnabled
         }
@@ -84,7 +87,7 @@ struct RuleDetailView: View {
             Spacer()
 
             if matches {
-                Text(selectedCategory.title)
+                Text(selectedCategoryName)
                     .font(.caption.bold())
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)

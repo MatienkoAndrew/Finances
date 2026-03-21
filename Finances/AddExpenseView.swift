@@ -12,6 +12,9 @@ import SwiftData
 struct AddExpenseView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
 
     @State private var date: Date = .now
     @State private var amountText: String = ""
@@ -22,7 +25,7 @@ struct AddExpenseView: View {
     @State private var foreignAmountText: String = ""
     @State private var foreignCurrency: String = ""
 
-    @State private var selectedCategory: ExpenseCategory? = nil
+    @State private var selectedCategoryName: String? = nil
     @State private var note: String = ""
 
     @FocusState private var focusedField: Field?
@@ -78,11 +81,11 @@ struct AddExpenseView: View {
                 }
 
                 Section("Категория") {
-                    Picker("Категория", selection: $selectedCategory) {
-                        Text("Без категории").tag(nil as ExpenseCategory?)
+                    Picker("Категория", selection: $selectedCategoryName) {
+                        Text("Без категории").tag(nil as String?)
 
-                        ForEach(ExpenseCategory.allCases, id: \.self) { category in
-                            Text(category.title).tag(category as ExpenseCategory?)
+                        ForEach(categories) { category in
+                            Text(category.name).tag(Optional(category.name))
                         }
                     }
                 }
@@ -148,10 +151,10 @@ struct AddExpenseView: View {
             details: details.trimmingCharacters(in: .whitespacesAndNewlines),
             foreignAmount: parsedForeignAmount,
             foreignCurrency: trimmedForeignCurrency.isEmpty ? nil : trimmedForeignCurrency,
-            category: selectedCategory,
+            categoryName: selectedCategoryName,
             note: trimmedNote.isEmpty ? nil : trimmedNote
         )
-
+        
         modelContext.insert(expense)
         dismiss()
     }

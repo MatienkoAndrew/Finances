@@ -182,16 +182,16 @@ struct ContentView: View {
     
     private func autoCategorizeExpenses() {
         for expense in expenses {
-            guard expense.category == nil else { continue }
+            guard expense.categoryName == nil else { continue }
 
-            let guessed = CategoryRuleEngine.matchCategory(
+            let guessed = CategoryRuleEngine.matchCategoryName(
                 operationType: expense.operationType,
                 details: expense.details,
                 rules: categoryRules
             )
 
             if let guessed {
-                expense.category = guessed
+                expense.categoryName = guessed
             }
         }
     }

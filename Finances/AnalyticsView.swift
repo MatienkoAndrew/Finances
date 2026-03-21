@@ -220,7 +220,7 @@ struct AnalyticsView: View {
 
     private var categoryTotals: [(category: String, total: Double)] {
         let grouped = Dictionary(grouping: filteredExpenses.filter { $0.amount < 0 }) { expense in
-            expense.category?.title ?? "Без категории"
+            expense.categoryName ?? "Без категории"
         }
 
         return grouped

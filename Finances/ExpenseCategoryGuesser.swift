@@ -1,23 +1,15 @@
-//
-//  ExpenseCategoryGuesser.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 19.03.2026.
-//
-
-
 import Foundation
 
 enum ExpenseCategoryGuesser {
-    static func guessCategory(for operationType: String, details: String) -> ExpenseCategory? {
+    static func guessCategoryName(for operationType: String, details: String) -> String? {
         let text = details.uppercased()
 
         if operationType == "Снятие" {
-            return .cashWithdrawal
+            return "Снятие наличных"
         }
 
         if operationType == "Перевод" {
-            return .transfer
+            return "Перевод"
         }
 
         if operationType == "Пополнение" {
@@ -25,15 +17,15 @@ enum ExpenseCategoryGuesser {
         }
 
         if text.contains("CHATGPT") || text.contains("SPOTIFY") || text.contains("APPLE.COM BILL") {
-            return .subscription
+            return "Подписки"
         }
 
         if text.contains("GRAB") {
-            return .transport
+            return "Транспорт"
         }
 
         if text.contains("COFFEE") || text.contains("HIGHLANDS") || text.contains("STARBUCKS") {
-            return .coffee
+            return "Кофе"
         }
 
         if text.contains("MCDONALDS")
@@ -48,7 +40,7 @@ enum ExpenseCategoryGuesser {
             || text.contains("LAVA 79")
             || text.contains("43 FACTORY")
             || text.contains("BIKINIBOTTOM") {
-            return .food
+            return "Еда"
         }
 
         if text.contains("MART")
@@ -60,16 +52,16 @@ enum ExpenseCategoryGuesser {
             || text.contains("CJ MART")
             || text.contains("HEREMART")
             || text.contains("TONY MART") {
-            return .groceries
+            return "Продукты"
         }
 
         if text.contains("AGODA") || text.contains("HOTEL") || text.contains("INN") {
-            return .travel
+            return "Путешествия"
         }
 
         if text.contains("MOBIFIT")
             || text.contains("FITNESS") {
-            return .health
+            return "Здоровье"
         }
 
         if text.contains("CAP TREO")
@@ -77,7 +69,7 @@ enum ExpenseCategoryGuesser {
             || text.contains("MOONMILK")
             || text.contains("NEWYORK")
             || text.contains("ELEMENT") {
-            return .shopping
+            return "Покупки"
         }
 
         return nil

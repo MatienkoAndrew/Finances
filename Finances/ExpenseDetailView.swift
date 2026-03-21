@@ -6,6 +6,9 @@ struct ExpenseDetailView: View {
     
     @Query
     private var settingsList: [AppSettings]
+    
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
 
     private var settings: AppSettings? {
         settingsList.first
@@ -19,7 +22,7 @@ struct ExpenseDetailView: View {
     @State private var editedDetails: String = ""
     @State private var editedForeignAmountText: String = ""
     @State private var editedForeignCurrency: String = ""
-    @State private var selectedCategory: ExpenseCategory?
+    @State private var selectedCategoryName: String?
     @State private var noteText: String = ""
 
     private let operationTypes = ["Покупка", "Пополнение", "Перевод", "Снятие", "Разное"]
@@ -84,16 +87,16 @@ struct ExpenseDetailView: View {
             }
 
             Section("Категория") {
-                Picker("Категория", selection: $selectedCategory) {
-                    Text("Без категории").tag(nil as ExpenseCategory?)
+                Picker("Категория", selection: $selectedCategoryName) {
+                    Text("Без категории").tag(nil as String?)
 
-                    ForEach(ExpenseCategory.allCases, id: \.self) { category in
-                        Text(category.title).tag(category as ExpenseCategory?)
+                    ForEach(categories) { category in
+                        Text(category.name).tag(category.name as String?)
                     }
                 }
                 .pickerStyle(.navigationLink)
-                .onChange(of: selectedCategory) { _, newValue in
-                    expense.category = newValue
+                .onChange(of: selectedCategoryName) { _, newValue in
+                    expense.categoryName = newValue
                 }
             }
 
@@ -134,7 +137,7 @@ struct ExpenseDetailView: View {
             }
         }
         .onAppear {
-            selectedCategory = expense.category
+            selectedCategoryName = expense.categoryName
             noteText = expense.note ?? ""
         }
     }

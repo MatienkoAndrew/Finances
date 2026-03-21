@@ -1,6 +1,12 @@
 import SwiftUI
+import SwiftData
 
 struct RootTabView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    @Query
+    private var categories: [ExpenseCategoryItem]
+
     var body: some View {
         TabView {
             ContentView()
@@ -22,6 +28,9 @@ struct RootTabView: View {
                 .tabItem {
                     Label("Настройки", systemImage: "gearshape")
                 }
+        }
+        .onAppear {
+            CategorySeeder.seedIfNeeded(existing: categories, modelContext: modelContext)
         }
     }
 }

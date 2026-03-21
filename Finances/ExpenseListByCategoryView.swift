@@ -17,7 +17,7 @@ struct ExpenseListByCategoryView: View {
 
     private var categoryExpenses: [Expense] {
         expenses.filter { expense in
-            let title = expense.category?.title ?? "Без категории"
+            let title = expense.categoryName ?? "Без категории"
             return title == categoryTitle
         }
     }

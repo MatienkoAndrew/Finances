@@ -1,38 +1,6 @@
 import Foundation
 import SwiftData
 
-enum ExpenseCategory: String, Codable, CaseIterable {
-    case food
-    case coffee
-    case groceries
-    case transport
-    case subscription
-    case shopping
-    case cashWithdrawal
-    case transfer
-    case housing
-    case travel
-    case health
-    case other
-
-    var title: String {
-        switch self {
-        case .food: return "Еда"
-        case .coffee: return "Кофе"
-        case .groceries: return "Продукты"
-        case .transport: return "Транспорт"
-        case .subscription: return "Подписки"
-        case .shopping: return "Покупки"
-        case .cashWithdrawal: return "Снятие наличных"
-        case .transfer: return "Перевод"
-        case .housing: return "Жильё"
-        case .travel: return "Путешествия"
-        case .health: return "Здоровье"
-        case .other: return "Другое"
-        }
-    }
-}
-
 @Model
 final class Expense {
     var date: Date
@@ -44,7 +12,7 @@ final class Expense {
     var foreignAmount: Double?
     var foreignCurrency: String?
 
-    var categoryRaw: String?
+    var categoryName: String?
     var note: String?
 
     var fingerprint: String?
@@ -52,16 +20,6 @@ final class Expense {
     var importedAt: Date?
 
     var createdAt: Date
-
-    var category: ExpenseCategory? {
-        get {
-            guard let categoryRaw else { return nil }
-            return ExpenseCategory(rawValue: categoryRaw)
-        }
-        set {
-            categoryRaw = newValue?.rawValue
-        }
-    }
 
     init(
         date: Date,
@@ -71,7 +29,7 @@ final class Expense {
         details: String,
         foreignAmount: Double? = nil,
         foreignCurrency: String? = nil,
-        category: ExpenseCategory? = nil,
+        categoryName: String? = nil,
         note: String? = nil,
         fingerprint: String? = nil,
         sourceFileName: String? = nil,
@@ -85,7 +43,7 @@ final class Expense {
         self.details = details
         self.foreignAmount = foreignAmount
         self.foreignCurrency = foreignCurrency
-        self.categoryRaw = category?.rawValue
+        self.categoryName = categoryName
         self.note = note
         self.fingerprint = fingerprint
         self.sourceFileName = sourceFileName

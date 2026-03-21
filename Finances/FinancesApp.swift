@@ -7,6 +7,11 @@ struct FinancesApp: App {
         WindowGroup {
             RootTabView()
         }
-        .modelContainer(for: [Expense.self, CategoryRule.self, AppSettings.self])
+        .modelContainer(for: [
+            Expense.self,
+            CategoryRule.self,
+            AppSettings.self,
+            ExpenseCategoryItem.self
+        ])
     }
 }

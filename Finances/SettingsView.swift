@@ -9,6 +9,7 @@
 import SwiftUI
 import SwiftData
 
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -16,6 +17,7 @@ struct SettingsView: View {
     private var settingsList: [AppSettings]
 
     @State private var kztPerRubText: String = ""
+    
 
     private var settings: AppSettings {
         if let existing = settingsList.first {
@@ -51,6 +53,12 @@ struct SettingsView: View {
                     Text("1 RUB = \(stringFromDouble(settings.kztPerRub)) KZT")
                     Text("1 KZT = \(rubPerKztString()) RUB")
                         .foregroundStyle(.secondary)
+                }
+                
+                Section("Данные") {
+                    NavigationLink("Управление категориями") {
+                        CategoriesView()
+                    }
                 }
             }
             .navigationTitle("Настройки")

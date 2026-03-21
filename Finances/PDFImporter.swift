@@ -57,7 +57,7 @@ enum PDFImporter {
                 details: row.details,
                 foreignAmount: row.foreignAmount,
                 foreignCurrency: row.foreignCurrency,
-                category: CategoryRuleEngine.matchCategory(
+                categoryName: CategoryRuleEngine.matchCategoryName(
                     operationType: row.operationType,
                     details: row.details,
                     rules: rules

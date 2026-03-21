@@ -12,9 +12,12 @@ import SwiftData
 struct AddRuleView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
 
     @State private var pattern: String = ""
-    @State private var selectedCategory: ExpenseCategory = .other
+    @State private var selectedCategoryName: String = "Другое"
     @State private var priorityText: String = "0"
     @State private var isEnabled: Bool = true
 
@@ -27,9 +30,9 @@ struct AddRuleView: View {
                 }
 
                 Section("Категория") {
-                    Picker("Категория", selection: $selectedCategory) {
-                        ForEach(ExpenseCategory.allCases, id: \.self) { category in
-                            Text(category.title).tag(category)
+                    Picker("Категория", selection: $selectedCategoryName) {
+                        ForEach(categories) { category in
+                            Text(category.name).tag(category.name)
                         }
                     }
                 }
@@ -66,7 +69,7 @@ struct AddRuleView: View {
 
         let rule = CategoryRule(
             pattern: trimmedPattern,
-            category: selectedCategory,
+            categoryName: selectedCategoryName,
             priority: priority,
             isEnabled: isEnabled
         )

@@ -41,8 +41,8 @@ struct ExpenseRowView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                if let category = expense.category {
-                    Text("• \(category.title)")
+                if let categoryName = expense.categoryName {
+                    Text("• \(categoryName)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

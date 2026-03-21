@@ -37,7 +37,7 @@ struct RulesView: View {
                                         Text(rule.pattern)
                                             .font(.headline)
 
-                                        Text(rule.category.title)
+                                        Text(rule.categoryName)
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
 
