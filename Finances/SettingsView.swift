@@ -1,14 +1,5 @@
-//
-//  SettingsView.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 20.03.2026.
-//
-
-
 import SwiftUI
 import SwiftData
-
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -17,7 +8,6 @@ struct SettingsView: View {
     private var settingsList: [AppSettings]
 
     @State private var kztPerRubText: String = ""
-    
 
     private var settings: AppSettings {
         if let existing = settingsList.first {
@@ -54,10 +44,14 @@ struct SettingsView: View {
                     Text("1 KZT = \(rubPerKztString()) RUB")
                         .foregroundStyle(.secondary)
                 }
-                
+
                 Section("Данные") {
                     NavigationLink("Управление категориями") {
                         CategoriesView()
+                    }
+
+                    NavigationLink("Правила категорий") {
+                        RulesView()
                     }
                 }
             }

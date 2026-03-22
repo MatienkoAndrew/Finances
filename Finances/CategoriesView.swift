@@ -1,11 +1,3 @@
-//
-//  CategoriesView.swift
-//  Finances
-//
-//  Created by Андрей Матиенко on 20.03.2026.
-//
-
-
 import SwiftUI
 import SwiftData
 
@@ -15,39 +7,23 @@ struct CategoriesView: View {
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
+    @Query
+    private var expenses: [Expense]
+
+    @Query
+    private var rules: [CategoryRule]
+
     @State private var isShowingAddCategory = false
+
+    @State private var categoryToDelete: ExpenseCategoryItem?
+    @State private var isShowingDeleteOptions = false
+    @State private var isShowingReassignSheet = false
 
     var body: some View {
         List {
             ForEach(categories) { category in
-                NavigationLink {
-                    CategoryDetailView(category: category)
-                } label: {
-                    HStack(spacing: 12) {
-                        Circle()
-                            .fill(Color(hex: category.colorHex) ?? .gray)
-                            .frame(width: 28, height: 28)
-                            .overlay {
-                                Image(systemName: category.iconName)
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(category.name)
-                                .font(.headline)
-
-                            Text(category.isSystem ? "Системная" : "Пользовательская")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
+                categoryRow(category)
             }
-            .onDelete(perform: deleteCategories)
         }
         .listStyle(.plain)
         .navigationTitle("Категории")
@@ -63,11 +39,107 @@ struct CategoriesView: View {
         .sheet(isPresented: $isShowingAddCategory) {
             AddCategoryView()
         }
+        .confirmationDialog(
+            "Удалить категорию?",
+            isPresented: $isShowingDeleteOptions,
+            titleVisibility: .visible
+        ) {
+            Button("Удалить и очистить категорию", role: .destructive) {
+                deleteCategoryAndClearReferences()
+            }
+
+            Button("Перенести в другую категорию") {
+                isShowingReassignSheet = true
+            }
+
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            if let categoryToDelete {
+                Text("Категория \"\(categoryToDelete.name)\" используется в операциях и правилах.")
+            }
+        }
+        .sheet(isPresented: $isShowingReassignSheet) {
+            if let categoryToDelete {
+                ReassignCategoryView(
+                    categoryToDelete: categoryToDelete,
+                    categories: categories.filter { $0.name != categoryToDelete.name },
+                    onConfirm: { newCategoryName in
+                        reassignAndDeleteCategory(newCategoryName: newCategoryName)
+                    }
+                )
+            }
+        }
     }
 
-    private func deleteCategories(offsets: IndexSet) {
-        for index in offsets {
-            modelContext.delete(categories[index])
+    @ViewBuilder
+    private func categoryRow(_ category: ExpenseCategoryItem) -> some View {
+        NavigationLink {
+            CategoryDetailView(category: category)
+        } label: {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color(hex: category.colorHex) ?? .gray)
+                    .frame(width: 28, height: 28)
+                    .overlay {
+                        Image(systemName: category.iconName)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(category.name)
+                        .font(.headline)
+
+                    Text(category.isSystem ? "Системная" : "Пользовательская")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(.vertical, 4)
         }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                categoryToDelete = category
+                isShowingDeleteOptions = true
+            } label: {
+                Label("Удалить", systemImage: "trash")
+            }
+        }
+    }
+
+    private func deleteCategoryAndClearReferences() {
+        guard let categoryToDelete else { return }
+
+        let oldName = categoryToDelete.name
+
+        for expense in expenses where expense.categoryName == oldName {
+            expense.categoryName = nil
+        }
+
+        for rule in rules where rule.categoryName == oldName {
+            rule.categoryName = "Другое"
+        }
+
+        modelContext.delete(categoryToDelete)
+        self.categoryToDelete = nil
+    }
+
+    private func reassignAndDeleteCategory(newCategoryName: String) {
+        guard let categoryToDelete else { return }
+
+        let oldName = categoryToDelete.name
+
+        for expense in expenses where expense.categoryName == oldName {
+            expense.categoryName = newCategoryName
+        }
+
+        for rule in rules where rule.categoryName == oldName {
+            rule.categoryName = newCategoryName
+        }
+
+        modelContext.delete(categoryToDelete)
+        self.categoryToDelete = nil
     }
 }

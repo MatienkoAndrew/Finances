@@ -9,7 +9,7 @@
 import Foundation
 
 enum AnalyticsMode: String, CaseIterable {
-    case quick = "Быстрый"
+    case all = "Все"
     case month = "Месяц"
     case range = "Диапазон"
 }

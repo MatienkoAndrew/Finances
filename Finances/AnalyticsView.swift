@@ -13,12 +13,15 @@ import Charts
 struct AnalyticsView: View {
     @Query(sort: \Expense.date, order: .reverse)
     private var expenses: [Expense]
+    
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
 
-    @State private var selectedPeriod: AnalyticsPeriod = .month
+//    @State private var selectedPeriod: AnalyticsPeriod = .month
     
     @State private var selectedBreakdown: AnalyticsBreakdown = .daily
     
-    @State private var selectedMode: AnalyticsMode = .quick
+    @State private var selectedMode: AnalyticsMode = .all
     @State private var selectedMonth: MonthSelection?
     @State private var selectedRange = DateRangeSelection()
     @State private var isShowingRangePicker = false
@@ -70,12 +73,10 @@ struct AnalyticsView: View {
     
     private var currentAnalyticsScope: AnalyticsScope {
         switch selectedMode {
-        case .quick:
+        case .all:
             return AnalyticsScope(
-                title: selectedPeriod.rawValue,
-                contains: { date in
-                    selectedPeriod.contains(date)
-                }
+                title: "Все",
+                contains: { _ in true }
             )
 
         case .month:
@@ -99,11 +100,11 @@ struct AnalyticsView: View {
             )
         }
     }
-
+    
     private var filteredExpenses: [Expense] {
         switch selectedMode {
-        case .quick:
-            return expenses.filter { selectedPeriod.contains($0.date) }
+        case .all:
+            return expenses
 
         case .month:
             guard let selectedMonth else { return expenses }
@@ -142,8 +143,8 @@ struct AnalyticsView: View {
     @ViewBuilder
     private var periodControls: some View {
         switch selectedMode {
-        case .quick:
-            periodPicker
+        case .all:
+            EmptyView()
 
         case .month:
             ScrollView(.horizontal, showsIndicators: false) {
@@ -276,29 +277,29 @@ struct AnalyticsView: View {
         }
     }
 
-    private var periodPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(AnalyticsPeriod.allCases, id: \.self) { period in
-                    Button {
-                        selectedPeriod = period
-                    } label: {
-                        Text(period.rawValue)
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                selectedPeriod == period
-                                ? Color.primary.opacity(0.1)
-                                : Color.gray.opacity(0.1)
-                            )
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
+//    private var periodPicker: some View {
+//        ScrollView(.horizontal, showsIndicators: false) {
+//            HStack(spacing: 8) {
+//                ForEach(AnalyticsPeriod.allCases, id: \.self) { period in
+//                    Button {
+//                        selectedPeriod = period
+//                    } label: {
+//                        Text(period.rawValue)
+//                            .font(.subheadline)
+//                            .padding(.horizontal, 12)
+//                            .padding(.vertical, 8)
+//                            .background(
+//                                selectedPeriod == period
+//                                ? Color.primary.opacity(0.1)
+//                                : Color.gray.opacity(0.1)
+//                            )
+//                            .clipShape(Capsule())
+//                    }
+//                    .buttonStyle(.plain)
+//                }
+//            }
+//        }
+//    }
 
     private var summaryCards: some View {
         VStack(spacing: 12) {
@@ -363,6 +364,10 @@ struct AnalyticsView: View {
         }
     }
     
+    private func categoryItem(for categoryName: String) -> ExpenseCategoryItem? {
+        CategoryLookup.findCategory(named: categoryName, in: categories)
+    }
+    
     private func formattedRubAmount(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
@@ -396,15 +401,40 @@ struct AnalyticsView: View {
                             ExpenseListByCategoryView(categoryTitle: item.category)
                         } label: {
                             HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.category)
+                                if let categoryItem = categoryItem(for: item.category) {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                                            .frame(width: 24, height: 24)
+                                            .overlay {
+                                                Image(systemName: categoryItem.iconName)
+                                                    .font(.system(size: 10, weight: .bold))
+                                                    .foregroundStyle(.white)
+                                            }
 
-                                    if let settings {
-                                        Text(formattedRubAmount(
-                                            CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
-                                        ))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.category)
+
+                                            if let settings {
+                                                Text(formattedRubAmount(
+                                                    CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
+                                                ))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.category)
+
+                                        if let settings {
+                                            Text(formattedRubAmount(
+                                                CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
+                                            ))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
 
@@ -608,10 +638,13 @@ struct AnalyticsView: View {
             } else {
                 Chart {
                     ForEach(categoryTotalsRub, id: \.category) { item in
+                        let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
+
                         BarMark(
                             x: .value("Сумма", item.total),
                             y: .value("Категория", item.category)
                         )
+                        .foregroundStyle(color)
                         .annotation(position: .trailing) {
                             Text(shortAmount(item.total))
                                 .font(.caption2)
@@ -643,18 +676,20 @@ struct AnalyticsView: View {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
 
-        switch selectedPeriod {
-        case .day:
-            formatter.dateFormat = "HH:mm"
-        case .week, .month:
-            formatter.dateFormat = "d MMM"
+        switch selectedMode {
         case .all:
+            formatter.dateFormat = "d MMM"
+
+        case .month:
+            formatter.dateFormat = "d MMM"
+
+        case .range:
             formatter.dateFormat = "d MMM"
         }
 
         return formatter.string(from: date)
     }
-
+    
     private func shortAmount(_ value: Double) -> String {
         if value >= 1_000_000 {
             return String(format: "%.1fM ₽", value / 1_000_000)

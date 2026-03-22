@@ -19,11 +19,6 @@ struct RootTabView: View {
                     Label("Аналитика", systemImage: "chart.bar")
                 }
 
-            RulesView()
-                .tabItem {
-                    Label("Правила", systemImage: "wand.and.stars")
-                }
-
             SettingsView()
                 .tabItem {
                     Label("Настройки", systemImage: "gearshape")

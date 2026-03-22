@@ -52,7 +52,7 @@ struct AddExpenseView: View {
                 Section("Основное") {
                     DatePicker("Дата", selection: $date, displayedComponents: .date)
 
-                    TextField("Сумма, например -1761.07", text: $amountText)
+                    TextField("Сумма, например 1761.07", text: $amountText)
                         .keyboardType(.decimalPad)
                         .focused($focusedField, equals: .amount)
 
@@ -120,14 +120,16 @@ struct AddExpenseView: View {
     }
 
     private var parsedAmount: Double? {
-        parseNumber(from: amountText)
+        guard let value = parseNumber(from: amountText) else { return nil }
+        return abs(value)
     }
 
     private var parsedForeignAmount: Double? {
         guard !foreignAmountText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
-        return parseNumber(from: foreignAmountText)
+        guard let value = parseNumber(from: foreignAmountText) else { return nil }
+        return abs(value)
     }
 
     private func parseNumber(from string: String) -> Double? {
@@ -138,23 +140,43 @@ struct AddExpenseView: View {
     }
 
     private func saveExpense() {
-        guard let amount = parsedAmount else { return }
+        guard let parsedAmount = parsedAmount else { return }
 
+        let trimmedCurrency = accountCurrency.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedForeignCurrency = foreignCurrency.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let signedAmount: Double
+        if operationType == "Пополнение" {
+            signedAmount = abs(parsedAmount)
+        } else {
+            signedAmount = -abs(parsedAmount)
+        }
+
+        let signedForeignAmount: Double?
+        if let parsedForeignAmount {
+            if operationType == "Пополнение" {
+                signedForeignAmount = abs(parsedForeignAmount)
+            } else {
+                signedForeignAmount = -abs(parsedForeignAmount)
+            }
+        } else {
+            signedForeignAmount = nil
+        }
 
         let expense = Expense(
             date: date,
-            amount: amount,
-            accountCurrency: accountCurrency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "₸" : accountCurrency.trimmingCharacters(in: .whitespacesAndNewlines),
+            amount: signedAmount,
+            accountCurrency: trimmedCurrency.isEmpty ? "₸" : trimmedCurrency,
             operationType: operationType,
-            details: details.trimmingCharacters(in: .whitespacesAndNewlines),
-            foreignAmount: parsedForeignAmount,
+            details: trimmedDetails,
+            foreignAmount: signedForeignAmount,
             foreignCurrency: trimmedForeignCurrency.isEmpty ? nil : trimmedForeignCurrency,
             categoryName: selectedCategoryName,
             note: trimmedNote.isEmpty ? nil : trimmedNote
         )
-        
+
         modelContext.insert(expense)
         dismiss()
     }
