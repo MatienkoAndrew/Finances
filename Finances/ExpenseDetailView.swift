@@ -3,6 +3,8 @@ import SwiftData
 
 struct ExpenseDetailView: View {
     @Bindable var expense: Expense
+    
+    @Environment(\.modelContext) private var modelContext
 
     @Query
     private var settingsList: [AppSettings]
@@ -104,9 +106,30 @@ struct ExpenseDetailView: View {
                         Text(category.name).tag(category.name as String?)
                     }
                 }
-                .pickerStyle(.navigationLink)
+                .pickerStyle(.menu)
                 .onChange(of: selectedCategoryName) { _, newValue in
                     expense.categoryName = newValue
+                    try? modelContext.save()
+                }
+
+                if let selectedCategoryName,
+                   let categoryItem = CategoryLookup.findCategory(named: selectedCategoryName, in: categories) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                            .frame(width: 16, height: 16)
+                            .overlay {
+                                Image(systemName: categoryItem.iconName)
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+
+                        Text(categoryItem.name)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Без категории")
+                        .foregroundStyle(.secondary)
                 }
             }
 

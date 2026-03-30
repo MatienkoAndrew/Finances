@@ -262,30 +262,6 @@ struct AnalyticsView: View {
         }
     }
 
-//    private var periodPicker: some View {
-//        ScrollView(.horizontal, showsIndicators: false) {
-//            HStack(spacing: 8) {
-//                ForEach(AnalyticsPeriod.allCases, id: \.self) { period in
-//                    Button {
-//                        selectedPeriod = period
-//                    } label: {
-//                        Text(period.rawValue)
-//                            .font(.subheadline)
-//                            .padding(.horizontal, 12)
-//                            .padding(.vertical, 8)
-//                            .background(
-//                                selectedPeriod == period
-//                                ? Color.primary.opacity(0.1)
-//                                : Color.gray.opacity(0.1)
-//                            )
-//                            .clipShape(Capsule())
-//                    }
-//                    .buttonStyle(.plain)
-//                }
-//            }
-//        }
-//    }
-
     private var summaryCards: some View {
         VStack(spacing: 12) {
             NavigationLink {
