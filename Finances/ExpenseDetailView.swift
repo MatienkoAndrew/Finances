@@ -3,12 +3,15 @@ import SwiftData
 
 struct ExpenseDetailView: View {
     @Bindable var expense: Expense
-    
+
     @Query
     private var settingsList: [AppSettings]
-    
+
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
+
+    @Query(sort: \ExchangeRateEntry.date, order: .reverse)
+    private var rates: [ExchangeRateEntry]
 
     private var settings: AppSettings? {
         settingsList.first
@@ -55,7 +58,13 @@ struct ExpenseDetailView: View {
                 } else {
                     detailRow(title: "Дата", value: formattedDate(expense.date))
                     detailRow(title: "Сумма", value: formattedAmount(expense.amount, currency: expense.accountCurrency))
-                    if let settings {
+
+                    if let rubAmount = expense.rubAmount {
+                        detailRow(
+                            title: "Сумма в рублях",
+                            value: formattedRubAmount(rubAmount)
+                        )
+                    } else if let settings {
                         detailRow(
                             title: "Сумма в рублях",
                             value: formattedRubAmount(
@@ -63,6 +72,7 @@ struct ExpenseDetailView: View {
                             )
                         )
                     }
+
                     detailRow(title: "Тип операции", value: expense.operationType)
                     detailRow(title: "Детали", value: expense.details)
                 }
@@ -141,21 +151,6 @@ struct ExpenseDetailView: View {
             noteText = expense.note ?? ""
         }
     }
-    
-    private func formattedRubAmount(_ amount: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        formatter.groupingSeparator = " "
-        formatter.decimalSeparator = ","
-
-        let sign = amount < 0 ? "-" : "+"
-        let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
-
-        return "\(sign) \(number) ₽"
-    }
 
     private func startEditing() {
         editedDate = expense.date
@@ -194,6 +189,13 @@ struct ExpenseDetailView: View {
             expense.foreignAmount = nil
             expense.foreignCurrency = nil
         }
+
+        expense.rubAmount = HistoricalCurrencyConverter.rubAmount(
+            for: expense.amount,
+            on: expense.date,
+            rates: rates,
+            fallbackKztPerRub: settings?.kztPerRub
+        )
 
         isEditing = false
     }
@@ -262,5 +264,20 @@ struct ExpenseDetailView: View {
         let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
 
         return "\(sign) \(number) \(currency)"
+    }
+
+    private func formattedRubAmount(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+
+        let sign = amount < 0 ? "-" : "+"
+        let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
+
+        return "\(sign) \(number) ₽"
     }
 }

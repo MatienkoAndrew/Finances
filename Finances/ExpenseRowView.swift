@@ -33,12 +33,10 @@ struct ExpenseRowView: View {
                         .foregroundStyle(amountColor(expense.amount))
                         .multilineTextAlignment(.trailing)
 
-                    if let settings {
-                        Text(formattedRubAmount(
-                            CurrencyConverter.kztToRub(expense.amount, kztPerRub: settings.kztPerRub)
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let rubAmount = expense.rubAmount {
+                        Text(formattedRubAmount(rubAmount))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

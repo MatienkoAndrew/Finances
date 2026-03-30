@@ -199,21 +199,6 @@ struct AnalyticsView: View {
             .filter { $0.amount > 0 }
             .reduce(0) { $0 + $1.amount }
     }
-    
-    private var totalExpensesRub: Double {
-        guard let settings else { return 0 }
-        return CurrencyConverter.kztToRub(totalExpenses, kztPerRub: settings.kztPerRub)
-    }
-
-    private var totalIncomeRub: Double {
-        guard let settings else { return 0 }
-        return CurrencyConverter.kztToRub(totalIncome, kztPerRub: settings.kztPerRub)
-    }
-
-    private var netFlowRub: Double {
-        guard let settings else { return 0 }
-        return CurrencyConverter.kztToRub(netFlow, kztPerRub: settings.kztPerRub)
-    }
 
     private var netFlow: Double {
         totalIncome - totalExpenses
@@ -343,25 +328,48 @@ struct AnalyticsView: View {
     }
     
     private var dailyExpenseTotalsRub: [(date: Date, total: Double)] {
-        guard let settings else { return [] }
+        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
 
-        return dailyExpenseTotals.map { item in
-            (
-                date: item.date,
-                total: CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
-            )
+        let grouped = Dictionary(grouping: onlyExpenses) {
+            Calendar.current.startOfDay(for: $0.date)
         }
+
+        return grouped
+            .map { date, expenses in
+                let total = expenses.reduce(0) { $0 + abs($1.rubAmount ?? 0) }
+                return (date: date, total: total)
+            }
+            .sorted { $0.date > $1.date }
     }
     
     private var categoryTotalsRub: [(category: String, total: Double)] {
-        guard let settings else { return [] }
-
-        return categoryTotals.map { item in
-            (
-                category: item.category,
-                total: CurrencyConverter.kztToRub(item.total, kztPerRub: settings.kztPerRub)
-            )
+        let grouped = Dictionary(grouping: filteredExpenses.filter { $0.amount < 0 }) { expense in
+            expense.categoryName ?? "Без категории"
         }
+
+        return grouped
+            .map { key, value in
+                let total = value.reduce(0) { $0 + abs($1.rubAmount ?? 0) }
+                return (category: key, total: total)
+            }
+            .sorted { $0.total > $1.total }
+    }
+    
+    private var merchantTotalsRub: [(merchant: String, total: Double)] {
+        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+
+        let grouped = Dictionary(grouping: onlyExpenses) { expense in
+            normalizedMerchantName(expense.details)
+        }
+
+        return grouped
+            .map { merchant, expenses in
+                let total = expenses.reduce(0) { $0 + abs($1.rubAmount ?? 0) }
+                return (merchant: merchant, total: total)
+            }
+            .sorted { $0.total > $1.total }
+            .prefix(10)
+            .map { $0 }
     }
     
     private func categoryItem(for categoryName: String) -> ExpenseCategoryItem? {
@@ -670,6 +678,22 @@ struct AnalyticsView: View {
         let count = max(categoryTotals.count, 1)
         let base = CGFloat(count) * 44
         return min(max(base, 180), 420)
+    }
+    
+    private var totalExpensesRub: Double {
+        filteredExpenses
+            .filter { $0.amount < 0 }
+            .reduce(0) { $0 + abs($1.rubAmount ?? 0) }
+    }
+
+    private var totalIncomeRub: Double {
+        filteredExpenses
+            .filter { $0.amount > 0 }
+            .reduce(0) { $0 + ($1.rubAmount ?? 0) }
+    }
+
+    private var netFlowRub: Double {
+        totalIncomeRub - totalExpensesRub
     }
     
     private func chartShortDate(_ date: Date) -> String {

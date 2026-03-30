@@ -10,6 +10,12 @@ struct ContentView: View {
     
     @Query(sort: \CategoryRule.priority, order: .reverse)
     private var categoryRules: [CategoryRule]
+    
+    @Query(sort: \ExchangeRateEntry.date, order: .reverse)
+    private var rates: [ExchangeRateEntry]
+
+    @Query
+    private var settingsList: [AppSettings]
 
     @State private var isShowingAddExpense = false
     @State private var isShowingImporter = false
@@ -220,7 +226,9 @@ struct ContentView: View {
                 let importedExpenses = try PDFImporter.importExpenses(
                     from: url,
                     existingExpenses: expenses,
-                    rules: categoryRules
+                    rules: categoryRules,
+                    rates: rates,
+                    fallbackKztPerRub: settingsList.first?.kztPerRub
                 )
 
                 for expense in importedExpenses {

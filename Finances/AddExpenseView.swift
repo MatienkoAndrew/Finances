@@ -5,26 +5,27 @@
 //  Created by Андрей Матиенко on 19.03.2026.
 //
 
-
 import SwiftUI
 import SwiftData
 
 struct AddExpenseView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    
+
+    @Query
+    private var settingsList: [AppSettings]
+
+    @Query(sort: \TrackedExchangeRate.code, order: .forward)
+    private var trackedRates: [TrackedExchangeRate]
+
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
     @State private var date: Date = .now
     @State private var amountText: String = ""
-    @State private var accountCurrency: String = "₸"
+    @State private var selectedCurrencyCode: String = "KZT"
     @State private var operationType: String = "Покупка"
     @State private var details: String = ""
-
-    @State private var foreignAmountText: String = ""
-    @State private var foreignCurrency: String = ""
-
     @State private var selectedCategoryName: String? = nil
     @State private var note: String = ""
 
@@ -33,8 +34,6 @@ struct AddExpenseView: View {
     enum Field {
         case amount
         case details
-        case foreignAmount
-        case foreignCurrency
         case note
     }
 
@@ -46,18 +45,88 @@ struct AddExpenseView: View {
         "Разное"
     ]
 
+    private var settings: AppSettings? {
+        settingsList.first
+    }
+
+    private var parsedEnteredAmount: Double? {
+        guard let value = parseNumber(from: amountText) else { return nil }
+        return abs(value)
+    }
+
+    private var convertedKztAmount: Double? {
+        guard let parsedEnteredAmount,
+              let settings
+        else { return nil }
+
+        return ManualExpenseCurrencyConverter.kztAmount(
+            enteredAmount: parsedEnteredAmount,
+            currencyCode: selectedCurrencyCode,
+            kztPerRub: settings.kztPerRub,
+            trackedRates: trackedRates
+        )
+    }
+
+    private var convertedRubAmount: Double? {
+        guard let parsedEnteredAmount,
+              let settings
+        else { return nil }
+
+        return ManualExpenseCurrencyConverter.rubAmount(
+            enteredAmount: parsedEnteredAmount,
+            currencyCode: selectedCurrencyCode,
+            kztPerRub: settings.kztPerRub,
+            trackedRates: trackedRates
+        )
+    }
+
+    private var needsTrackedRateWarning: Bool {
+        selectedCurrencyCode != "KZT"
+        && selectedCurrencyCode != "RUB"
+        && convertedKztAmount == nil
+    }
+
+    private var canSave: Bool {
+        parsedEnteredAmount != nil
+        && convertedKztAmount != nil
+        && !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("Основное") {
                     DatePicker("Дата", selection: $date, displayedComponents: .date)
 
-                    TextField("Сумма, например 1761.07", text: $amountText)
+                    TextField("Сумма, например 10000", text: $amountText)
                         .keyboardType(.decimalPad)
                         .focused($focusedField, equals: .amount)
 
-                    TextField("Валюта счета", text: $accountCurrency)
-                        .textInputAutocapitalization(.never)
+                    Picker("Валюта", selection: $selectedCurrencyCode) {
+                        ForEach(SupportedInputCurrencies.all) { currency in
+                            Text("\(currency.flag) \(currency.code) — \(currency.displayName)")
+                                .tag(currency.code)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+
+                    if let convertedKztAmount {
+                        Text("Будет сохранено: \(formattedAmount(convertedKztAmount, currency: "₸"))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let convertedRubAmount {
+                        Text("Примерно: \(formattedRubAmount(convertedRubAmount))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if needsTrackedRateWarning {
+                        Text("Для валюты \(selectedCurrencyCode) нет курса. Добавь её в Настройках → Дополнительные курсы.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
 
                     Picker("Тип операции", selection: $operationType) {
                         ForEach(operationTypes, id: \.self) { type in
@@ -65,19 +134,15 @@ struct AddExpenseView: View {
                         }
                     }
 
+                    Text(operationType == "Пополнение"
+                         ? "Сумма будет сохранена как пополнение (+)"
+                         : "Сумма будет сохранена как расход (-)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     TextField("Детали", text: $details, axis: .vertical)
                         .lineLimit(2...4)
                         .focused($focusedField, equals: .details)
-                }
-
-                Section("Иностранная валюта") {
-                    TextField("Сумма в другой валюте", text: $foreignAmountText)
-                        .keyboardType(.decimalPad)
-                        .focused($focusedField, equals: .foreignAmount)
-
-                    TextField("Код валюты, например USD / VND", text: $foreignCurrency)
-                        .textInputAutocapitalization(.characters)
-                        .focused($focusedField, equals: .foreignCurrency)
                 }
 
                 Section("Категория") {
@@ -115,69 +180,101 @@ struct AddExpenseView: View {
         }
     }
 
-    private var canSave: Bool {
-        parsedAmount != nil && !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var parsedAmount: Double? {
-        guard let value = parseNumber(from: amountText) else { return nil }
-        return abs(value)
-    }
-
-    private var parsedForeignAmount: Double? {
-        guard !foreignAmountText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
-        }
-        guard let value = parseNumber(from: foreignAmountText) else { return nil }
-        return abs(value)
-    }
-
     private func parseNumber(from string: String) -> Double? {
         let normalized = string
+            .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: ",", with: ".")
         return Double(normalized)
     }
 
     private func saveExpense() {
-        guard let parsedAmount = parsedAmount else { return }
+        guard let parsedEnteredAmount,
+              let settings,
+              let convertedKztAmount
+        else { return }
 
-        let trimmedCurrency = accountCurrency.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedForeignCurrency = foreignCurrency.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let signedAmount: Double
         if operationType == "Пополнение" {
-            signedAmount = abs(parsedAmount)
+            signedAmount = abs(convertedKztAmount)
         } else {
-            signedAmount = -abs(parsedAmount)
+            signedAmount = -abs(convertedKztAmount)
+        }
+
+        let baseRubAmount = ManualExpenseCurrencyConverter.rubAmount(
+            enteredAmount: parsedEnteredAmount,
+            currencyCode: selectedCurrencyCode,
+            kztPerRub: settings.kztPerRub,
+            trackedRates: trackedRates
+        )
+
+        let signedRubAmount: Double?
+        if let baseRubAmount {
+            if operationType == "Пополнение" {
+                signedRubAmount = abs(baseRubAmount)
+            } else {
+                signedRubAmount = -abs(baseRubAmount)
+            }
+        } else {
+            signedRubAmount = nil
         }
 
         let signedForeignAmount: Double?
-        if let parsedForeignAmount {
-            if operationType == "Пополнение" {
-                signedForeignAmount = abs(parsedForeignAmount)
-            } else {
-                signedForeignAmount = -abs(parsedForeignAmount)
-            }
-        } else {
+        if selectedCurrencyCode == "KZT" {
             signedForeignAmount = nil
+        } else if operationType == "Пополнение" {
+            signedForeignAmount = abs(parsedEnteredAmount)
+        } else {
+            signedForeignAmount = -abs(parsedEnteredAmount)
         }
 
         let expense = Expense(
             date: date,
             amount: signedAmount,
-            accountCurrency: trimmedCurrency.isEmpty ? "₸" : trimmedCurrency,
+            accountCurrency: "₸",
             operationType: operationType,
             details: trimmedDetails,
             foreignAmount: signedForeignAmount,
-            foreignCurrency: trimmedForeignCurrency.isEmpty ? nil : trimmedForeignCurrency,
+            foreignCurrency: selectedCurrencyCode == "KZT" ? nil : selectedCurrencyCode,
+            rubAmount: signedRubAmount,
             categoryName: selectedCategoryName,
             note: trimmedNote.isEmpty ? nil : trimmedNote
         )
 
         modelContext.insert(expense)
         dismiss()
+    }
+
+    private func formattedAmount(_ amount: Double, currency: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+
+        let sign = amount < 0 ? "-" : "+"
+        let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
+
+        return "\(sign) \(number) \(currency)"
+    }
+
+    private func formattedRubAmount(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+
+        let sign = amount < 0 ? "-" : "+"
+        let number = formatter.string(from: NSNumber(value: abs(amount))) ?? "\(abs(amount))"
+
+        return "\(sign) \(number) ₽"
     }
 }

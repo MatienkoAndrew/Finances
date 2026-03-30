@@ -11,6 +11,7 @@ final class Expense {
 
     var foreignAmount: Double?
     var foreignCurrency: String?
+    var rubAmount: Double?
 
     var categoryName: String?
     var note: String?
@@ -29,12 +30,13 @@ final class Expense {
         details: String,
         foreignAmount: Double? = nil,
         foreignCurrency: String? = nil,
+        rubAmount: Double? = nil,
         categoryName: String? = nil,
         note: String? = nil,
         fingerprint: String? = nil,
         sourceFileName: String? = nil,
         importedAt: Date? = nil,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
     ) {
         self.date = date
         self.amount = amount
@@ -43,6 +45,7 @@ final class Expense {
         self.details = details
         self.foreignAmount = foreignAmount
         self.foreignCurrency = foreignCurrency
+        self.rubAmount = rubAmount
         self.categoryName = categoryName
         self.note = note
         self.fingerprint = fingerprint

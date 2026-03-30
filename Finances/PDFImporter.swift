@@ -21,7 +21,9 @@ enum PDFImporter {
     static func importExpenses(
         from url: URL,
         existingExpenses: [Expense],
-        rules: [CategoryRule]
+        rules: [CategoryRule],
+        rates: [ExchangeRateEntry],
+        fallbackKztPerRub: Double?
     ) throws -> [Expense] {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
@@ -49,7 +51,14 @@ enum PDFImporter {
         let importedAt = Date()
 
         return newRows.map { row in
-            Expense(
+            let rubAmount = HistoricalCurrencyConverter.rubAmount(
+                for: row.amount,
+                on: row.date,
+                rates: rates,
+                fallbackKztPerRub: fallbackKztPerRub
+            )
+
+            return Expense(
                 date: row.date,
                 amount: row.amount,
                 accountCurrency: row.accountCurrency,
@@ -57,6 +66,7 @@ enum PDFImporter {
                 details: row.details,
                 foreignAmount: row.foreignAmount,
                 foreignCurrency: row.foreignCurrency,
+                rubAmount: rubAmount,
                 categoryName: CategoryRuleEngine.matchCategoryName(
                     operationType: row.operationType,
                     details: row.details,
