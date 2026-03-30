@@ -54,3 +54,13 @@ final class Expense {
         self.createdAt = createdAt
     }
 }
+
+extension Expense {
+    var countsAsExpenseInAnalytics: Bool {
+        operationType == "Покупка"
+    }
+
+    var countsAsIncomeInAnalytics: Bool {
+        operationType == "Пополнение"
+    }
+}

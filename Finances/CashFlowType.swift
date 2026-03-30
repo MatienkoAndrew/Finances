@@ -15,9 +15,9 @@ enum CashFlowType: String {
     func matches(_ expense: Expense) -> Bool {
         switch self {
         case .expenses:
-            return expense.amount < 0
+            return expense.countsAsExpenseInAnalytics
         case .income:
-            return expense.amount > 0
+            return expense.countsAsIncomeInAnalytics
         }
     }
 }

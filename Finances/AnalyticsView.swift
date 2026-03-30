@@ -190,7 +190,7 @@ struct AnalyticsView: View {
     
     private var totalExpenses: Double {
         filteredExpenses
-            .filter { $0.amount < 0 }
+            .filter { $0.countsAsExpenseInAnalytics }
             .reduce(0) { $0 + abs($1.amount) }
     }
 
@@ -205,7 +205,7 @@ struct AnalyticsView: View {
     }
 
     private var categoryTotals: [(category: String, total: Double)] {
-        let grouped = Dictionary(grouping: filteredExpenses.filter { $0.amount < 0 }) { expense in
+        let grouped = Dictionary(grouping: filteredExpenses.filter { $0.countsAsExpenseInAnalytics }) { expense in
             expense.categoryName ?? "Без категории"
         }
 
@@ -304,7 +304,7 @@ struct AnalyticsView: View {
     }
     
     private var dailyExpenseTotalsRub: [(date: Date, total: Double)] {
-        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+        let onlyExpenses = filteredExpenses.filter { $0.countsAsExpenseInAnalytics }
 
         let grouped = Dictionary(grouping: onlyExpenses) {
             Calendar.current.startOfDay(for: $0.date)
@@ -319,7 +319,7 @@ struct AnalyticsView: View {
     }
     
     private var categoryTotalsRub: [(category: String, total: Double)] {
-        let grouped = Dictionary(grouping: filteredExpenses.filter { $0.amount < 0 }) { expense in
+        let grouped = Dictionary(grouping: filteredExpenses.filter { $0.countsAsExpenseInAnalytics }) { expense in
             expense.categoryName ?? "Без категории"
         }
 
@@ -332,7 +332,7 @@ struct AnalyticsView: View {
     }
     
     private var merchantTotalsRub: [(merchant: String, total: Double)] {
-        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+        let onlyExpenses = filteredExpenses.filter { $0.countsAsExpenseInAnalytics }
 
         let grouped = Dictionary(grouping: onlyExpenses) { expense in
             normalizedMerchantName(expense.details)
@@ -439,7 +439,7 @@ struct AnalyticsView: View {
     }
     
     private var dailyExpenseTotals: [(date: Date, total: Double)] {
-        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+        let onlyExpenses = filteredExpenses.filter { $0.countsAsExpenseInAnalytics }
 
         let grouped = Dictionary(grouping: onlyExpenses) {
             Calendar.current.startOfDay(for: $0.date)
@@ -497,7 +497,7 @@ struct AnalyticsView: View {
     }
     
     private var merchantTotals: [(merchant: String, total: Double)] {
-        let onlyExpenses = filteredExpenses.filter { $0.amount < 0 }
+        let onlyExpenses = filteredExpenses.filter { $0.countsAsExpenseInAnalytics }
 
         let grouped = Dictionary(grouping: onlyExpenses) { expense in
             normalizedMerchantName(expense.details)
@@ -658,13 +658,13 @@ struct AnalyticsView: View {
     
     private var totalExpensesRub: Double {
         filteredExpenses
-            .filter { $0.amount < 0 }
+            .filter { $0.countsAsExpenseInAnalytics }
             .reduce(0) { $0 + abs($1.rubAmount ?? 0) }
     }
 
     private var totalIncomeRub: Double {
         filteredExpenses
-            .filter { $0.amount > 0 }
+            .filter { $0.countsAsIncomeInAnalytics }
             .reduce(0) { $0 + ($1.rubAmount ?? 0) }
     }
 
