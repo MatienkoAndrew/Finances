@@ -4,6 +4,8 @@ import SwiftData
 struct ExpenseRowView: View {
     let expense: Expense
 
+    @Environment(\.modelContext) private var modelContext
+
     @Query
     private var settingsList: [AppSettings]
 
@@ -46,28 +48,7 @@ struct ExpenseRowView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                if let categoryName = expense.categoryName {
-                    if let categoryItem {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color(hex: categoryItem.colorHex) ?? .gray)
-                                .frame(width: 16, height: 16)
-                                .overlay {
-                                    Image(systemName: categoryItem.iconName)
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
-
-                            Text(categoryName)
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    } else {
-                        Text("• \(categoryName)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                categoryMenu
 
                 Spacer()
 
@@ -91,6 +72,105 @@ struct ExpenseRowView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var categoryMenu: some View {
+        Menu {
+            Button {
+                expense.categoryName = nil
+                saveChanges()
+            } label: {
+                HStack {
+                    Text("Без категории")
+                    if expense.categoryName == nil {
+                        Spacer()
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            Divider()
+
+            ForEach(categories) { category in
+                Button {
+                    expense.categoryName = category.name
+                    saveChanges()
+                } label: {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color(hex: category.colorHex) ?? .gray)
+                            .frame(width: 16, height: 16)
+                            .overlay {
+                                Image(systemName: category.iconName)
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+
+                        Text(category.name)
+
+                        if expense.categoryName == category.name {
+                            Spacer()
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            categoryLabel
+        }
+    }
+
+    @ViewBuilder
+    private var categoryLabel: some View {
+        if let categoryName = expense.categoryName {
+            if let categoryItem {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                        .frame(width: 16, height: 16)
+                        .overlay {
+                            Image(systemName: categoryItem.iconName)
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+
+                    Text(categoryName)
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 4) {
+                    Text("• \(categoryName)")
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+        } else {
+            HStack(spacing: 4) {
+                Text("Без категории")
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func saveChanges() {
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save category change: \(error)")
+        }
     }
 
     private func formattedAmount(_ amount: Double, currency: String) -> String {
