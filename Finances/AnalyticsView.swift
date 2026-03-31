@@ -9,187 +9,90 @@ struct AnalyticsView: View {
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
+    @Query(sort: \TrackedExchangeRate.code, order: .forward)
+    private var trackedRates: [TrackedExchangeRate]
+
     @Query
     private var settingsList: [AppSettings]
 
+    @State private var selectedScale: AnalyticsTimeScale = .week
+    @State private var pageAnchorDate: Date = .now
     @State private var selectedBreakdown: AnalyticsBreakdown = .daily
-//    @State private var selectedMode: AnalyticsMode = .all
-    @State private var selectedMode: AnalyticsMode = .month
-    @State private var selectedMonth: MonthSelection?
-    @State private var selectedRange = DateRangeSelection()
-    @State private var isShowingRangePicker = false
-    @State private var selectedExpenseDate: Date?
-    @State private var lastHapticSelectionDate: Date?
+
+    @State private var selectedChartPointID: String?
+    @State private var lastHapticChartPointID: String?
+
     @State private var selectedCategoryName: String?
     @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
+    
+    @State private var pageChangeToken = UUID()
 
     private var settings: AppSettings? {
         settingsList.first
     }
 
-    private var availableMonths: [MonthSelection] {
+    private var snapshot: AnalyticsSnapshot {
+        AnalyticsSnapshotBuilder.build(
+            transactions: transactions,
+            scale: selectedScale,
+            anchorDate: pageAnchorDate,
+            settings: settings,
+            trackedRates: trackedRates
+        )
+    }
+
+    private var previousSnapshot: AnalyticsSnapshot {
         let calendar = Calendar.current
 
-        let months = transactions.map {
-            let comps = calendar.dateComponents([.year, .month], from: $0.date)
-            return MonthSelection(year: comps.year ?? 2000, month: comps.month ?? 1)
+        let previousAnchor: Date
+        switch selectedScale {
+        case .week:
+            previousAnchor = calendar.date(byAdding: .weekOfYear, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+        case .month:
+            previousAnchor = calendar.date(byAdding: .month, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+        case .year:
+            previousAnchor = calendar.date(byAdding: .year, value: -1, to: pageAnchorDate) ?? pageAnchorDate
         }
 
-        return Array(Set(months)).sorted {
-            if $0.year != $1.year { return $0.year > $1.year }
-            return $0.month > $1.month
-        }
+        return AnalyticsSnapshotBuilder.build(
+            transactions: transactions,
+            scale: selectedScale,
+            anchorDate: previousAnchor,
+            settings: settings,
+            trackedRates: trackedRates
+        )
     }
 
     private var currentAnalyticsScope: AnalyticsScope {
-        switch selectedMode {
-
-        case .month:
-            let month = selectedMonth
-            return AnalyticsScope(
-                title: month?.title ?? "Месяц",
-                contains: { date in
-                    guard let month else { return true }
-                    return month.contains(date)
-                }
-            )
-
-        case .range:
-            let range = selectedRange
-            return AnalyticsScope(
-                title: range.title,
-                contains: { date in
-                    guard range.isComplete else { return true }
-                    return range.contains(date)
-                }
-            )
-            
-        case .all:
-            return AnalyticsScope(
-                title: "Все",
-                contains: { _ in true }
-            )
-        }
+        let page = snapshot.page
+        return AnalyticsScope(
+            title: page.displayTitle,
+            contains: { page.contains($0) }
+        )
     }
 
-    private var filteredTransactions: [Transaction] {
-        switch selectedMode {
-        case .all:
-            return transactions
-
-        case .month:
-            guard let selectedMonth else { return transactions }
-            return transactions.filter { selectedMonth.contains($0.date) }
-
-        case .range:
-            guard selectedRange.isComplete else { return transactions }
-            return transactions.filter { selectedRange.contains($0.date) }
-        }
-    }
-
-    private var expenseTransactions: [Transaction] {
-        filteredTransactions.filter { $0.countsAsExpenseInAnalytics }
-    }
-
-    private var incomeTransactions: [Transaction] {
-        filteredTransactions.filter { $0.countsAsIncomeInAnalytics }
-    }
-
-    private var totalExpensesRub: Double {
-        expenseTransactions.reduce(0) { partial, transaction in
-            partial + (rubValue(for: transaction) ?? 0)
-        }
-    }
-
-    private var totalIncomeRub: Double {
-        incomeTransactions.reduce(0) { partial, transaction in
-            partial + (rubValue(for: transaction) ?? 0)
-        }
-    }
-
-    private var netFlowRub: Double {
-        totalIncomeRub - totalExpensesRub
-    }
-
-    private var expenseTransactionsMissingRub: [Transaction] {
-        expenseTransactions.filter { rubValue(for: $0) == nil }
-    }
-
-    private var incomeTransactionsMissingRub: [Transaction] {
-        incomeTransactions.filter { rubValue(for: $0) == nil }
-    }
-
-    private var dailyExpenseTotalsRub: [(date: Date, total: Double)] {
-        let grouped = Dictionary(grouping: expenseTransactions.compactMap { transaction -> (Date, Double)? in
-            guard let rub = rubValue(for: transaction) else { return nil }
-            return (Calendar.current.startOfDay(for: transaction.date), rub)
-        }) { $0.0 }
-
-        return grouped
-            .map { date, values in
-                let total = values.reduce(0) { $0 + $1.1 }
-                return (date: date, total: total)
-            }
-            .sorted { $0.date > $1.date }
-    }
-
-    private var categoryTotalsRub: [(category: String, total: Double)] {
-        let grouped = Dictionary(grouping: expenseTransactions.compactMap { transaction -> (String, Double)? in
-            guard let rub = rubValue(for: transaction) else { return nil }
-            return (transaction.categoryName ?? "Без категории", rub)
-        }) { $0.0 }
-
-        return grouped
-            .map { category, values in
-                let total = values.reduce(0) { $0 + $1.1 }
-                return (category: category, total: total)
-            }
-            .sorted { $0.total > $1.total }
-    }
-
-    private var merchantTotalsRub: [(merchant: String, total: Double)] {
-        let grouped = Dictionary(grouping: expenseTransactions.compactMap { transaction -> (String, Double)? in
-            guard let rub = rubValue(for: transaction) else { return nil }
-            return (normalizedMerchantName(transaction.details), rub)
-        }) { $0.0 }
-
-        return grouped
-            .map { merchant, values in
-                let total = values.reduce(0) { $0 + $1.1 }
-                return (merchant: merchant, total: total)
-            }
-            .sorted { $0.total > $1.total }
-            .prefix(10)
-            .map { $0 }
+    private var selectedChartPoint: AnalyticsChartPoint? {
+        snapshot.chartPoints.first { $0.id == selectedChartPointID }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    modePicker
-                    periodControls
-//                    coverageInfoSection
-                    summaryCards
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    scalePicker
+                    periodNavigation
+                    topSummarySection
                     chartSection
+                    periodSummaryCards
+//                    trendSection
+//                    highlightsSection
                     breakdownPicker
                     selectedBreakdownSection
                 }
                 .padding()
             }
             .navigationTitle("Аналитика")
-            .sheet(isPresented: $isShowingRangePicker) {
-                DateRangePickerView(
-                    selection: $selectedRange,
-                    availableDates: transactions.map(\.date)
-                )
-            }
-            .onAppear {
-                if selectedMonth == nil {
-                    selectedMonth = availableMonths.first
-                }
-            }
             .background {
                 NavigationLink(
                     isActive: Binding(
@@ -213,109 +116,123 @@ struct AnalyticsView: View {
                 .hidden()
             }
         }
-    }
-
-    private var modePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(AnalyticsMode.allCases, id: \.self) { mode in
-                    Button {
-                        selectedMode = mode
-                    } label: {
-                        Text(mode.rawValue)
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                selectedMode == mode
-                                ? Color.primary.opacity(0.1)
-                                : Color.gray.opacity(0.1)
-                            )
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+        .onAppear {
+            pageAnchorDate = .now
         }
     }
 
-    @ViewBuilder
-    private var periodControls: some View {
-        switch selectedMode {
-        case .all:
-            EmptyView()
+    // MARK: - Top
 
-        case .month:
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(availableMonths) { month in
-                        Button {
-                            selectedMonth = month
-                        } label: {
-                            Text(month.title)
-                                .font(.subheadline)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(
-                                    selectedMonth == month
-                                    ? Color.primary.opacity(0.1)
-                                    : Color.gray.opacity(0.1)
-                                )
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-        case .range:
-            VStack(alignment: .leading, spacing: 8) {
+    private var scalePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(AnalyticsTimeScale.allCases) { scale in
                 Button {
-                    isShowingRangePicker = true
+                    selectedScale = scale
+                    selectedChartPointID = nil
+                    selectedCategoryName = nil
                 } label: {
-                    HStack {
-                        Image(systemName: "calendar")
-                        Text(selectedRange.title)
-                        Spacer()
-                    }
-                    .padding()
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    Text(scale.rawValue)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            selectedScale == scale
+                            ? Color.white
+                            : Color.clear
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
+
+                if scale != AnalyticsTimeScale.allCases.last {
+                    Divider()
+                        .frame(height: 20)
+                        .padding(.horizontal, 8)
+                }
             }
         }
+        .padding(6)
+        .background(Color.gray.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
-    private var coverageInfoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Базовая валюта аналитики — рубли")
-                .font(.subheadline.weight(.semibold))
+    private var periodNavigation: some View {
+        HStack {
+            Spacer()
 
-            if expenseTransactionsMissingRub.isEmpty && incomeTransactionsMissingRub.isEmpty {
-                Text("Все доходы и расходы в выбранном периоде имеют рублевый эквивалент.")
-                    .font(.footnote)
+            Text(snapshot.page.displayTitle)
+                .font(.title3.weight(.semibold))
+                .contentTransition(.opacity)
+
+            Spacer()
+        }
+        .frame(height: 44)
+    }
+
+    private var topSummarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(selectedChartPoint == nil ? selectedScale.averageTitle : selectedScale.selectedPointTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(
+                formattedRubAmount(
+                    selectedChartPoint?.total ?? snapshot.averageExpensePerBin
+                )
+            )
+            .font(.system(size: 24, weight: .bold))
+            .minimumScaleFactor(0.7)
+            .lineLimit(1)
+            .contentTransition(.numericText())
+
+            Text(selectedChartPoint?.title ?? snapshot.page.displayTitle)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.secondary)
+                .contentTransition(.opacity)
+        }
+        .id(pageChangeToken)
+    }
+
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("График расходов")
+                .font(.title3.bold())
+
+            if snapshot.chartPoints.isEmpty {
+                Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    if !expenseTransactionsMissingRub.isEmpty {
-                        Text("• Расходов без ₽-эквивалента: \(expenseTransactionsMissingRub.count)")
+                InteractiveBarChartView(
+                    points: snapshot.chartPoints,
+                    selectedPointID: $selectedChartPointID
+                ) { point in
+                    if let point {
+                        if lastHapticChartPointID != point.id {
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred(intensity: 0.7)
+                            lastHapticChartPointID = point.id
+                        }
+                    } else {
+                        lastHapticChartPointID = nil
                     }
-
-                    if !incomeTransactionsMissingRub.isEmpty {
-                        Text("• Доходов без ₽-эквивалента: \(incomeTransactionsMissingRub.count)")
-                    }
+                } onPeriodSwipe: { delta in
+                    movePeriod(by: delta)
                 }
-                .font(.footnote)
-                .foregroundStyle(.orange)
+                .padding()
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .id(pageChangeToken)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
             }
         }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    private var summaryCards: some View {
+    // MARK: - Summary cards
+
+    private var periodSummaryCards: some View {
         VStack(spacing: 12) {
             NavigationLink {
                 TransactionListByKindView(
@@ -325,8 +242,8 @@ struct AnalyticsView: View {
             } label: {
                 AnalyticsCardView(
                     title: "Расходы",
-                    value: formattedRubAmount(totalExpensesRub),
-                    secondaryValue: "\(expenseTransactions.count) операций",
+                    value: formattedRubAmount(snapshot.totalExpensesRub),
+                    secondaryValue: "\(snapshot.expenseCount) операций",
                     systemImage: "arrow.up.circle.fill"
                 )
             }
@@ -340,8 +257,8 @@ struct AnalyticsView: View {
             } label: {
                 AnalyticsCardView(
                     title: "Доходы",
-                    value: formattedRubAmount(totalIncomeRub),
-                    secondaryValue: "\(incomeTransactions.count) операций",
+                    value: formattedRubAmount(snapshot.totalIncomeRub),
+                    secondaryValue: "\(snapshot.incomeCount) операций",
                     systemImage: "arrow.down.circle.fill"
                 )
             }
@@ -349,12 +266,99 @@ struct AnalyticsView: View {
 
             AnalyticsCardView(
                 title: "Итог",
-                value: signedFormattedRubAmount(netFlowRub),
-                secondaryValue: currentAnalyticsScope.title,
+                value: signedFormattedRubAmount(snapshot.netFlowRub),
+                secondaryValue: snapshot.page.displayTitle,
                 systemImage: "equal.circle.fill"
             )
         }
     }
+
+    // MARK: - Trend / Highlights
+
+    private var trendSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Тренд")
+                .font(.title3.bold())
+
+            if let trendMessage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(trendHeadline)
+                        .font(.headline)
+
+                    Text(trendMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            } else {
+                Text("Недостаточно данных для сравнения с предыдущим периодом")
+                    .foregroundStyle(.secondary)
+                    .padding()
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+        }
+    }
+
+    private var highlightsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Highlights")
+                .font(.title3.bold())
+
+            VStack(spacing: 12) {
+                if let peakPoint = snapshot.peakChartPoint {
+                    highlightCard(
+                        title: selectedScale == .year ? "Пиковый месяц" : "Пиковый день",
+                        value: formattedRubAmount(peakPoint.total),
+                        subtitle: peakPoint.title,
+                        systemImage: "flame.fill"
+                    )
+                }
+
+                if let topCategory = snapshot.categoryTotals.first {
+                    highlightCard(
+                        title: "Топ категория",
+                        value: formattedRubAmount(topCategory.total),
+                        subtitle: "\(topCategory.category) • \(formattedPercent(categoryShare(for: topCategory.category)))",
+                        systemImage: "chart.bar.fill"
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func highlightCard(
+        title: String,
+        value: String,
+        subtitle: String,
+        systemImage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.orange)
+
+                Text(title)
+                    .font(.headline)
+            }
+
+            Text(value)
+                .font(.title2.bold())
+
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    // MARK: - Breakdown picker
 
     private var breakdownPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -365,12 +369,12 @@ struct AnalyticsView: View {
                     } label: {
                         Text(breakdown.rawValue)
                             .font(.subheadline)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .background(
                                 selectedBreakdown == breakdown
-                                ? Color.primary.opacity(0.1)
-                                : Color.gray.opacity(0.1)
+                                ? Color.primary.opacity(0.10)
+                                : Color.gray.opacity(0.08)
                             )
                             .clipShape(Capsule())
                     }
@@ -397,22 +401,31 @@ struct AnalyticsView: View {
         }
     }
 
+    // MARK: - Lower sections
+
     private var dailySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("По дням")
+            Text(selectedScale == .year ? "По месяцам" : "По дням")
                 .font(.title3.bold())
 
-            if dailyExpenseTotalsRub.isEmpty {
+            if snapshot.lowerTimeTotals.isEmpty {
                 Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(dailyExpenseTotalsRub, id: \.date) { item in
+                    ForEach(snapshot.lowerTimeTotals) { item in
                         NavigationLink {
-                            TransactionListByDateView(date: item.date)
+                            if selectedScale == .year {
+                                TransactionListByKindView(
+                                    kind: .expense,
+                                    scope: monthScope(for: item.date)
+                                )
+                            } else {
+                                TransactionListByDateView(date: item.date)
+                            }
                         } label: {
                             HStack {
-                                Text(formattedShortDate(item.date))
+                                Text(item.title)
                                 Spacer()
                                 Text(formattedRubAmount(item.total))
                                     .fontWeight(.semibold)
@@ -433,12 +446,12 @@ struct AnalyticsView: View {
             Text("По категориям")
                 .font(.title3.bold())
 
-            if categoryTotalsRub.isEmpty {
+            if snapshot.categoryTotals.isEmpty {
                 Text("Нет данных для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(categoryTotalsRub, id: \.category) { item in
+                    ForEach(snapshot.categoryTotals) { item in
                         NavigationLink {
                             TransactionListByCategoryView(
                                 categoryTitle: item.category,
@@ -484,12 +497,12 @@ struct AnalyticsView: View {
             Text("Топ мест и сервисов")
                 .font(.title3.bold())
 
-            if merchantTotalsRub.isEmpty {
+            if snapshot.merchantTotals.isEmpty {
                 Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(Array(merchantTotalsRub.enumerated()), id: \.offset) { index, item in
+                    ForEach(Array(snapshot.merchantTotals.enumerated()), id: \.offset) { index, item in
                         NavigationLink {
                             TransactionListByMerchantView(
                                 merchantTitle: item.merchant,
@@ -526,115 +539,14 @@ struct AnalyticsView: View {
         }
     }
 
-    private var chartSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("График расходов")
-                .font(.title3.bold())
-
-            if dailyExpenseTotalsRub.isEmpty {
-                Text("Нет расходов для выбранного периода")
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let selectedDailyPoint {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tooltipDate(selectedDailyPoint.date))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Text(formattedRubAmount(selectedDailyPoint.total))
-                                .font(.headline.bold())
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                    }
-
-                    Chart {
-                        ForEach(dailyExpenseTotalsRub, id: \.date) { item in
-                            let isSelected = selectedExpenseDate.map {
-                                Calendar.current.isDate($0, inSameDayAs: item.date)
-                            } ?? false
-
-                            BarMark(
-                                x: .value("Дата", item.date),
-                                y: .value("Расходы", item.total),
-                                width: .fixed(isSelected ? 20 : 12)
-                            )
-                            .foregroundStyle(isSelected ? .blue : .blue.opacity(0.8))
-                            .cornerRadius(isSelected ? 6 : 4)
-
-                            if isSelected {
-                                RuleMark(x: .value("Дата", item.date))
-                                    .foregroundStyle(.secondary.opacity(0.22))
-                            }
-                        }
-                    }
-                    .frame(height: 240)
-                    .chartXAxis {
-                        AxisMarks(values: .automatic) { value in
-                            AxisGridLine()
-                            AxisTick()
-                            AxisValueLabel {
-                                if let date = value.as(Date.self) {
-                                    Text(chartShortDate(date))
-                                }
-                            }
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading)
-                    }
-                    .chartOverlay { proxy in
-                        GeometryReader { geometry in
-                            Rectangle()
-                                .fill(.clear)
-                                .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onChanged { value in
-                                            let plotFrame = geometry[proxy.plotAreaFrame]
-                                            let xInPlot = value.location.x - plotFrame.origin.x
-
-                                            guard xInPlot >= 0, xInPlot <= proxy.plotAreaSize.width else {
-                                                return
-                                            }
-
-                                            if let date: Date = proxy.value(atX: xInPlot),
-                                               let nearest = nearestDailyPoint(to: date) {
-                                                if selectedExpenseDate == nil ||
-                                                    !Calendar.current.isDate(selectedExpenseDate!, inSameDayAs: nearest.date) {
-                                                    selectedExpenseDate = nearest.date
-                                                    triggerSelectionHaptic(for: nearest.date)
-                                                }
-                                            }
-                                        }
-                                        .onEnded { _ in
-                                            withAnimation(.easeOut(duration: 0.15)) {
-                                                selectedExpenseDate = nil
-                                                lastHapticSelectionDate = nil
-                                            }
-                                        }
-                                )
-                        }
-                    }
-                    .animation(.easeOut(duration: 0.15), value: selectedExpenseDate)
-                }
-                .padding()
-                .background(Color.gray.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-            }
-        }
-    }
+    // MARK: - Category interactive chart
 
     private var categoryChartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("График по категориям")
                 .font(.title3.bold())
 
-            if categoryTotalsRub.isEmpty {
+            if snapshot.categoryTotals.isEmpty {
                 Text("Нет данных для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
@@ -656,7 +568,7 @@ struct AnalyticsView: View {
                                     .background(Color.gray.opacity(0.10))
                                     .clipShape(Capsule())
 
-                                if let merchant = topMerchant(in: selectedCategoryPoint.category) {
+                                if let merchant = snapshot.topMerchantByCategory[selectedCategoryPoint.category], !merchant.isEmpty {
                                     Text("Топ: \(merchant)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -668,11 +580,10 @@ struct AnalyticsView: View {
                         .padding(.vertical, 10)
                         .background(.thinMaterial)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                     }
 
                     Chart {
-                        ForEach(categoryTotalsRub, id: \.category) { item in
+                        ForEach(snapshot.categoryTotals) { item in
                             let isSelected = selectedCategoryName == item.category
                             let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
 
@@ -718,7 +629,12 @@ struct AnalyticsView: View {
                                             ) {
                                                 if selectedCategoryName != nearestCategoryName {
                                                     selectedCategoryName = nearestCategoryName
-                                                    triggerCategoryHaptic(for: nearestCategoryName)
+
+                                                    if lastHapticCategoryName != nearestCategoryName {
+                                                        let generator = UIImpactFeedbackGenerator(style: .light)
+                                                        generator.impactOccurred(intensity: 0.7)
+                                                        lastHapticCategoryName = nearestCategoryName
+                                                    }
                                                 }
                                             }
                                         }
@@ -729,15 +645,12 @@ struct AnalyticsView: View {
                                                 categoryNavigationTarget = selectedCategoryName
                                             }
 
-                                            withAnimation(.easeOut(duration: 0.15)) {
-                                                selectedCategoryName = nil
-                                                lastHapticCategoryName = nil
-                                            }
+                                            selectedCategoryName = nil
+                                            lastHapticCategoryName = nil
                                         }
                                 )
                         }
                     }
-                    .animation(.easeOut(duration: 0.15), value: selectedCategoryName)
                 }
                 .padding()
                 .background(Color.gray.opacity(0.08))
@@ -746,84 +659,138 @@ struct AnalyticsView: View {
         }
     }
 
-    private var chartHeightForCategories: CGFloat {
-        let count = max(categoryTotalsRub.count, 1)
-        let base = CGFloat(count) * 44
-        return min(max(base, 180), 420)
+    // MARK: - Helpers
+
+    private var canMoveForward: Bool {
+        let currentRealPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now)
+        return snapshot.page.startDate < currentRealPage.startDate
     }
 
-    private func rubValue(for transaction: Transaction) -> Double? {
-        if let rubAmount = transaction.rubAmount {
-            return abs(rubAmount)
+    private func movePeriod(by delta: Int) {
+        let calendar = Calendar.current
+
+        let nextDate: Date
+        switch selectedScale {
+        case .week:
+            nextDate = calendar.date(byAdding: .weekOfYear, value: delta, to: pageAnchorDate) ?? pageAnchorDate
+        case .month:
+            nextDate = calendar.date(byAdding: .month, value: delta, to: pageAnchorDate) ?? pageAnchorDate
+        case .year:
+            nextDate = calendar.date(byAdding: .year, value: delta, to: pageAnchorDate) ?? pageAnchorDate
         }
 
-        if transaction.currencyCode == "₽" {
-            return abs(transaction.amount)
+        if delta > 0 && !canMoveForward {
+            return
         }
 
-        if transaction.currencyCode == "₸", let settings {
-            return CurrencyConverter.kztToRub(abs(transaction.amount), kztPerRub: settings.kztPerRub)
+        let generator = UIImpactFeedbackGenerator(style: .soft)
+        generator.impactOccurred(intensity: 0.8)
+
+        withAnimation(.snappy(duration: 0.28, extraBounce: 0.04)) {
+            pageAnchorDate = nextDate
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+            pageChangeToken = UUID()
+        }
+    }
+
+    private var trendDeltaFraction: Double? {
+        guard previousSnapshot.averageExpensePerBin > 0 else { return nil }
+        return (snapshot.averageExpensePerBin - previousSnapshot.averageExpensePerBin) / previousSnapshot.averageExpensePerBin
+    }
+
+    private var trendHeadline: String {
+        guard let delta = trendDeltaFraction else {
+            return "Тренд недоступен"
         }
 
-        return nil
+        if abs(delta) < 0.03 {
+            return "Расходы почти не изменились"
+        } else if delta > 0 {
+            return "Ты тратишь больше"
+        } else {
+            return "Ты тратишь меньше"
+        }
+    }
+
+    private var trendMessage: String? {
+        guard let delta = trendDeltaFraction else { return nil }
+
+        let periodName: String
+        switch selectedScale {
+        case .week:
+            periodName = "прошлой неделей"
+        case .month:
+            periodName = "прошлым месяцем"
+        case .year:
+            periodName = "прошлым годом"
+        }
+
+        if abs(delta) < 0.03 {
+            return "Средний расход почти не изменился по сравнению с \(periodName)."
+        }
+
+        let percent = formattedPercent(abs(delta))
+        let unit: String = selectedScale == .year ? "Средний расход в месяц" : "Средний расход в день"
+
+        if delta > 0 {
+            return "\(unit) выше на \(percent) по сравнению с \(periodName)."
+        } else {
+            return "\(unit) ниже на \(percent) по сравнению с \(periodName)."
+        }
+    }
+
+    private var selectedCategoryPoint: AnalyticsCategoryTotal? {
+        snapshot.categoryTotals.first { $0.category == selectedCategoryName }
+    }
+
+    private func categoryShare(for categoryName: String) -> Double {
+        guard snapshot.totalExpensesRub > 0 else { return 0 }
+        let total = snapshot.categoryTotals.first(where: { $0.category == categoryName })?.total ?? 0
+        return total / snapshot.totalExpensesRub
+    }
+
+    private func formattedPercent(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .percent
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
+    }
+
+    private func nearestCategory(at yInPlot: CGFloat, plotHeight: CGFloat) -> String? {
+        guard !snapshot.categoryTotals.isEmpty, plotHeight > 0 else { return nil }
+
+        let rowHeight = plotHeight / CGFloat(snapshot.categoryTotals.count)
+        let rawIndex = Int((yInPlot / rowHeight).rounded(.down))
+        let index = min(max(rawIndex, 0), snapshot.categoryTotals.count - 1)
+
+        return snapshot.categoryTotals[index].category
     }
 
     private func categoryItem(for categoryName: String) -> ExpenseCategoryItem? {
         CategoryLookup.findCategory(named: categoryName, in: categories)
     }
 
-    private func normalizedMerchantName(_ details: String) -> String {
-        let uppercased = details.uppercased()
-
-        if uppercased.hasPrefix("GRAB ") {
-            return "GRAB"
-        }
-
-        if uppercased.hasPrefix("PAYOO MCDONALDS") {
-            return "PAYOO MCDONALDS"
-        }
-
-        if uppercased.hasPrefix("OPENAI CHATGPT SUBSCR") {
-            return "OPENAI CHATGPT SUBSCR"
-        }
-
-        if uppercased.hasPrefix("APPLE.COM BILL") {
-            return "APPLE.COM BILL"
-        }
-
-        if uppercased.hasPrefix("VNPAY 43 FACTORY") {
-            return "VNPAY 43 FACTORY"
-        }
-
-        if uppercased.hasPrefix("VNPAY XLIII COFFEE") {
-            return "VNPAY XLIII COFFEE"
-        }
-
-        return uppercased
+    private var chartHeightForCategories: CGFloat {
+        let count = max(snapshot.categoryTotals.count, 1)
+        let base = CGFloat(count) * 44
+        return min(max(base, 180), 420)
     }
 
-    private func chartShortDate(_ date: Date) -> String {
+    private func monthScope(for date: Date) -> AnalyticsScope {
+        let interval = Calendar.current.dateInterval(of: .month, for: date)!
+        return AnalyticsScope(
+            title: monthYear(date),
+            contains: { $0 >= interval.start && $0 < interval.end }
+        )
+    }
+
+    private func monthYear(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMM"
-        return formatter.string(from: date)
-    }
-
-    private func shortAmount(_ value: Double) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM ₽", value / 1_000_000)
-        } else if value >= 1_000 {
-            return String(format: "%.0fK ₽", value / 1_000)
-        } else {
-            return String(format: "%.0f ₽", value)
-        }
-    }
-
-    private func formattedShortDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMM yyyy"
-        return formatter.string(from: date)
+        formatter.dateFormat = "LLL yyyy"
+        return formatter.string(from: date).capitalized
     }
 
     private func formattedRubAmount(_ value: Double) -> String {
@@ -843,96 +810,14 @@ struct AnalyticsView: View {
         let sign = value < 0 ? "-" : "+"
         return "\(sign) \(formattedRubAmount(abs(value)))"
     }
-    
-    private var selectedDailyPoint: (date: Date, total: Double)? {
-        guard let selectedExpenseDate else { return nil }
 
-        return dailyExpenseTotalsRub.first {
-            Calendar.current.isDate($0.date, inSameDayAs: selectedExpenseDate)
+    private func shortAmount(_ value: Double) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM ₽", value / 1_000_000)
+        } else if value >= 1_000 {
+            return String(format: "%.0fK ₽", value / 1_000)
+        } else {
+            return String(format: "%.0f ₽", value)
         }
-    }
-
-    private func nearestDailyPoint(to date: Date) -> (date: Date, total: Double)? {
-        guard !dailyExpenseTotalsRub.isEmpty else { return nil }
-
-        return dailyExpenseTotalsRub.min {
-            abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
-        }
-    }
-
-    private func triggerSelectionHaptic(for date: Date) {
-        if let lastHapticSelectionDate,
-           Calendar.current.isDate(lastHapticSelectionDate, inSameDayAs: date) {
-            return
-        }
-
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred(intensity: 0.7)
-        lastHapticSelectionDate = date
-    }
-
-    private func tooltipDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMM yyyy"
-        return formatter.string(from: date)
-    }
-    
-    private var selectedCategoryPoint: (category: String, total: Double)? {
-        guard let selectedCategoryName else { return nil }
-
-        return categoryTotalsRub.first { $0.category == selectedCategoryName }
-    }
-
-    private func categoryShare(for categoryName: String) -> Double {
-        guard totalExpensesRub > 0 else { return 0 }
-
-        let total = categoryTotalsRub.first(where: { $0.category == categoryName })?.total ?? 0
-        return total / totalExpensesRub
-    }
-
-    private func formattedPercent(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .percent
-        formatter.maximumFractionDigits = 0
-        formatter.minimumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
-    }
-
-    private func topMerchant(in categoryName: String) -> String? {
-        let grouped = Dictionary(grouping: expenseTransactions.compactMap { transaction -> (String, Double)? in
-            guard (transaction.categoryName ?? "Без категории") == categoryName else { return nil }
-            guard let rub = rubValue(for: transaction) else { return nil }
-
-            return (normalizedMerchantName(transaction.details), rub)
-        }) { $0.0 }
-
-        return grouped
-            .map { merchant, values in
-                (merchant: merchant, total: values.reduce(0) { $0 + $1.1 })
-            }
-            .sorted { $0.total > $1.total }
-            .first?
-            .merchant
-    }
-
-    private func nearestCategory(at yInPlot: CGFloat, plotHeight: CGFloat) -> String? {
-        guard !categoryTotalsRub.isEmpty, plotHeight > 0 else { return nil }
-
-        let rowHeight = plotHeight / CGFloat(categoryTotalsRub.count)
-        let rawIndex = Int((yInPlot / rowHeight).rounded(.down))
-        let index = min(max(rawIndex, 0), categoryTotalsRub.count - 1)
-
-        return categoryTotalsRub[index].category
-    }
-
-    private func triggerCategoryHaptic(for categoryName: String) {
-        if lastHapticCategoryName == categoryName {
-            return
-        }
-
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred(intensity: 0.7)
-        lastHapticCategoryName = categoryName
     }
 }
