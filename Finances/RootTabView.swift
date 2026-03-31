@@ -7,12 +7,26 @@ struct RootTabView: View {
     @Query
     private var categories: [ExpenseCategoryItem]
 
+    @Query
+    private var accounts: [Account]
+
     var body: some View {
         TabView {
-            ContentView()
+            TransactionsView()
                 .tabItem {
-                    Label("Операции", systemImage: "list.bullet.rectangle")
+                    Label("Транзакции", systemImage: "list.bullet.rectangle")
                 }
+            
+            
+            AccountsView()
+                .tabItem {
+                    Label("Счета", systemImage: "wallet.bifold")
+                }
+            
+//            ContentView()
+//                .tabItem {
+//                    Label("Операции", systemImage: "list.bullet.rectangle")
+//                }
 
             AnalyticsView()
                 .tabItem {
@@ -26,6 +40,7 @@ struct RootTabView: View {
         }
         .onAppear {
             CategorySeeder.seedIfNeeded(existing: categories, modelContext: modelContext)
+            DefaultAccountsSeeder.seedIfNeeded(existingAccounts: accounts, modelContext: modelContext)
         }
     }
 }

@@ -2,7 +2,12 @@ import SwiftUI
 import SwiftData
 
 struct CategoryDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+
     @Bindable var category: ExpenseCategoryItem
+
+    @Query(sort: \Transaction.date, order: .reverse)
+    private var transactions: [Transaction]
 
     @Query
     private var expenses: [Expense]
@@ -120,7 +125,6 @@ struct CategoryDetailView: View {
 
         let oldName = originalName
         let newName = trimmed
-
         let normalizedNewName = CategoryNameNormalizer.normalize(newName)
 
         let duplicateExists = categories.contains { item in
@@ -136,18 +140,20 @@ struct CategoryDetailView: View {
         errorMessage = nil
 
         if oldName != newName {
-            for expense in expenses where expense.categoryName == oldName {
-                expense.categoryName = newName
-            }
-
-            for rule in rules where rule.categoryName == oldName {
-                rule.categoryName = newName
-            }
+            TransactionCategorySync.renameCategory(
+                from: oldName,
+                to: newName,
+                transactions: transactions,
+                legacyExpenses: expenses,
+                rules: rules
+            )
         }
 
         category.name = newName
         category.iconName = selectedIconName
         category.colorHex = selectedColorHex
         originalName = newName
+
+        try? modelContext.save()
     }
 }

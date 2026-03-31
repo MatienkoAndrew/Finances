@@ -5,21 +5,18 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query
-    private var expenses: [Expense]
-
-    @Query
     private var settingsList: [AppSettings]
 
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
-
-    @State private var kztPerRubText: String = ""
 
     @State private var isUpdatingRate = false
     @State private var rateMessage: String?
     @State private var rateErrorMessage: String?
 
     @State private var isShowingAddCurrency = false
+
+    @AppStorage("rates_last_refresh_at") private var lastRatesRefreshAt: Double = 0
 
     private var settings: AppSettings {
         if let existing = settingsList.first {
@@ -31,100 +28,76 @@ struct SettingsView: View {
         }
     }
 
+    private var displayedTrackedRates: [TrackedExchangeRate] {
+        let preferredOrder = ["USD", "EUR", "CNY", "VND", "SGD"]
+
+        return trackedRates.sorted { lhs, rhs in
+            let li = preferredOrder.firstIndex(of: lhs.code.uppercased()) ?? Int.max
+            let ri = preferredOrder.firstIndex(of: rhs.code.uppercased()) ?? Int.max
+
+            if li != ri { return li < ri }
+            return lhs.code < rhs.code
+        }
+    }
+
+    private var shouldRefreshRates: Bool {
+        let now = Date().timeIntervalSince1970
+        return now - lastRatesRefreshAt > 60 * 60 * 24
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("Курс для аналитики") {
-                    TextField("Сколько KZT в 1 RUB", text: $kztPerRubText)
-                        .keyboardType(.decimalPad)
-                        .onAppear {
-                            kztPerRubText = stringFromDouble(settings.kztPerRub)
-                        }
-                        .onChange(of: kztPerRubText) { _, newValue in
-                            if let parsed = parseNumber(newValue), parsed > 0 {
-                                settings.kztPerRub = parsed
-                            }
-                        }
+                Section("Валюты и курсы") {
+//                    currencyRow(
+//                        flag: "🇷🇺",
+//                        code: "RUB",
+//                        name: "Российский рубль",
+//                        subtitle: "Базовая валюта аналитики"
+//                    )
+
+                    currencyRow(
+                        flag: "🇰🇿",
+                        code: "KZT",
+                        name: "Казахстанский тенге",
+                        subtitle: "1 KZT = \(rubPerKztString()) RUB"
+                    )
+
+                    ForEach(displayedTrackedRates) { rate in
+                        currencyRow(
+                            flag: rate.flag,
+                            code: rate.code,
+                            name: rate.displayName,
+                            subtitle: "1 \(rate.code) = \(stringFromDouble(rate.rubPerUnit)) RUB"
+                        )
+                    }
+                    .onDelete(perform: deleteTrackedRates)
+
+                    Button {
+                        isShowingAddCurrency = true
+                    } label: {
+                        Text("Добавить валюту")
+                    }
 
                     Button {
                         Task {
-                            await updateRubRateFromAPI()
+                            await refreshRatesNow()
                         }
                     } label: {
                         HStack {
                             if isUpdatingRate {
                                 ProgressView()
                             }
-                            Text(isUpdatingRate ? "Обновляем..." : "Обновить курс RUB из API")
+                            Text(isUpdatingRate ? "Обновляем..." : "Обновить курсы")
                         }
                     }
                     .disabled(isUpdatingRate)
 
-                    Text("Этот курс используется для пересчёта всех сумм в рубли.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+//                    Text("Новые транзакции используют свежий курс. Старые транзакции сохраняют исторический ₽-эквивалент и не пересчитываются задним числом.")
+//                        .font(.caption)
+//                        .foregroundStyle(.secondary)
                 }
 
-                Section("Текущий курс") {
-                    Text("1 RUB = \(stringFromDouble(settings.kztPerRub)) KZT")
-                    Text("1 KZT = \(rubPerKztString()) RUB")
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Рубли") {
-                    Button("Пересчитать суммы в рублях") {
-                        ExpenseRubRecalculator.recalculate(
-                            expenses: expenses,
-                            rates: [],
-                            fallbackKztPerRub: settings.kztPerRub
-                        )
-                    }
-
-                    Text("Используется текущий курс RUB из настроек.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Дополнительные курсы") {
-                    if trackedRates.isEmpty {
-                        Text("Нет дополнительных валют")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(trackedRates) { rate in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("\(rate.flag) \(rate.code) — \(rate.displayName)")
-                                        .font(.headline)
-
-                                    Text("1 \(rate.code) = \(stringFromDouble(rate.rubPerUnit)) RUB")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-                            }
-                        }
-                        .onDelete(perform: deleteTrackedRates)
-                    }
-
-                    Button("Добавить валюту") {
-                        isShowingAddCurrency = true
-                    }
-
-                    if !trackedRates.isEmpty {
-                        Button("Обновить дополнительные курсы из API") {
-                            Task {
-                                await updateTrackedRatesFromAPI()
-                            }
-                        }
-                        .disabled(isUpdatingRate)
-                    }
-
-                    Text("При добавлении курс подтягивается сразу из API. Эти курсы хранятся для информации и не участвуют в аналитике.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
                 Section("Данные") {
                     NavigationLink("Управление категориями") {
                         CategoriesView()
@@ -139,7 +112,17 @@ struct SettingsView: View {
             .sheet(isPresented: $isShowingAddCurrency) {
                 AddTrackedCurrencyView()
             }
-            .alert("Курс обновлён", isPresented: Binding(
+            .task {
+                let inserted = DefaultTrackedCurrenciesSeeder.seedMissing(
+                    existingRates: trackedRates,
+                    modelContext: modelContext
+                )
+
+                if shouldRefreshRates {
+                    await refreshRatesNow(extraRates: inserted)
+                }
+            }
+            .alert("Курсы обновлены", isPresented: Binding(
                 get: { rateMessage != nil },
                 set: { if !$0 { rateMessage = nil } }
             )) {
@@ -147,7 +130,7 @@ struct SettingsView: View {
             } message: {
                 Text(rateMessage ?? "")
             }
-            .alert("Ошибка обновления курса", isPresented: Binding(
+            .alert("Ошибка обновления курсов", isPresented: Binding(
                 get: { rateErrorMessage != nil },
                 set: { if !$0 { rateErrorMessage = nil } }
             )) {
@@ -158,13 +141,77 @@ struct SettingsView: View {
         }
     }
 
-    private func parseNumber(_ string: String) -> Double? {
-        let normalized = string
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ",", with: ".")
+    @ViewBuilder
+    private func currencyRow(
+        flag: String,
+        code: String,
+        name: String,
+        subtitle: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(flag)
+                .font(.title3)
 
-        return Double(normalized)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(code)
+                        .font(.headline)
+
+                    Text("— \(name)")
+                        .font(.headline)
+                }
+
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func rubPerKztString() -> String {
+        guard settings.kztPerRub > 0 else { return "0" }
+        return stringFromDouble(1 / settings.kztPerRub)
+    }
+
+    @MainActor
+    private func refreshRatesNow(extraRates: [TrackedExchangeRate] = []) async {
+        isUpdatingRate = true
+        defer { isUpdatingRate = false }
+
+        do {
+            let kztPerRub = try await ExchangeRateService.fetchCurrentKztPerUnit(for: "RUB")
+            settings.kztPerRub = kztPerRub
+
+            let allTracked = trackedRates + extraRates
+            let codes = Array(Set(allTracked.map { $0.code.uppercased() }))
+
+            if !codes.isEmpty {
+                let fetched = try await ExchangeRateService.fetchCurrentRates(for: codes)
+
+                for rate in allTracked {
+                    if let value = fetched[rate.code.uppercased()] {
+                        rate.rubPerUnit = value
+                    }
+                }
+            }
+
+            try? modelContext.save()
+            lastRatesRefreshAt = Date().timeIntervalSince1970
+            rateMessage = "Курсы успешно обновлены"
+        } catch {
+            rateErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteTrackedRates(offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(displayedTrackedRates[index])
+        }
+
+        try? modelContext.save()
     }
 
     private func stringFromDouble(_ value: Double) -> String {
@@ -177,59 +224,5 @@ struct SettingsView: View {
         formatter.decimalSeparator = ","
 
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    }
-
-    private func rubPerKztString() -> String {
-        guard settings.kztPerRub > 0 else { return "0" }
-        return stringFromDouble(1 / settings.kztPerRub)
-    }
-
-    @MainActor
-    private func updateRubRateFromAPI() async {
-        isUpdatingRate = true
-        defer { isUpdatingRate = false }
-
-        do {
-            let rate = try await ExchangeRateService.fetchCurrentKztPerUnit(for: "RUB")
-            settings.kztPerRub = rate
-            kztPerRubText = stringFromDouble(rate)
-
-            ExpenseRubRecalculator.recalculate(
-                expenses: expenses,
-                rates: [],
-                fallbackKztPerRub: settings.kztPerRub
-            )
-
-            rateMessage = "Текущий курс RUB обновлён"
-        } catch {
-            rateErrorMessage = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func updateTrackedRatesFromAPI() async {
-        isUpdatingRate = true
-        defer { isUpdatingRate = false }
-
-        do {
-            let codes = trackedRates.map(\.code)
-            let fetched = try await ExchangeRateService.fetchCurrentRates(for: codes)
-
-            for rate in trackedRates {
-                if let value = fetched[rate.code.uppercased()] {
-                    rate.rubPerUnit = value
-                }
-            }
-
-            rateMessage = "Дополнительные курсы обновлены"
-        } catch {
-            rateErrorMessage = error.localizedDescription
-        }
-    }
-
-    private func deleteTrackedRates(offsets: IndexSet) {
-        for index in offsets {
-            modelContext.delete(trackedRates[index])
-        }
     }
 }

@@ -4,6 +4,16 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    
+    @Query(sort: \Transaction.date, order: .reverse)
+    private var transactions: [Transaction]
+    
+    @Query(sort: \Account.createdAt, order: .forward)
+    private var accounts: [Account]
+    
+    private var settings: AppSettings? {
+        settingsList.first
+    }
 
     @Query(sort: \Expense.date, order: .reverse)
     private var expenses: [Expense]
@@ -223,19 +233,22 @@ struct ContentView: View {
             guard let url = urls.first else { return }
 
             do {
-                let importedExpenses = try PDFImporter.importExpenses(
+                let importedTransactions = try PDFImporter.importTransactions(
                     from: url,
-                    existingExpenses: expenses,
+                    existingTransactions: transactions,
+                    accounts: accounts,
                     rules: categoryRules,
                     rates: rates,
-                    fallbackKztPerRub: settingsList.first?.kztPerRub
+                    fallbackKztPerRub: settings?.kztPerRub
                 )
 
-                for expense in importedExpenses {
-                    modelContext.insert(expense)
+                for transaction in importedTransactions {
+                    modelContext.insert(transaction)
                 }
 
-                importResultMessage = "Импортировано \(importedExpenses.count) новых операций"
+                try modelContext.save()
+
+                importResultMessage = "Импортировано \(importedTransactions.count) новых операций"
             } catch {
                 importErrorMessage = error.localizedDescription
             }

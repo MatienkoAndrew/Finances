@@ -7,6 +7,9 @@ struct CategoriesView: View {
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
+    @Query(sort: \Transaction.date, order: .reverse)
+    private var transactions: [Transaction]
+
     @Query
     private var expenses: [Expense]
 
@@ -55,7 +58,7 @@ struct CategoriesView: View {
             Button("Отмена", role: .cancel) {}
         } message: {
             if let categoryToDelete {
-                Text("Категория \"\(categoryToDelete.name)\" используется в операциях и правилах.")
+                Text("Категория \"\(categoryToDelete.name)\" используется в транзакциях и правилах.")
             }
         }
         .sheet(isPresented: $isShowingReassignSheet) {
@@ -112,34 +115,31 @@ struct CategoriesView: View {
     private func deleteCategoryAndClearReferences() {
         guard let categoryToDelete else { return }
 
-        let oldName = categoryToDelete.name
-
-        for expense in expenses where expense.categoryName == oldName {
-            expense.categoryName = nil
-        }
-
-        for rule in rules where rule.categoryName == oldName {
-            rule.categoryName = "Другое"
-        }
+        TransactionCategorySync.clearCategoryReferences(
+            named: categoryToDelete.name,
+            transactions: transactions,
+            legacyExpenses: expenses,
+            rules: rules
+        )
 
         modelContext.delete(categoryToDelete)
+        try? modelContext.save()
         self.categoryToDelete = nil
     }
 
     private func reassignAndDeleteCategory(newCategoryName: String) {
         guard let categoryToDelete else { return }
 
-        let oldName = categoryToDelete.name
-
-        for expense in expenses where expense.categoryName == oldName {
-            expense.categoryName = newCategoryName
-        }
-
-        for rule in rules where rule.categoryName == oldName {
-            rule.categoryName = newCategoryName
-        }
+        TransactionCategorySync.reassignCategoryReferences(
+            from: categoryToDelete.name,
+            to: newCategoryName,
+            transactions: transactions,
+            legacyExpenses: expenses,
+            rules: rules
+        )
 
         modelContext.delete(categoryToDelete)
+        try? modelContext.save()
         self.categoryToDelete = nil
     }
 }
