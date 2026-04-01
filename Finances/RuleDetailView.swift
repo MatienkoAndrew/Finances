@@ -18,6 +18,7 @@ struct RuleDetailView: View {
     @State private var selectedPriority: PriorityLevel = .medium
     @State private var isEnabled: Bool = true
     @State private var isShowingDeleteDialog = false
+    @State private var showAllMatches = false
 
     private var matchingTransactions: [Transaction] {
         let normalizedPattern = pattern
@@ -32,91 +33,47 @@ struct RuleDetailView: View {
         }
     }
 
+    private var selectedCategoryItem: ExpenseCategoryItem? {
+        CategoryLookup.findCategory(named: selectedCategoryName, in: categories)
+    }
+
     var body: some View {
-        Form {
-            Section("Условие") {
-                TextField("Например: CHATGPT", text: $pattern)
-                    .textInputAutocapitalization(.characters)
-                    .onChange(of: pattern) { _, newValue in
-                        rule.pattern = newValue
-                        try? modelContext.save()
-                    }
+        ZStack {
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    conditionCard
+                    categoryRow
+                    priorityCard
+                    previewCard
+                }
+                .padding(16)
+                .padding(.bottom, 24)
             }
-
-            Section("Категория, которую назначит правило") {
-                Picker("Категория", selection: $selectedCategoryName) {
-                    ForEach(categories) { category in
-                        Text(category.name).tag(category.name)
-                    }
-                }
-                .onChange(of: selectedCategoryName) { _, newValue in
-                    rule.categoryName = newValue
-                    try? modelContext.save()
-                }
-            }
-
-            Section("Настройки") {
-                Picker("Приоритет", selection: $selectedPriority) {
-                    ForEach(PriorityLevel.allCases) { level in
-                        Text(level.title).tag(level)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: selectedPriority) { _, newValue in
-                    rule.priority = newValue.rawValue
-                    try? modelContext.save()
-                }
-
-                Toggle("Правило активно", isOn: $isEnabled)
-                    .onChange(of: isEnabled) { _, newValue in
-                        rule.isEnabled = newValue
-                        try? modelContext.save()
-                    }
-            }
-
-            Section("Совпадения в транзакциях") {
-                if matchingTransactions.isEmpty {
-                    Text("Нет совпадающих расходных транзакций")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Найдено: \(matchingTransactions.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    ForEach(matchingTransactions.prefix(8)) { transaction in
-                        previewRow(transaction: transaction)
-                    }
-
-                    if matchingTransactions.count > 8 {
-                        Text("Показаны первые 8 совпадений")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Section {
-                Button(role: .destructive) {
-                    isShowingDeleteDialog = true
-                } label: {
-                    Label("Удалить правило", systemImage: "trash")
-                }
-            }
+            .scrollIndicators(.hidden)
         }
         .navigationTitle("Правило")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    isShowingDeleteDialog = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+            }
+        }
         .confirmationDialog(
             "Удалить правило?",
             isPresented: $isShowingDeleteDialog,
             titleVisibility: .visible
         ) {
-            Button("Удалить правило", role: .destructive) {
+            Button("Удалить", role: .destructive) {
                 deleteRule()
             }
-
             Button("Отмена", role: .cancel) { }
-        } message: {
-            Text("Это правило будет удалено без возможности восстановления.")
         }
         .onAppear {
             pattern = rule.pattern
@@ -126,46 +83,189 @@ struct RuleDetailView: View {
         }
     }
 
-    @ViewBuilder
+    // MARK: - UI
+
+    private var conditionCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Условие", text: $pattern)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .font(.headline)
+                .onChange(of: pattern) { _, newValue in
+                    rule.pattern = newValue
+                    try? modelContext.save()
+                }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    private var categoryRow: some View {
+        HStack {
+            Text("Категория")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Menu {
+                ForEach(categories) { category in
+                    Button {
+                        selectedCategoryName = category.name
+                    } label: {
+                        Label(category.name, systemImage: category.iconName)
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if let selectedCategoryItem {
+                        Circle()
+                            .fill(Color(hex: selectedCategoryItem.colorHex) ?? .gray)
+                            .frame(width: 20, height: 20)
+                            .overlay {
+                                Image(systemName: selectedCategoryItem.iconName)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                    }
+
+                    Text(selectedCategoryName)
+                        .font(.subheadline.weight(.medium))
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(Color(.secondarySystemGroupedBackground))
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+        )
+        .onChange(of: selectedCategoryName) { _, newValue in
+            rule.categoryName = newValue
+            try? modelContext.save()
+        }
+    }
+
+    private var priorityCard: some View {
+        VStack(spacing: 10) {
+            Picker("Приоритет", selection: $selectedPriority) {
+                ForEach(PriorityLevel.allCases) { level in
+                    Text(level.title).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: selectedPriority) { _, newValue in
+                rule.priority = newValue.rawValue
+                try? modelContext.save()
+            }
+
+            Toggle("Активно", isOn: $isEnabled)
+                .onChange(of: isEnabled) { _, newValue in
+                    rule.isEnabled = newValue
+                    try? modelContext.save()
+                }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+        )
+    }
+
+    private var previewCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Совпадения")
+                    .font(.headline)
+
+                Spacer()
+
+                Text("\(matchingTransactions.count)")
+                    .font(.caption.monospacedDigit())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.blue.opacity(0.1))
+                    )
+            }
+
+            if matchingTransactions.isEmpty {
+                Text("Нет совпадений")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                let displayed = showAllMatches
+                    ? matchingTransactions
+                    : Array(matchingTransactions.prefix(8))
+
+                VStack(spacing: 8) {
+                    ForEach(displayed) { transaction in
+                        previewRow(transaction: transaction)
+                    }
+                }
+
+                // 👇 ОДНА кнопка
+                if matchingTransactions.count > 8 {
+                    Button {
+                        withAnimation(.easeInOut) {
+                            showAllMatches.toggle()
+                        }
+                    } label: {
+                        Text(showAllMatches
+                             ? "Свернуть"
+                             : "Показать все (\(matchingTransactions.count))")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+        )
+    }
+    
     private func previewRow(transaction: Transaction) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.details)
                     .font(.subheadline)
 
-                HStack(spacing: 8) {
-                    Text(transaction.date, format: .dateTime.day().month().year())
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text("Сейчас: \(transaction.categoryName ?? "Без категории")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(transaction.date, format: .dateTime.day().month())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 6) {
-                Text(transaction.categoryName ?? "Без категории")
-                    .font(.caption.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.gray.opacity(0.12))
-                    .clipShape(Capsule())
-
-                if rule.isEnabled {
-                    Text("→ \(selectedCategoryName)")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
+            Text("→ \(selectedCategoryName)")
+                .font(.caption.bold())
+                .foregroundStyle(.green)
         }
-        .padding(.vertical, 2)
     }
+
+    // MARK: - Actions
 
     private func deleteRule() {
         modelContext.delete(rule)
