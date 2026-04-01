@@ -18,7 +18,7 @@ struct AddRuleView: View {
 
     @State private var pattern: String = ""
     @State private var selectedCategoryName: String = "Другое"
-    @State private var priorityText: String = "0"
+    @State private var selectedPriority: PriorityLevel = .medium
     @State private var isEnabled: Bool = true
 
     var body: some View {
@@ -37,12 +37,12 @@ struct AddRuleView: View {
                     }
                 }
 
-                Section("Приоритет") {
-                    TextField("Приоритет", text: $priorityText)
-                        .keyboardType(.numberPad)
-
-                    Toggle("Правило активно", isOn: $isEnabled)
+                Picker("Приоритет", selection: $selectedPriority) {
+                    ForEach(PriorityLevel.allCases) { level in
+                        Text(level.title).tag(level)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
             .navigationTitle("Новое правило")
             .navigationBarTitleDisplayMode(.inline)
@@ -65,12 +65,11 @@ struct AddRuleView: View {
 
     private func saveRule() {
         let trimmedPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        let priority = Int(priorityText) ?? 0
 
         let rule = CategoryRule(
             pattern: trimmedPattern,
             categoryName: selectedCategoryName,
-            priority: priority,
+            priority: selectedPriority.rawValue,
             isEnabled: isEnabled
         )
 

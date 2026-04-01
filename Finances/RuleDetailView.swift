@@ -3,6 +3,7 @@ import SwiftData
 
 struct RuleDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
 
     @Bindable var rule: CategoryRule
 
@@ -14,8 +15,9 @@ struct RuleDetailView: View {
 
     @State private var pattern: String = ""
     @State private var selectedCategoryName: String = "Другое"
-    @State private var priorityText: String = "0"
+    @State private var selectedPriority: PriorityLevel = .medium
     @State private var isEnabled: Bool = true
+    @State private var isShowingDeleteDialog = false
 
     private var matchingTransactions: [Transaction] {
         let normalizedPattern = pattern
@@ -41,7 +43,7 @@ struct RuleDetailView: View {
                     }
             }
 
-            Section("Категория") {
+            Section("Категория, которую назначит правило") {
                 Picker("Категория", selection: $selectedCategoryName) {
                     ForEach(categories) { category in
                         Text(category.name).tag(category.name)
@@ -53,13 +55,17 @@ struct RuleDetailView: View {
                 }
             }
 
-            Section("Приоритет") {
-                TextField("Приоритет", text: $priorityText)
-                    .keyboardType(.numberPad)
-                    .onChange(of: priorityText) { _, newValue in
-                        rule.priority = Int(newValue) ?? 0
-                        try? modelContext.save()
+            Section("Настройки") {
+                Picker("Приоритет", selection: $selectedPriority) {
+                    ForEach(PriorityLevel.allCases) { level in
+                        Text(level.title).tag(level)
                     }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: selectedPriority) { _, newValue in
+                    rule.priority = newValue.rawValue
+                    try? modelContext.save()
+                }
 
                 Toggle("Правило активно", isOn: $isEnabled)
                     .onChange(of: isEnabled) { _, newValue in
@@ -80,15 +86,42 @@ struct RuleDetailView: View {
                     ForEach(matchingTransactions.prefix(8)) { transaction in
                         previewRow(transaction: transaction)
                     }
+
+                    if matchingTransactions.count > 8 {
+                        Text("Показаны первые 8 совпадений")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    isShowingDeleteDialog = true
+                } label: {
+                    Label("Удалить правило", systemImage: "trash")
                 }
             }
         }
         .navigationTitle("Правило")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Удалить правило?",
+            isPresented: $isShowingDeleteDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Удалить правило", role: .destructive) {
+                deleteRule()
+            }
+
+            Button("Отмена", role: .cancel) { }
+        } message: {
+            Text("Это правило будет удалено без возможности восстановления.")
+        }
         .onAppear {
             pattern = rule.pattern
             selectedCategoryName = rule.categoryName
-            priorityText = String(rule.priority)
+            selectedPriority = PriorityLevel.from(rule.priority)
             isEnabled = rule.isEnabled
         }
     }
@@ -105,22 +138,38 @@ struct RuleDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if let currentCategory = transaction.categoryName {
-                        Text("Сейчас: \(currentCategory)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Сейчас: \(transaction.categoryName ?? "Без категории")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
             Spacer()
 
-            Text(selectedCategoryName)
-                .font(.caption.bold())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.green.opacity(0.12))
-                .clipShape(Capsule())
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(transaction.categoryName ?? "Без категории")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.gray.opacity(0.12))
+                    .clipShape(Capsule())
+
+                if rule.isEnabled {
+                    Text("→ \(selectedCategoryName)")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
         }
+        .padding(.vertical, 2)
+    }
+
+    private func deleteRule() {
+        modelContext.delete(rule)
+        try? modelContext.save()
+        dismiss()
     }
 }

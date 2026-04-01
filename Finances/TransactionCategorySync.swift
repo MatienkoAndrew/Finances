@@ -66,11 +66,14 @@ enum TransactionCategorySync {
         }
     }
 
+    @discardableResult
     static func autoCategorizeTransactions(
         _ transactions: [Transaction],
         rules: [CategoryRule],
         overwriteExisting: Bool = false
-    ) {
+    ) -> Int {
+        var updatedCount = 0
+
         for transaction in transactions {
             guard transaction.kind == .expense else { continue }
 
@@ -84,10 +87,14 @@ enum TransactionCategorySync {
                 rules: rules
             )
 
-            if let guessed {
-                transaction.categoryName = guessed
-            }
+            guard let guessed else { continue }
+            guard transaction.categoryName != guessed else { continue }
+
+            transaction.categoryName = guessed
+            updatedCount += 1
         }
+
+        return updatedCount
     }
 }
 

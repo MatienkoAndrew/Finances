@@ -14,7 +14,8 @@ struct RulesView: View {
     private var transactions: [Transaction]
 
     @State private var isShowingAddRule = false
-    @State private var isShowingApplyConfirmation = false
+    @State private var isShowingApplyRulesDialog = false
+    @State private var applyRulesResultMessage: String?
 
     private var expenseTransactions: [Transaction] {
         transactions.filter { $0.kind == .expense }
@@ -33,18 +34,45 @@ struct RulesView: View {
                     List {
                         Section {
                             Button {
-                                isShowingApplyConfirmation = true
+                                isShowingApplyRulesDialog = true
                             } label: {
-                                HStack {
-                                    Image(systemName: "wand.and.stars")
-                                    Text("Применить правила к транзакциям")
-                                    Spacer()
-                                }
+                                Label("Применить правила к транзакциям", systemImage: "wand.and.stars")
                             }
+                            .confirmationDialog(
+                                "Как применить правила?",
+                                isPresented: $isShowingApplyRulesDialog,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Применить к пустым категориям") {
+                                    let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
+                                        transactions,
+                                        rules: rules,
+                                        overwriteExisting: false
+                                    )
 
-                            Text("Будут категоризированы расходные транзакции без категории.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                    try? modelContext.save()
+
+                                    applyRulesResultMessage = updatedCount == 0
+                                        ? "Правила не изменили ни одной транзакции."
+                                        : "Обновлено \(updatedCount) транзакций."
+                                }
+
+                                Button("Переприменить ко всем транзакциям", role: .destructive) {
+                                    let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
+                                        transactions,
+                                        rules: rules,
+                                        overwriteExisting: true
+                                    )
+
+                                    try? modelContext.save()
+
+                                    applyRulesResultMessage = updatedCount == 0
+                                        ? "Правила не изменили ни одной транзакции."
+                                        : "Обновлено \(updatedCount) транзакций."
+                                }
+
+                                Button("Отмена", role: .cancel) { }
+                            }
                         }
 
                         ForEach(rules) { rule in
@@ -52,33 +80,43 @@ struct RulesView: View {
                                 RuleDetailView(rule: rule)
                             } label: {
                                 HStack(spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 4) {
+                                    VStack(alignment: .leading, spacing: 6) {
                                         Text(rule.pattern)
                                             .font(.headline)
 
-                                        if let categoryItem = CategoryLookup.findCategory(named: rule.categoryName, in: categories) {
-                                            HStack(spacing: 6) {
-                                                Circle()
-                                                    .fill(Color(hex: categoryItem.colorHex) ?? .gray)
-                                                    .frame(width: 16, height: 16)
-                                                    .overlay {
-                                                        Image(systemName: categoryItem.iconName)
-                                                            .font(.system(size: 8, weight: .bold))
-                                                            .foregroundStyle(.white)
-                                                    }
-
-                                                Text(rule.categoryName)
-                                            }
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                        } else {
-                                            Text(rule.categoryName)
+                                        HStack(spacing: 6) {
+                                            Text("Назначит:")
                                                 .font(.subheadline)
                                                 .foregroundStyle(.secondary)
+
+                                            if let categoryItem = CategoryLookup.findCategory(named: rule.categoryName, in: categories) {
+                                                HStack(spacing: 6) {
+                                                    Circle()
+                                                        .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                                                        .frame(width: 16, height: 16)
+                                                        .overlay {
+                                                            Image(systemName: categoryItem.iconName)
+                                                                .font(.system(size: 8, weight: .bold))
+                                                                .foregroundStyle(.white)
+                                                        }
+
+                                                    Text(rule.categoryName)
+                                                }
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                            } else {
+                                                Text(rule.categoryName)
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
 
+                                        Text(currentCategorySummary(for: rule))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+
                                         HStack(spacing: 8) {
-                                            Text("Приоритет: \(rule.priority)")
+                                            Text("Приоритет: \(PriorityLevel.from(rule.priority).title)")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
 
@@ -127,13 +165,18 @@ struct RulesView: View {
             .sheet(isPresented: $isShowingAddRule) {
                 AddRuleView()
             }
-            .alert("Применить правила?", isPresented: $isShowingApplyConfirmation) {
-                Button("Применить") {
-                    applyRulesToTransactions()
+            .alert(
+                "Готово",
+                isPresented: Binding(
+                    get: { applyRulesResultMessage != nil },
+                    set: { if !$0 { applyRulesResultMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    applyRulesResultMessage = nil
                 }
-                Button("Отмена", role: .cancel) {}
             } message: {
-                Text("Будут обновлены только расходные транзакции без категории.")
+                Text(applyRulesResultMessage ?? "")
             }
         }
     }
@@ -152,20 +195,51 @@ struct RulesView: View {
         }.count
     }
 
-    private func applyRulesToTransactions() {
-        TransactionCategorySync.autoCategorizeTransactions(
-            transactions,
-            rules: rules,
-            overwriteExisting: false
-        )
-
-        try? modelContext.save()
-    }
-
     private func deleteRules(offsets: IndexSet) {
         for index in offsets {
             modelContext.delete(rules[index])
         }
         try? modelContext.save()
+    }
+    
+    
+    private func currentCategorySummary(for rule: CategoryRule) -> String {
+        let matched = matchedExpenseTransactions(for: rule)
+
+        guard !matched.isEmpty else {
+            return "Сейчас: нет совпадений"
+        }
+
+        let grouped = Dictionary(grouping: matched) { transaction in
+            transaction.categoryName ?? "Без категории"
+        }
+
+        let sorted = grouped
+            .map { (category: $0.key, count: $0.value.count) }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                return lhs.category < rhs.category
+            }
+
+        let preview = sorted
+            .prefix(3)
+            .map { "\($0.category) (\($0.count))" }
+            .joined(separator: ", ")
+
+        return "Сейчас: \(preview)"
+    }
+
+    private func matchedExpenseTransactions(for rule: CategoryRule) -> [Transaction] {
+        guard rule.isEnabled else { return [] }
+
+        let normalizedPattern = rule.pattern
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+
+        guard !normalizedPattern.isEmpty else { return [] }
+
+        return expenseTransactions.filter {
+            $0.details.uppercased().contains(normalizedPattern)
+        }
     }
 }
