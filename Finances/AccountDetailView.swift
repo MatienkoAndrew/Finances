@@ -58,18 +58,18 @@ struct AccountDetailView: View {
                     }
                 }
             }
-
-            Section {
-                Button(account.isArchived ? "Вернуть из архива" : "Отправить в архив") {
-                    account.isArchived.toggle()
-                    try? modelContext.save()
-                }
-            }
         }
         .navigationTitle(account.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button(account.isArchived ? "Разархивировать" : "Архивировать") {
+                    toggleArchive()
+                }
+            }
+        }
     }
-
+    
     @ViewBuilder
     private func detailRow(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -95,4 +95,10 @@ struct AccountDetailView: View {
         let number = formatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
         return "\(sign)\(number) \(currency)"
     }
+    
+    private func toggleArchive() {
+        account.isArchived.toggle()
+        try? modelContext.save()
+    }
+
 }

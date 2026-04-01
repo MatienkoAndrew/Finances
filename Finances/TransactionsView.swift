@@ -269,7 +269,7 @@ struct TransactionsView: View {
             }
 
             do {
-                let importedTransactions = try PDFImporter.importTransactions(
+                let importResult = try PDFImporter.importTransactions(
                     from: url,
                     existingTransactions: transactions,
                     accounts: accounts,
@@ -278,13 +278,22 @@ struct TransactionsView: View {
                     fallbackKztPerRub: settings?.kztPerRub
                 )
 
-                for transaction in importedTransactions {
+                for account in importResult.accountsToCreate {
+                    modelContext.insert(account)
+                }
+
+                for transaction in importResult.transactions {
                     modelContext.insert(transaction)
                 }
 
                 try modelContext.save()
 
-                importResultMessage = "Импортировано \(importedTransactions.count) новых операций"
+                if importResult.accountsToCreate.isEmpty {
+                    importResultMessage = "Импортировано \(importResult.transactions.count) новых операций"
+                } else {
+                    let createdNames = importResult.accountsToCreate.map(\.name).joined(separator: ", ")
+                    importResultMessage = "Импортировано \(importResult.transactions.count) новых операций. Созданы счета: \(createdNames)"
+                }
             } catch {
                 importErrorMessage = error.localizedDescription
             }

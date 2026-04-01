@@ -223,7 +223,7 @@ struct ContentView: View {
             modelContext.delete(expense)
         }
     }
-
+    
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .failure(let error):
@@ -233,7 +233,7 @@ struct ContentView: View {
             guard let url = urls.first else { return }
 
             do {
-                let importedTransactions = try PDFImporter.importTransactions(
+                let result = try PDFImporter.importTransactions(
                     from: url,
                     existingTransactions: transactions,
                     accounts: accounts,
@@ -242,16 +242,56 @@ struct ContentView: View {
                     fallbackKztPerRub: settings?.kztPerRub
                 )
 
-                for transaction in importedTransactions {
+                for account in result.accountsToCreate {
+                    modelContext.insert(account)
+                }
+
+                for transaction in result.transactions {
                     modelContext.insert(transaction)
                 }
 
                 try modelContext.save()
 
-                importResultMessage = "Импортировано \(importedTransactions.count) новых операций"
+                if result.accountsToCreate.isEmpty {
+                    importResultMessage = "Импортировано \(result.transactions.count) новых операций"
+                } else {
+                    let createdNames = result.accountsToCreate.map(\.name).joined(separator: ", ")
+                    importResultMessage = "Импортировано \(result.transactions.count) новых операций. Созданы счета: \(createdNames)"
+                }
             } catch {
                 importErrorMessage = error.localizedDescription
             }
         }
     }
+
+//    private func handleImport(_ result: Result<[URL], Error>) {
+//        switch result {
+//        case .failure(let error):
+//            importErrorMessage = error.localizedDescription
+//
+//        case .success(let urls):
+//            guard let url = urls.first else { return }
+//
+//            do {
+//                let importedTransactions = try PDFImporter.importTransactions(
+//                    from: url,
+//                    existingTransactions: transactions,
+//                    accounts: accounts,
+//                    rules: categoryRules,
+//                    rates: rates,
+//                    fallbackKztPerRub: settings?.kztPerRub
+//                )
+//
+//                for transaction in importedTransactions {
+//                    modelContext.insert(transaction)
+//                }
+//
+//                try modelContext.save()
+//
+//                importResultMessage = "Импортировано \(importedTransactions.count) новых операций"
+//            } catch {
+//                importErrorMessage = error.localizedDescription
+//            }
+//        }
+//    }
 }

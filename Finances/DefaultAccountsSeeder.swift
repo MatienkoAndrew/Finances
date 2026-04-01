@@ -17,10 +17,10 @@ enum DefaultAccountsSeeder {
         guard existingAccounts.isEmpty else { return }
 
         let defaults = [
-            Account(name: "Kaspi", currencyCode: "₸", typeRaw: AccountType.bankCard.rawValue),
-            Account(name: "Cash KZT", currencyCode: "₸", typeRaw: AccountType.cash.rawValue),
-            Account(name: "Cash RUB", currencyCode: "₽", typeRaw: AccountType.cash.rawValue),
-            Account(name: "Cash VND", currencyCode: "₫", typeRaw: AccountType.cash.rawValue)
+            Account(name: "Kaspi", currencyCode: "KZT", typeRaw: AccountType.bankCard.rawValue),
+//            Account(name: "Cash KZT", currencyCode: "₸", typeRaw: AccountType.cash.rawValue),
+//            Account(name: "Cash RUB", currencyCode: "₽", typeRaw: AccountType.cash.rawValue),
+//            Account(name: "Cash VND", currencyCode: "₫", typeRaw: AccountType.cash.rawValue)
         ]
 
         for account in defaults {

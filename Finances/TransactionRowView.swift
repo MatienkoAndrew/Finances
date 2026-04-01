@@ -24,9 +24,13 @@ struct TransactionRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             topRow
-            secondaryAmountsRow
+
+            if let text = secondaryAmountsText {
+                secondaryAmountsRow(text: text)
+            }
+
             metaRow
 
             if let note = transaction.note, !note.isEmpty {
@@ -52,16 +56,13 @@ struct TransactionRowView: View {
 
             Spacer(minLength: 10)
 
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: 4) {
                 Text(primaryAmountText)
                     .font(.system(size: 18, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(primaryAmountColor)
                     .multilineTextAlignment(.trailing)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
 
-                Text(transaction.date, format: .dateTime.day().month().year())
+                Text(transaction.date, format: .dateTime.day().month(.abbreviated).year())
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -69,41 +70,29 @@ struct TransactionRowView: View {
     }
 
     @ViewBuilder
-    private var secondaryAmountsRow: some View {
-        if let text = secondaryAmountsText {
-            HStack {
-                Text(text)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+    private func secondaryAmountsRow(text: String) -> some View {
+        HStack {
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(secondaryAmountColor)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
-                Spacer()
-            }
+            Spacer()
         }
     }
 
     private var metaRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: transaction.kind.systemImage)
-                .font(.caption2)
-                .foregroundStyle(kindTint)
+        HStack(spacing: 8) {
+            Image(systemName: metaIconName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(metaIconColor)
 
-            Text(transaction.kind.title)
-                .font(.caption)
+            Text(accountLine)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-            if let accountText {
-                Text("•")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-
-                Text(accountText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+                .lineLimit(1)
 
             Spacer()
         }
@@ -204,16 +193,30 @@ struct TransactionRowView: View {
         switch transaction.kind {
         case .expense, .income:
             if let rub = resolvedRubAmount {
-                return "\(formattedNumber(rub)) ₽"
+                return signedFormattedAmount(
+                    rub,
+                    currency: "₽",
+                    kind: transaction.kind
+                )
             } else {
-                return "\(formattedNumber(transaction.amount)) \(transaction.currencyCode)"
+                return signedFormattedAmount(
+                    transaction.amount,
+                    currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode),
+                    kind: transaction.kind
+                )
             }
 
         case .transfer:
             if transaction.isCrossCurrencyTransfer {
-                return "\(formattedNumber(transaction.creditedAmount)) \(transaction.creditedCurrencyCode)"
+                return formattedUnsignedAmount(
+                    transaction.creditedAmount,
+                    currency: CurrencyDisplay.normalizedCode(from: transaction.creditedCurrencyCode)
+                )
             } else {
-                return "\(formattedNumber(transaction.amount)) \(transaction.currencyCode)"
+                return formattedUnsignedAmount(
+                    transaction.amount,
+                    currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode)
+                )
             }
         }
     }
@@ -225,38 +228,85 @@ struct TransactionRowView: View {
 
             if let foreignAmount = transaction.foreignAmount,
                let foreignCurrencyCode = transaction.foreignCurrencyCode {
-                parts.append("\(formattedNumber(abs(foreignAmount))) \(foreignCurrencyCode)")
+                parts.append(
+                    signedFormattedAmount(
+                        foreignAmount,
+                        currency: CurrencyDisplay.normalizedCode(from: foreignCurrencyCode),
+                        kind: transaction.kind
+                    )
+                )
             }
 
             if resolvedRubAmount != nil || transaction.foreignAmount != nil {
-                parts.append("\(formattedNumber(transaction.amount)) \(transaction.currencyCode)")
+                parts.append(
+                    signedFormattedAmount(
+                        transaction.amount,
+                        currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode),
+                        kind: transaction.kind
+                    )
+                )
             }
 
             return parts.isEmpty ? nil : parts.joined(separator: " • ")
 
         case .transfer:
             if transaction.isCrossCurrencyTransfer {
-                return "\(formattedNumber(transaction.amount)) \(transaction.currencyCode) → \(formattedNumber(transaction.creditedAmount)) \(transaction.creditedCurrencyCode)"
+                return "\(formattedUnsignedAmount(transaction.amount, currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode))) → \(formattedUnsignedAmount(transaction.creditedAmount, currency: CurrencyDisplay.normalizedCode(from: transaction.creditedCurrencyCode)))"
             } else {
                 return nil
             }
         }
     }
 
-    private var accountText: String? {
+    private var accountLine: String {
         switch transaction.kind {
         case .expense:
-            return transaction.fromAccount?.name
+            return transaction.fromAccount?.name ?? "Без счета"
+
         case .income:
-            return transaction.toAccount?.name
+            return transaction.toAccount?.name ?? "Без счета"
+
         case .transfer:
-            let from = transaction.fromAccount?.name ?? "?"
-            let to = transaction.toAccount?.name ?? "?"
+            let from = transaction.fromAccount?.name ?? "Без счета"
+            let to = transaction.toAccount?.name ?? "Без счета"
             return "\(from) → \(to)"
         }
     }
 
-    private var kindTint: Color {
+    private var primaryAmountColor: Color {
+        switch transaction.kind {
+        case .expense:
+            return .red
+        case .income:
+            return .green
+        case .transfer:
+            return .primary
+        }
+    }
+
+    private var secondaryAmountColor: Color {
+        switch transaction.kind {
+        case .expense:
+            return .red.opacity(0.75)
+        case .income:
+            return .green.opacity(0.75)
+        case .transfer:
+            return .secondary
+        }
+    }
+
+    private var metaIconName: String {
+        switch transaction.kind {
+        case .expense:
+            return "arrow.up.circle.fill"
+        case .income:
+            return "arrow.down.circle.fill"
+        case .transfer:
+            return "arrow.left.arrow.right.circle.fill"
+        }
+    }
+
+    private var metaIconColor: Color {
         switch transaction.kind {
         case .expense:
             return .red.opacity(0.75)
@@ -270,6 +320,32 @@ struct TransactionRowView: View {
     private func updateCategory(_ name: String?) {
         transaction.categoryName = name
         try? modelContext.save()
+    }
+
+    private func signedFormattedAmount(
+        _ value: Double,
+        currency: String,
+        kind: TransactionKind
+    ) -> String {
+        let sign: String
+        switch kind {
+        case .expense:
+            sign = "-"
+        case .income:
+            sign = "+"
+        case .transfer:
+            sign = ""
+        }
+
+        let number = formattedNumber(abs(value))
+        return sign.isEmpty ? "\(number) \(currency)" : "\(sign) \(number) \(currency)"
+    }
+
+    private func formattedUnsignedAmount(
+        _ value: Double,
+        currency: String
+    ) -> String {
+        "\(formattedNumber(abs(value))) \(currency)"
     }
 
     private func formattedNumber(_ value: Double) -> String {
