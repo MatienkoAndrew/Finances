@@ -143,14 +143,7 @@ struct TransactionRowView: View {
 
         if let categoryItem {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(Color(hex: categoryItem.colorHex) ?? .gray)
-                    .frame(width: 16, height: 16)
-                    .overlay {
-                        Image(systemName: categoryItem.iconName)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+                CategoryIconView(category: categoryItem, size: 16)
 
                 Text(name)
                     .font(.caption.weight(.semibold))

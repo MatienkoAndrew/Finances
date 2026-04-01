@@ -84,9 +84,7 @@ struct CategoriesView: View {
                     .fill(Color(hex: category.colorHex) ?? .gray)
                     .frame(width: 28, height: 28)
                     .overlay {
-                        Image(systemName: category.iconName)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
+                        CategoryIconView(category: category, size: 30)
                     }
 
                 VStack(alignment: .leading, spacing: 4) {

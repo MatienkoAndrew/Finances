@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct CategoryDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
     @Bindable var category: ExpenseCategoryItem
@@ -21,86 +22,33 @@ struct CategoryDetailView: View {
     @State private var editedName: String = ""
     @State private var originalName: String = ""
     @State private var selectedIconName: String = "square.grid.2x2.fill"
+    @State private var editedEmoji: String = ""
     @State private var selectedColorHex: String = "#8E8E93"
     @State private var errorMessage: String?
+    @State private var isShowingEmojiPicker = false
+
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
-        Form {
-            Section("Название") {
-                TextField("Название категории", text: $editedName)
-            }
+        ScrollView {
+            VStack(spacing: 24) {
+                topPreviewSection
+                quickIconsSection
+                colorSection
 
-            Section("Иконка") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 12) {
-                    ForEach(CategoryAppearance.iconOptions, id: \.self) { icon in
-                        Button {
-                            selectedIconName = icon
-                        } label: {
-                            Image(systemName: icon)
-                                .font(.title3)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(
-                                    selectedIconName == icon
-                                    ? Color.primary.opacity(0.12)
-                                    : Color.gray.opacity(0.08)
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            Section("Цвет") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                    ForEach(CategoryAppearance.colorOptions, id: \.self) { hex in
-                        Button {
-                            selectedColorHex = hex
-                        } label: {
-                            Circle()
-                                .fill(Color(hex: hex) ?? .gray)
-                                .frame(width: 32, height: 32)
-                                .overlay {
-                                    if selectedColorHex == hex {
-                                        Image(systemName: "checkmark")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(.white)
-                                    }
-                                }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            Section("Предпросмотр") {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(Color(hex: selectedColorHex) ?? .gray)
-                        .frame(width: 30, height: 30)
-                        .overlay {
-                            Image(systemName: selectedIconName)
-                                .font(.caption.bold())
-                                .foregroundStyle(.white)
-                        }
-
-                    Text(editedName.isEmpty ? "Название категории" : editedName)
-                }
-            }
-
-            if let errorMessage {
-                Section {
+                if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
 
-            Section("Тип") {
-                Text(category.isSystem ? "Системная" : "Пользовательская")
-                    .foregroundStyle(.secondary)
+                typeSection
             }
+            .padding(16)
+            .padding(.bottom, 24)
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("Категория")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -111,12 +59,145 @@ struct CategoryDetailView: View {
                 .disabled(editedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .sheet(isPresented: $isShowingEmojiPicker) {
+            EmojiPickerSheet(selectedEmoji: $editedEmoji)
+        }
         .onAppear {
             editedName = category.name
             originalName = category.name
             selectedIconName = category.iconName
+            editedEmoji = category.emoji ?? ""
             selectedColorHex = category.colorHex
         }
+    }
+
+    private var topPreviewSection: some View {
+        VStack(spacing: 18) {
+            Button {
+                isShowingEmojiPicker = true
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(Color(hex: selectedColorHex)?.opacity(0.22) ?? Color.gray.opacity(0.18))
+                        .frame(width: 156, height: 156)
+
+                    Circle()
+                        .fill(Color(.systemBackground))
+                        .frame(width: 84, height: 84)
+                        .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 4)
+                        .overlay {
+                            previewSymbol
+                        }
+                }
+            }
+            .buttonStyle(.plain)
+
+            TextField("Название", text: $editedName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .multilineTextAlignment(.center)
+                .font(.title2.weight(.medium))
+                .focused($isNameFocused)
+                .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private var quickIconsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Быстрые варианты")
+                .font(.headline)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
+                ForEach(CategoryAppearance.iconOptions, id: \.self) { iconName in
+                    Button {
+                        selectedIconName = iconName
+                        if !editedEmoji.isEmpty {
+                            editedEmoji = ""
+                        }
+                    } label: {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                            .frame(height: 58)
+                            .overlay {
+                                ZStack {
+                                    if selectedIconName == iconName && editedEmoji.isEmpty {
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .stroke(Color.accentColor, lineWidth: 2)
+                                    }
+
+                                    Image(systemName: iconName)
+                                        .font(.title2)
+                                        .foregroundStyle(.primary)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(18)
+        .background(cardBackground)
+    }
+
+    private var colorSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Цвет фона")
+                .font(.headline)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), spacing: 14) {
+                ForEach(CategoryAppearance.colorOptions, id: \.self) { hex in
+                    Button {
+                        selectedColorHex = hex
+                    } label: {
+                        Circle()
+                            .fill(Color(hex: hex) ?? .gray)
+                            .frame(width: 42, height: 42)
+                            .overlay {
+                                if selectedColorHex == hex {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(18)
+        .background(cardBackground)
+    }
+
+    private var typeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Тип")
+                .font(.headline)
+
+            Text(category.isSystem ? "Системная" : "Пользовательская")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(cardBackground)
+    }
+
+    @ViewBuilder
+    private var previewSymbol: some View {
+        if !editedEmoji.isEmpty {
+            Text(editedEmoji)
+                .font(.system(size: 36))
+        } else {
+            Image(systemName: selectedIconName)
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(Color(hex: selectedColorHex) ?? .blue)
+        }
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(Color(.systemBackground))
     }
 
     private func saveChanges() {
@@ -151,9 +232,15 @@ struct CategoryDetailView: View {
 
         category.name = newName
         category.iconName = selectedIconName
+        category.emoji = editedEmoji.isEmpty ? nil : editedEmoji
         category.colorHex = selectedColorHex
         originalName = newName
 
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            dismiss()
+        } catch {
+            errorMessage = "Не удалось сохранить изменения."
+        }
     }
 }

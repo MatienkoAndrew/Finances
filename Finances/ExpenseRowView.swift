@@ -102,9 +102,7 @@ struct ExpenseRowView: View {
                             .fill(Color(hex: category.colorHex) ?? .gray)
                             .frame(width: 16, height: 16)
                             .overlay {
-                                Image(systemName: category.iconName)
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white)
+                                CategoryIconView(category: category, size: 30)
                             }
 
                         Text(category.name)
