@@ -15,6 +15,8 @@ struct TransactionRowView: View {
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
+    @State private var isShowingAddCategory = false
+
     private var settings: AppSettings? {
         settingsList.first
     }
@@ -130,10 +132,23 @@ struct TransactionRowView: View {
                         }
                     }
                 }
+
+                Divider()
+
+                Button {
+                    isShowingAddCategory = true
+                } label: {
+                    Label("Новая категория", systemImage: "plus.circle.fill")
+                }
             } label: {
                 categoryChipLabel
             }
             .menuStyle(.borderlessButton)
+            .sheet(isPresented: $isShowingAddCategory) {
+                AddCategorySheet { newCategoryName in
+                    updateCategory(newCategoryName)
+                }
+            }
         }
     }
 

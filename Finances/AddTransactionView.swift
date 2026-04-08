@@ -45,6 +45,7 @@ struct AddTransactionView: View {
     @State private var isShowingToCurrencyPicker = false
 
     @State private var didApplyInitialDefaults = false
+    @State private var isShowingAddCategory = false
 
     var body: some View {
         NavigationStack {
@@ -94,8 +95,48 @@ struct AddTransactionView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    
+                    if selectedKind == .expense {
+                        Menu {
+                            Button {
+                                selectedCategoryName = nil
+                            } label: {
+                                Text("Без категории")
+                            }
 
-                    TextField("Детали", text: $details, axis: .vertical)
+                            ForEach(categories) { category in
+                                Button {
+                                    selectedCategoryName = category.name
+                                } label: {
+                                    Text(category.name)
+                                }
+                            }
+
+                            Divider()
+
+                            Button {
+                                isShowingAddCategory = true
+                            } label: {
+                                Label("Новая категория", systemImage: "plus.circle.fill")
+                            }
+                        } label: {
+                            HStack {
+                                Text("Категория")
+                                    .foregroundStyle(.primary)
+
+                                Spacer()
+
+                                Text(selectedCategoryName ?? "Без категории")
+                                    .foregroundStyle(.secondary)
+
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    TextField(detailsPlaceholder, text: $details, axis: .vertical)
                         .lineLimit(2...4)
                 }
 
@@ -155,19 +196,6 @@ struct AddTransactionView: View {
                     }
                 }
 
-                if selectedKind == .expense {
-                    Section("Категория") {
-                        Picker("Категория", selection: $selectedCategoryName) {
-                            Text("Без категории").tag(nil as String?)
-
-                            ForEach(categories) { category in
-                                Text(category.name).tag(category.name as String?)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                }
-
                 Section("Заметка") {
                     TextField("Добавь заметку", text: $note, axis: .vertical)
                         .lineLimit(2...6)
@@ -197,6 +225,11 @@ struct AddTransactionView: View {
             .sheet(isPresented: $isShowingToCurrencyPicker) {
                 CurrencyPickerView(selectedCode: toCurrencyCode) { newCode in
                     toCurrencyCode = CurrencyDisplay.normalizedCode(from: newCode)
+                }
+            }
+            .sheet(isPresented: $isShowingAddCategory) {
+                AddCategorySheet { newCategoryName in
+                    selectedCategoryName = newCategoryName
                 }
             }
             .onAppear {
@@ -229,6 +262,17 @@ struct AddTransactionView: View {
             guard selectedFromAccount != nil, selectedToAccount != nil else { return false }
             guard parseNumber(toAmountText) != nil else { return false }
             return true
+        }
+    }
+    
+    private var detailsPlaceholder: String {
+        switch selectedKind {
+        case .expense:
+            return "Описание"
+        case .income:
+            return "Откуда пришло?"
+        case .transfer:
+            return "Описание перевода"
         }
     }
 

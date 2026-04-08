@@ -87,10 +87,28 @@ struct TransactionsView: View {
                                     .listRowBackground(Color.clear)
                             }
                         } header: {
-                            Text(formattedSectionDate(section.date))
-                                .font(.title3.weight(.semibold))
-                                .textCase(nil)
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text(formattedSectionDate(section.date))
+                                    .font(.title3.weight(.semibold))
+                                    .textCase(nil)
+                                    .foregroundStyle(.secondary)
+                                
+                                Spacer()
+                                
+                                if let (totalText, color) = calculateDailyTotal(section.items) {
+                                    Text(totalText)
+                                        .font(.subheadline.weight(.semibold))
+                                        .textCase(nil)
+                                        .foregroundStyle(color)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            color.opacity(0.15),
+                                            in: RoundedRectangle(cornerRadius: 8)
+                                        )
+                                }
+                            }
+                            .padding(.bottom, 4)
                         }
                     }
                 }
@@ -253,6 +271,75 @@ struct TransactionsView: View {
         formatter.locale = Locale(identifier: "ru_RU")
         formatter.dateFormat = "d MMMM yyyy"
         return formatter.string(from: date)
+    }
+    
+    /// Подсчет суммы за день в рублях с учетом фильтра
+    private func calculateDailyTotal(_ transactions: [Transaction]) -> (String, Color)? {
+        var totalRub: Double = 0
+        
+        // Подсчитываем сумму в зависимости от выбранного фильтра
+        switch selectedFilter {
+        case .all:
+            // Показываем чистый баланс: доходы минус расходы
+            let expenses = transactions.filter { $0.kind == .expense }
+                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
+            
+            let income = transactions.filter { $0.kind == .income }
+                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
+            
+            totalRub = income - expenses
+            
+        case .expenses:
+            // Только расходы (делаем отрицательными)
+            totalRub = -transactions.filter { $0.kind == .expense }
+                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
+            
+        case .income:
+            // Только доходы (положительные)
+            totalRub = transactions.filter { $0.kind == .income }
+                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
+            
+        case .transfers:
+            // Для переводов не показываем сумму
+            return nil
+        }
+        
+        guard totalRub != 0 else { return nil }
+        
+        // Определяем цвет и формат в зависимости от типа операций и суммы
+        if selectedFilter == .all {
+            // Для "Все": зеленый если положительный, красный если отрицательный
+            let color: Color = totalRub > 0 ? .green : .red
+            return (signedFormattedRubAmount(totalRub), color)
+        } else if selectedFilter == .expenses {
+            // Для расходов: всегда красный цвет и со знаком минус
+            return (signedFormattedRubAmount(totalRub), .red)
+        } else if selectedFilter == .income {
+            // Для доходов: всегда зеленый цвет и со знаком плюс
+            return (signedFormattedRubAmount(totalRub), .green)
+        }
+        
+        return nil
+    }
+    
+    /// Форматирование суммы в рублях
+    private func formattedRubAmount(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+        
+        let number = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        return "\(number) ₽"
+    }
+    
+    /// Форматирование суммы в рублях со знаком
+    private func signedFormattedRubAmount(_ value: Double) -> String {
+        let sign = value < 0 ? "-" : "+"
+        return "\(sign) \(formattedRubAmount(abs(value)))"
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {

@@ -215,8 +215,8 @@ struct AnalyticsView: View {
                     } else {
                         lastHapticChartPointID = nil
                     }
-                } onPeriodSwipe: { delta in
-                    movePeriod(by: delta)
+                } onPeriodSwipe: { swipeInfo in
+                    handleProportionalSwipe(swipeInfo)
                 }
                 .padding()
                 .background(Color.gray.opacity(0.08))
@@ -664,6 +664,108 @@ struct AnalyticsView: View {
     private var canMoveForward: Bool {
         let currentRealPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now)
         return snapshot.page.startDate < currentRealPage.startDate
+    }
+
+    /// Обрабатывает пропорциональный свайп с учётом дистанции и скорости
+    private func handleProportionalSwipe(_ swipeInfo: ProportionalSwipeInfo) {
+        let calendar = Calendar.current
+        
+        // Рассчитываем пропорциональный сдвиг в днях/месяцах
+        let offsetDays = calculateProportionalOffset(for: swipeInfo)
+        
+        // Проверяем направление
+        let multiplier: Double = swipeInfo.direction == .forward ? 1.0 : -1.0
+        let totalDays = offsetDays * multiplier
+        
+        // Вычисляем новую дату
+        let nextDate = calendar.date(byAdding: .day, value: Int(totalDays), to: pageAnchorDate) ?? pageAnchorDate
+        
+        // Проверка границы будущего
+        if swipeInfo.direction == .forward {
+            let currentRealPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now)
+            let nextPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: nextDate)
+            
+            if nextPage.startDate >= currentRealPage.endDateExclusive {
+                // Достигли будущего — предупреждающая вибрация и отскок
+                let notification = UINotificationFeedbackGenerator()
+                notification.notificationOccurred(.warning)
+                
+                // Визуальный bounce-эффект уже обрабатывается в InteractiveBarChartView
+                return
+            }
+        }
+        
+        // Выбираем анимацию в зависимости от силы свайпа
+        let animation: Animation
+        switch swipeInfo.intensity {
+        case .minimal, .light:
+            animation = .spring(response: 0.5, dampingFraction: 0.80)
+        case .medium:
+            animation = .spring(response: 0.35, dampingFraction: 0.78)
+        case .strong:
+            animation = .spring(response: 0.28, dampingFraction: 0.75)
+        }
+        
+        withAnimation(animation) {
+            pageAnchorDate = nextDate
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+            pageChangeToken = UUID()
+        }
+    }
+    
+    /// Рассчитывает пропорциональный сдвиг в днях на основе параметров свайпа
+    private func calculateProportionalOffset(for swipeInfo: ProportionalSwipeInfo) -> Double {
+        let absDistance = abs(swipeInfo.distance)
+        let absVelocity = abs(swipeInfo.velocity)
+        
+        // Калибровочные коэффициенты для каждого масштаба
+        let baseCalibration: CGFloat
+        switch selectedScale {
+        case .week:
+            baseCalibration = 80  // Для недельного масштаба
+        case .month:
+            baseCalibration = 100 // Для месячного масштаба
+        case .year:
+            baseCalibration = 60  // Для годового масштаба (более чувствительный)
+        }
+        
+        // Базовый сдвиг = distance / K
+        let baseOffset = absDistance / baseCalibration
+        
+        // Множитель скорости (от 1.0 до 3.0)
+        let velocityMultiplier: CGFloat
+        if absVelocity > 2000 {
+            velocityMultiplier = 3.0
+        } else if absVelocity > 1500 {
+            velocityMultiplier = 2.5
+        } else if absVelocity > 1000 {
+            velocityMultiplier = 2.0
+        } else if absVelocity > 500 {
+            velocityMultiplier = 1.5
+        } else {
+            velocityMultiplier = 1.0
+        }
+        
+        // Ограничения по масштабу
+        let scaleLimits: (min: Double, max: Double)
+        switch selectedScale {
+        case .week:
+            // Неделя: от 1 дня до 14 дней (2 недели максимум)
+            scaleLimits = (1.0, 14.0)
+        case .month:
+            // Месяц: от 2 дней до 60 дней (2 месяца максимум)
+            scaleLimits = (2.0, 60.0)
+        case .year:
+            // Год: от 15 дней до 365 дней (1 год максимум)
+            scaleLimits = (15.0, 365.0)
+        }
+        
+        // Итоговый сдвиг с учётом всех множителей
+        let rawOffset = Double(baseOffset * velocityMultiplier)
+        let clampedOffset = min(max(rawOffset, scaleLimits.min), scaleLimits.max)
+        
+        return clampedOffset
     }
 
     private func movePeriod(by delta: Int) {
