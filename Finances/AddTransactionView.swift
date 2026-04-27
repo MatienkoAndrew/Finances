@@ -98,12 +98,6 @@ struct AddTransactionView: View {
                     
                     if selectedKind == .expense {
                         Menu {
-                            Button {
-                                selectedCategoryName = nil
-                            } label: {
-                                Text("Без категории")
-                            }
-
                             ForEach(categories) { category in
                                 Button {
                                     selectedCategoryName = category.name
@@ -126,7 +120,7 @@ struct AddTransactionView: View {
 
                                 Spacer()
 
-                                Text(selectedCategoryName ?? "Без категории")
+                                Text(selectedCategoryName ?? "Другое")
                                     .foregroundStyle(.secondary)
 
                                 Image(systemName: "chevron.up.chevron.down")

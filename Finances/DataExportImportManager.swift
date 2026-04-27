@@ -83,34 +83,18 @@ final class DataExportImportManager {
         let transactionDescriptor = FetchDescriptor<Transaction>(sortBy: [SortDescriptor(\Transaction.date)])
         let transactions = try modelContext.fetch(transactionDescriptor)
         
-        let accountDescriptor = FetchDescriptor<Account>(sortBy: [SortDescriptor(\Account.name)])
-        let accounts = try modelContext.fetch(accountDescriptor)
-        
-        let categoryRuleDescriptor = FetchDescriptor<CategoryRule>()
-        let categoryRules = try modelContext.fetch(categoryRuleDescriptor)
-        
-        let categoryDescriptor = FetchDescriptor<ExpenseCategoryItem>()
-        let categories = try modelContext.fetch(categoryDescriptor)
-        
         let rateDescriptor = FetchDescriptor<TrackedExchangeRate>()
         let trackedRates = try modelContext.fetch(rateDescriptor)
         
         let settingsDescriptor = FetchDescriptor<AppSettings>()
         let settings = try modelContext.fetch(settingsDescriptor).first
         
-        let tagsDescriptor = FetchDescriptor<TransactionTag>()
-        let tags = try modelContext.fetch(tagsDescriptor)
-        
         return ExportData(
             version: 1,
             exportDate: Date(),
             transactions: transactions.map { ExportableTransaction(from: $0) },
-            accounts: accounts.map { ExportableAccount(from: $0) },
-            categoryRules: categoryRules.map { ExportableCategoryRule(from: $0) },
-            categories: categories.map { ExportableCategory(from: $0) },
             trackedRates: trackedRates.map { ExportableTrackedRate(from: $0) },
-            settings: settings.map { ExportableSettings(from: $0) },
-            tags: tags.map { ExportableTag(from: $0) }
+            settings: settings.map { ExportableSettings(from: $0) }
         )
     }
     
@@ -146,7 +130,7 @@ final class DataExportImportManager {
                 try clearAllData(modelContext: modelContext)
             }
             
-            try importAllData(exportData, modelContext: modelContext)
+            try importAllData(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
             try modelContext.save()
         } catch {
             print("Import error: \(error)")
@@ -157,109 +141,131 @@ final class DataExportImportManager {
     private static func clearAllData(modelContext: ModelContext) throws {
         // Удаляем все данные
         try modelContext.delete(model: Transaction.self)
-        try modelContext.delete(model: Account.self)
-        try modelContext.delete(model: CategoryRule.self)
-        try modelContext.delete(model: ExpenseCategoryItem.self)
         try modelContext.delete(model: TrackedExchangeRate.self)
         try modelContext.delete(model: AppSettings.self)
-        try modelContext.delete(model: TransactionTag.self)
     }
     
-    private static func importAllData(_ data: ExportData, modelContext: ModelContext) throws {
-        // Словари для связи ID
-        var accountMap: [String: Account] = [:]
-        
-        // Импортируем аккаунты
-        for exportAccount in data.accounts {
-            let account = Account(
-                name: exportAccount.name,
-                currencyCode: exportAccount.currencyCode,
-                initialBalance: exportAccount.initialBalance,
-                color: exportAccount.color,
-                order: exportAccount.order,
-                isActive: exportAccount.isActive
-            )
-            modelContext.insert(account)
-            accountMap[exportAccount.id] = account
-        }
-        
-        // Импортируем категории
-        for exportCategory in data.categories {
-            let category = ExpenseCategoryItem(
-                title: exportCategory.title,
-                color: exportCategory.color,
-                order: exportCategory.order
-            )
-            modelContext.insert(category)
-        }
-        
-        // Импортируем правила категорий
-        for exportRule in data.categoryRules {
-            let rule = CategoryRule(
-                detailsContains: exportRule.detailsContains,
-                categoryName: exportRule.categoryName
-            )
-            rule.isActive = exportRule.isActive
-            modelContext.insert(rule)
-        }
-        
+    private static func importAllData(_ data: ExportData, modelContext: ModelContext, replaceExisting: Bool = false) throws {
         // Импортируем отслеживаемые курсы валют
-        for exportRate in data.trackedRates {
-            let rate = TrackedExchangeRate(
-                code: exportRate.code,
-                rubPerUnit: exportRate.rubPerUnit
-            )
-            modelContext.insert(rate)
+        if replaceExisting {
+            // При замене просто добавляем все
+            for exportRate in data.trackedRates {
+                let rate = TrackedExchangeRate(
+                    code: exportRate.code,
+                    displayName: exportRate.displayName,
+                    flag: exportRate.flag,
+                    rubPerUnit: exportRate.rubPerUnit
+                )
+                modelContext.insert(rate)
+            }
+        } else {
+            // При добавлении - проверяем, нет ли уже такой валюты
+            let existingRatesDescriptor = FetchDescriptor<TrackedExchangeRate>()
+            let existingRates = try modelContext.fetch(existingRatesDescriptor)
+            let existingCodes = Set(existingRates.map { $0.code.uppercased() })
+            
+            for exportRate in data.trackedRates {
+                if !existingCodes.contains(exportRate.code.uppercased()) {
+                    let rate = TrackedExchangeRate(
+                        code: exportRate.code,
+                        displayName: exportRate.displayName,
+                        flag: exportRate.flag,
+                        rubPerUnit: exportRate.rubPerUnit
+                    )
+                    modelContext.insert(rate)
+                }
+            }
         }
         
         // Импортируем настройки
         if let exportSettings = data.settings {
-            let settings = AppSettings()
-            settings.kztPerRub = exportSettings.kztPerRub
-            modelContext.insert(settings)
-        }
-        
-        // Импортируем метки
-        for exportTag in data.tags {
-            let tag = TransactionTag(
-                name: exportTag.name,
-                color: exportTag.color,
-                order: exportTag.order
-            )
-            modelContext.insert(tag)
+            if replaceExisting {
+                // При замене просто добавляем
+                let settings = AppSettings(kztPerRub: exportSettings.kztPerRub)
+                modelContext.insert(settings)
+            } else {
+                // При добавлении - обновляем существующие настройки
+                let settingsDescriptor = FetchDescriptor<AppSettings>()
+                let existingSettings = try modelContext.fetch(settingsDescriptor).first
+                
+                if let existing = existingSettings {
+                    existing.kztPerRub = exportSettings.kztPerRub
+                } else {
+                    let settings = AppSettings(kztPerRub: exportSettings.kztPerRub)
+                    modelContext.insert(settings)
+                }
+            }
         }
         
         // Импортируем транзакции
-        for exportTransaction in data.transactions {
-            let transaction = Transaction(
-                date: exportTransaction.date,
-                kindRaw: exportTransaction.kindRaw,
-                amount: exportTransaction.amount,
-                currencyCode: exportTransaction.currencyCode,
-                toAmount: exportTransaction.toAmount,
-                toCurrencyCode: exportTransaction.toCurrencyCode,
-                details: exportTransaction.details,
-                foreignAmount: exportTransaction.foreignAmount,
-                foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
-                rubAmount: exportTransaction.rubAmount,
-                categoryName: exportTransaction.categoryName,
-                note: exportTransaction.note,
-                tagNames: exportTransaction.tagNames,
-                fingerprint: exportTransaction.fingerprint,
-                sourceFileName: exportTransaction.sourceFileName,
-                importedAt: exportTransaction.importedAt,
-                createdAt: exportTransaction.createdAt
-            )
-            
-            // Связываем с аккаунтами
-            if let fromAccountId = exportTransaction.fromAccountId {
-                transaction.fromAccount = accountMap[fromAccountId]
+        if replaceExisting {
+            // При замене просто добавляем все
+            for exportTransaction in data.transactions {
+                let transaction = Transaction(
+                    date: exportTransaction.date,
+                    kindRaw: exportTransaction.kindRaw,
+                    amount: exportTransaction.amount,
+                    currencyCode: exportTransaction.currencyCode,
+                    toAmount: exportTransaction.toAmount,
+                    toCurrencyCode: exportTransaction.toCurrencyCode,
+                    details: exportTransaction.details,
+                    foreignAmount: exportTransaction.foreignAmount,
+                    foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
+                    rubAmount: exportTransaction.rubAmount,
+                    categoryName: exportTransaction.categoryName,
+                    note: exportTransaction.note,
+                    tagNames: exportTransaction.tagNames,
+                    fingerprint: exportTransaction.fingerprint,
+                    sourceFileName: exportTransaction.sourceFileName,
+                    importedAt: exportTransaction.importedAt,
+                    createdAt: exportTransaction.createdAt
+                )
+                
+                modelContext.insert(transaction)
             }
-            if let toAccountId = exportTransaction.toAccountId {
-                transaction.toAccount = accountMap[toAccountId]
+        } else {
+            // При добавлении - проверяем на дубликаты по fingerprint
+            let existingTransactionsDescriptor = FetchDescriptor<Transaction>()
+            let existingTransactions = try modelContext.fetch(existingTransactionsDescriptor)
+            let existingFingerprints = Set(existingTransactions.compactMap { $0.fingerprint })
+            
+            var addedCount = 0
+            var skippedCount = 0
+            
+            for exportTransaction in data.transactions {
+                // Пропускаем, если есть fingerprint и он уже существует
+                if let fingerprint = exportTransaction.fingerprint, 
+                   !fingerprint.isEmpty,
+                   existingFingerprints.contains(fingerprint) {
+                    skippedCount += 1
+                    continue
+                }
+                
+                let transaction = Transaction(
+                    date: exportTransaction.date,
+                    kindRaw: exportTransaction.kindRaw,
+                    amount: exportTransaction.amount,
+                    currencyCode: exportTransaction.currencyCode,
+                    toAmount: exportTransaction.toAmount,
+                    toCurrencyCode: exportTransaction.toCurrencyCode,
+                    details: exportTransaction.details,
+                    foreignAmount: exportTransaction.foreignAmount,
+                    foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
+                    rubAmount: exportTransaction.rubAmount,
+                    categoryName: exportTransaction.categoryName,
+                    note: exportTransaction.note,
+                    tagNames: exportTransaction.tagNames,
+                    fingerprint: exportTransaction.fingerprint,
+                    sourceFileName: exportTransaction.sourceFileName,
+                    importedAt: exportTransaction.importedAt,
+                    createdAt: exportTransaction.createdAt
+                )
+                
+                modelContext.insert(transaction)
+                addedCount += 1
             }
             
-            modelContext.insert(transaction)
+            print("Импорт: добавлено \(addedCount), пропущено дубликатов \(skippedCount)")
         }
     }
 }
@@ -270,12 +276,8 @@ struct ExportData: Codable {
     let version: Int
     let exportDate: Date
     let transactions: [ExportableTransaction]
-    let accounts: [ExportableAccount]
-    let categoryRules: [ExportableCategoryRule]
-    let categories: [ExportableCategory]
     let trackedRates: [ExportableTrackedRate]
     let settings: ExportableSettings?
-    let tags: [ExportableTag]
 }
 
 struct ExportableTransaction: Codable {
@@ -297,8 +299,6 @@ struct ExportableTransaction: Codable {
     let sourceFileName: String?
     let importedAt: Date?
     let createdAt: Date
-    let fromAccountId: String?
-    let toAccountId: String?
     
     init(from transaction: Transaction) {
         self.id = UUID().uuidString
@@ -319,61 +319,19 @@ struct ExportableTransaction: Codable {
         self.sourceFileName = transaction.sourceFileName
         self.importedAt = transaction.importedAt
         self.createdAt = transaction.createdAt
-        self.fromAccountId = transaction.fromAccount?.persistentModelID.hashValue.description
-        self.toAccountId = transaction.toAccount?.persistentModelID.hashValue.description
-    }
-}
-
-struct ExportableAccount: Codable {
-    let id: String
-    let name: String
-    let currencyCode: String
-    let initialBalance: Double
-    let color: String
-    let order: Int
-    let isActive: Bool
-    
-    init(from account: Account) {
-        self.id = account.persistentModelID.hashValue.description
-        self.name = account.name
-        self.currencyCode = account.currencyCode
-        self.initialBalance = account.initialBalance
-        self.color = account.color
-        self.order = account.order
-        self.isActive = account.isActive
-    }
-}
-
-struct ExportableCategoryRule: Codable {
-    let detailsContains: String
-    let categoryName: String
-    let isActive: Bool
-    
-    init(from rule: CategoryRule) {
-        self.detailsContains = rule.detailsContains
-        self.categoryName = rule.categoryName
-        self.isActive = rule.isActive
-    }
-}
-
-struct ExportableCategory: Codable {
-    let title: String
-    let color: String
-    let order: Int
-    
-    init(from category: ExpenseCategoryItem) {
-        self.title = category.title
-        self.color = category.color
-        self.order = category.order
     }
 }
 
 struct ExportableTrackedRate: Codable {
     let code: String
+    let displayName: String
+    let flag: String
     let rubPerUnit: Double
     
     init(from rate: TrackedExchangeRate) {
         self.code = rate.code
+        self.displayName = rate.displayName
+        self.flag = rate.flag
         self.rubPerUnit = rate.rubPerUnit
     }
 }
@@ -383,17 +341,5 @@ struct ExportableSettings: Codable {
     
     init(from settings: AppSettings) {
         self.kztPerRub = settings.kztPerRub
-    }
-}
-
-struct ExportableTag: Codable {
-    let name: String
-    let color: String
-    let order: Int
-    
-    init(from tag: TransactionTag) {
-        self.name = tag.name
-        self.color = tag.color
-        self.order = tag.order
     }
 }

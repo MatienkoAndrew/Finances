@@ -1,5 +1,7 @@
 import SwiftUI
+import SwiftUI
 import SwiftData
+import Foundation
 
 /// Утилита для массового добавления меток к транзакциям
 struct BulkTaggingHelper {

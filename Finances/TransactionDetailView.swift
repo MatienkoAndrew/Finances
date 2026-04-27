@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUI
 import SwiftData
 
 struct TransactionDetailView: View {
@@ -169,8 +170,6 @@ struct TransactionDetailView: View {
             if transaction.kind == .expense {
                 Section("Категория") {
                     Picker("Категория", selection: $editedCategoryName) {
-                        Text("Без категории").tag(nil as String?)
-
                         ForEach(categories) { category in
                             Text(category.name).tag(category.name as String?)
                         }
@@ -191,6 +190,8 @@ struct TransactionDetailView: View {
                     detailRow(title: "Заметка", value: transaction.note ?? "—")
                 }
             }
+            
+            tagsSection
 
             Section("Техническая информация") {
                 detailRow(title: "Источник", value: transaction.sourceFileName ?? "—")
@@ -385,5 +386,143 @@ struct TransactionDetailView: View {
 
         let number = formatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
         return "\(number) \(currency)"
+    }
+    
+    // MARK: - Tags Section
+    
+    @Query(sort: \TransactionTag.createdAt, order: .reverse)
+    private var allTags: [TransactionTag]
+    
+    @State private var showingTagPicker = false
+    
+    private var tagsSection: some View {
+        Section("Метки") {
+            if let tags = transaction.tagNames, !tags.isEmpty {
+                ForEach(tags, id: \.self) { tagName in
+                    HStack {
+                        if let tag = allTags.first(where: { $0.name == tagName }) {
+                            Text(tag.displayIcon)
+                                .font(.title3)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(tagName)
+                                    .font(.body)
+                                
+                                if tag.startDate != nil || tag.endDate != nil {
+                                    Text(tag.periodDescription)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Text("🏷️")
+                                .font(.title3)
+                            Text(tagName)
+                        }
+                        
+                        Spacer()
+                        
+                        Button(role: .destructive) {
+                            withAnimation {
+                                transaction.removeTag(tagName)
+                                try? modelContext.save()
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            
+            Button {
+                showingTagPicker = true
+            } label: {
+                Label("Добавить метку", systemImage: "tag.fill")
+            }
+        }
+        .sheet(isPresented: $showingTagPicker) {
+            TagPickerView(transaction: transaction)
+        }
+    }
+}
+
+// MARK: - Tag Picker View
+
+struct TagPickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    
+    @Query(sort: \TransactionTag.createdAt, order: .reverse)
+    private var allTags: [TransactionTag]
+    
+    let transaction: Transaction
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                if availableTags.isEmpty {
+                    ContentUnavailableView(
+                        "Нет доступных меток",
+                        systemImage: "tag.slash",
+                        description: Text("Все метки уже добавлены к этой транзакции или метки ещё не созданы")
+                    )
+                } else {
+                    ForEach(availableTags) { tag in
+                        Button {
+                            addTag(tag)
+                        } label: {
+                            HStack {
+                                Text(tag.displayIcon)
+                                    .font(.title3)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(tag.name)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                    
+                                    if tag.startDate != nil || tag.endDate != nil {
+                                        Text(tag.periodDescription)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                // Показываем галочку, если дата транзакции попадает в период метки
+                                if tag.contains(date: transaction.date) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Выбрать метку")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Отмена") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private var availableTags: [TransactionTag] {
+        allTags.filter { tag in
+            !(transaction.tagNames?.contains(tag.name) ?? false)
+        }
+    }
+    
+    private func addTag(_ tag: TransactionTag) {
+        transaction.addTag(tag.name)
+        try? modelContext.save()
+        dismiss()
     }
 }

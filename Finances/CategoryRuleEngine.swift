@@ -4,7 +4,8 @@ enum CategoryRuleEngine {
     static func matchCategoryName(
         operationType: String,
         details: String,
-        rules: [CategoryRule]
+        rules: [CategoryRule],
+        existingCategories: [ExpenseCategoryItem]
     ) -> String? {
         let normalizedDetails = details.uppercased()
 
@@ -29,9 +30,22 @@ enum CategoryRuleEngine {
             }
         }
 
-        return ExpenseCategoryGuesser.guessCategoryName(
+        // Пытаемся угадать категорию
+        let guessedName = ExpenseCategoryGuesser.guessCategoryName(
             for: operationType,
             details: details
         )
+        
+        // Возвращаем угаданную категорию если она существует
+        if let guessedName, existingCategories.contains(where: { $0.name == guessedName }) {
+            return guessedName
+        }
+        
+        // Fallback на "Другое" если категория не найдена
+        if existingCategories.contains(where: { $0.name == "Другое" }) {
+            return "Другое"
+        }
+        
+        return nil
     }
 }

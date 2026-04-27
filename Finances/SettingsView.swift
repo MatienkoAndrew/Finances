@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -15,6 +16,14 @@ struct SettingsView: View {
     @State private var rateErrorMessage: String?
 
     @State private var isShowingAddCurrency = false
+    @State private var isExporting = false
+    @State private var exportFileURL: URL?
+    @State private var isShowingImportPicker = false
+    @State private var isShowingImportConfirmation = false
+    @State private var selectedImportURL: URL?
+    @State private var exportErrorMessage: String?
+    @State private var importErrorMessage: String?
+    @State private var importSuccessMessage: String?
 
     @AppStorage("rates_last_refresh_at") private var lastRatesRefreshAt: Double = 0
 
@@ -106,11 +115,79 @@ struct SettingsView: View {
                     NavigationLink("Правила категорий") {
                         RulesView()
                     }
+                    
+                    NavigationLink("Встроенные правила") {
+                        BuiltInRulesView()
+                    }
+                    
+                    NavigationLink("Метки") {
+                        TagsManagementView()
+                    }
+                }
+                
+                Section("Резервное копирование") {
+                    Button {
+                        exportData()
+                    } label: {
+                        HStack {
+                            Label("Экспортировать данные", systemImage: "square.and.arrow.up")
+                            Spacer()
+                            if isExporting {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isExporting)
+                    
+                    Button {
+                        isShowingImportPicker = true
+                    } label: {
+                        Label("Импортировать данные", systemImage: "square.and.arrow.down")
+                    }
+                    
+                    Text("Экспорт создает JSON-файл со всеми данными. При импорте можно добавить данные к существующим (дубликаты автоматически пропускаются) или полностью заменить все данные.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Настройки")
             .sheet(isPresented: $isShowingAddCurrency) {
                 AddTrackedCurrencyView()
+            }
+            .fileExporter(
+                isPresented: Binding(
+                    get: { exportFileURL != nil },
+                    set: { if !$0 { exportFileURL = nil } }
+                ),
+                document: exportFileURL.map { JSONFileDocument(fileURL: $0) },
+                contentType: .json,
+                defaultFilename: "finances_backup"
+            ) { result in
+                handleExportResult(result)
+            }
+            .fileImporter(
+                isPresented: $isShowingImportPicker,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                handleImportSelection(result)
+            }
+            .confirmationDialog(
+                "Импорт данных",
+                isPresented: $isShowingImportConfirmation,
+                presenting: selectedImportURL
+            ) { url in
+                Button("Добавить к существующим") {
+                    importData(from: url, replaceExisting: false)
+                }
+                Button("Заменить все данные", role: .destructive) {
+                    importData(from: url, replaceExisting: true)
+                }
+                Button("Отмена", role: .cancel) {
+                    selectedImportURL = nil
+                }
+            } message: { _ in
+                Text("Выберите способ импорта данных")
             }
             .task {
                 let inserted = DefaultTrackedCurrenciesSeeder.seedMissing(
@@ -137,6 +214,30 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) { rateErrorMessage = nil }
             } message: {
                 Text(rateErrorMessage ?? "")
+            }
+            .alert("Ошибка экспорта", isPresented: Binding(
+                get: { exportErrorMessage != nil },
+                set: { if !$0 { exportErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { exportErrorMessage = nil }
+            } message: {
+                Text(exportErrorMessage ?? "")
+            }
+            .alert("Ошибка импорта", isPresented: Binding(
+                get: { importErrorMessage != nil },
+                set: { if !$0 { importErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { importErrorMessage = nil }
+            } message: {
+                Text(importErrorMessage ?? "")
+            }
+            .alert("Импорт завершен", isPresented: Binding(
+                get: { importSuccessMessage != nil },
+                set: { if !$0 { importSuccessMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { importSuccessMessage = nil }
+            } message: {
+                Text(importSuccessMessage ?? "")
             }
         }
     }
@@ -224,5 +325,91 @@ struct SettingsView: View {
         formatter.decimalSeparator = ","
 
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+    
+    // MARK: - Export/Import Methods
+    
+    private func exportData() {
+        isExporting = true
+        
+        Task { @MainActor in
+            do {
+                let fileURL = try DataExportImportManager.exportData(modelContext: modelContext)
+                exportFileURL = fileURL
+                isExporting = false
+            } catch {
+                exportErrorMessage = error.localizedDescription
+                isExporting = false
+            }
+        }
+    }
+    
+    private func handleExportResult(_ result: Result<URL, Error>) {
+        switch result {
+        case .success:
+            // Файл успешно сохранен
+            break
+        case .failure(let error):
+            exportErrorMessage = error.localizedDescription
+        }
+    }
+    
+    private func handleImportSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            selectedImportURL = url
+            isShowingImportConfirmation = true
+        case .failure(let error):
+            importErrorMessage = error.localizedDescription
+        }
+    }
+    
+    private func importData(from url: URL, replaceExisting: Bool) {
+        Task { @MainActor in
+            do {
+                try DataExportImportManager.importData(
+                    from: url,
+                    modelContext: modelContext,
+                    replaceExisting: replaceExisting
+                )
+                
+                let message = replaceExisting 
+                    ? "Данные успешно заменены" 
+                    : "Данные успешно импортированы"
+                importSuccessMessage = message
+                selectedImportURL = nil
+            } catch {
+                importErrorMessage = error.localizedDescription
+                selectedImportURL = nil
+            }
+        }
+    }
+}
+
+// MARK: - JSONFileDocument
+
+struct JSONFileDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    
+    let fileURL: URL
+    
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+    
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try data.write(to: tempURL)
+        self.fileURL = tempURL
+    }
+    
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let data = try Data(contentsOf: fileURL)
+        return FileWrapper(regularFileWithContents: data)
     }
 }

@@ -26,6 +26,7 @@ enum PDFImporter {
         existingTransactions: [Transaction],
         accounts: [Account],
         rules: [CategoryRule],
+        categories: [ExpenseCategoryItem],
         rates: [ExchangeRateEntry],
         fallbackKztPerRub: Double?
     ) throws -> PDFImportResult {
@@ -64,6 +65,7 @@ enum PDFImporter {
                 accounts: &workingAccounts,
                 accountsToCreate: &accountsToCreate,
                 rules: rules,
+                categories: categories,
                 rates: rates,
                 fallbackKztPerRub: fallbackKztPerRub,
                 fileName: fileName,
@@ -89,6 +91,7 @@ enum PDFImporter {
         accounts: inout [Account],
         accountsToCreate: inout [Account],
         rules: [CategoryRule],
+        categories: [ExpenseCategoryItem],
         rates: [ExchangeRateEntry],
         fallbackKztPerRub: Double?,
         fileName: String,
@@ -124,7 +127,8 @@ enum PDFImporter {
                 categoryName: CategoryRuleEngine.matchCategoryName(
                     operationType: row.operationType,
                     details: row.details,
-                    rules: rules
+                    rules: rules,
+                    existingCategories: categories
                 ),
                 note: nil,
                 fingerprint: row.fingerprint,
@@ -241,7 +245,8 @@ enum PDFImporter {
                     categoryName: CategoryRuleEngine.matchCategoryName(
                         operationType: row.operationType,
                         details: row.details,
-                        rules: rules
+                        rules: rules,
+                        existingCategories: categories
                     ),
                     note: nil,
                     fingerprint: row.fingerprint,
@@ -286,7 +291,8 @@ enum PDFImporter {
                     categoryName: CategoryRuleEngine.matchCategoryName(
                         operationType: row.operationType,
                         details: row.details,
-                        rules: rules
+                        rules: rules,
+                        existingCategories: categories
                     ),
                     note: nil,
                     fingerprint: row.fingerprint,

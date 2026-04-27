@@ -60,10 +60,12 @@ struct AnalyticsSnapshot {
     let categoryTotals: [AnalyticsCategoryTotal]
     let merchantTotals: [AnalyticsMerchantTotal]
     let topMerchantByCategory: [String: String]
+    
+    let effectiveBinCount: Int
 
     var averageExpensePerBin: Double {
-        guard page.binCount > 0 else { return 0 }
-        return totalExpensesRub / Double(page.binCount)
+        guard effectiveBinCount > 0 else { return 0 }
+        return totalExpensesRub / Double(effectiveBinCount)
     }
 
     var netFlowRub: Double {
@@ -85,7 +87,8 @@ struct AnalyticsSnapshot {
             incomeCount: 0,
             categoryTotals: [],
             merchantTotals: [],
-            topMerchantByCategory: [:]
+            topMerchantByCategory: [:],
+            effectiveBinCount: 0
         )
     }
 }
@@ -160,7 +163,22 @@ enum AnalyticsSnapshotBuilder {
             )
         }
 
-        let lowerTimeTotals = chartPoints
+        // Вычисляем последнюю релевантную дату для фильтрации
+        let now = Date()
+        let lastRelevantDate: Date
+        
+        if let lastTransactionDate = filtered.map({ $0.date }).max() {
+            // Используем последнюю транзакцию или текущую дату, в зависимости от того, что раньше
+            lastRelevantDate = min(lastTransactionDate, now)
+        } else {
+            // Если нет транзакций, используем текущую дату
+            lastRelevantDate = now
+        }
+        
+        // Фильтруем chartPoints: показываем только те, которые не в будущем
+        let filteredChartPoints = chartPoints.filter { $0.date <= lastRelevantDate }
+        
+        let lowerTimeTotals = filteredChartPoints
             .reversed()
             .map {
                 AnalyticsTimeTotal(
@@ -170,6 +188,33 @@ enum AnalyticsSnapshotBuilder {
                     total: $0.total
                 )
             }
+
+        // Вычисляем эффективное количество бинов для расчета среднего
+        let effectiveBinCount: Int
+        switch scale {
+        case .week, .month:
+            // Для недели и месяца считаем только дни до текущей даты (включительно)
+            let startOfDay = calendar.startOfDay(for: page.startDate)
+            let currentDay = calendar.startOfDay(for: min(now, page.endDateExclusive))
+            // +1 потому что нужно включить текущий день
+            let daysPassed = calendar.dateComponents([.day], from: startOfDay, to: currentDay).day ?? 0
+            effectiveBinCount = max(daysPassed + 1, 1) // +1 для включения текущего дня
+            
+        case .year:
+            // Для года считаем только месяцы до текущего (включительно)
+            let startYear = calendar.component(.year, from: page.startDate)
+            let startMonth = calendar.component(.month, from: page.startDate)
+            let currentYear = calendar.component(.year, from: now)
+            let currentMonth = calendar.component(.month, from: now)
+            
+            if currentYear > startYear {
+                effectiveBinCount = 12
+            } else if currentYear == startYear {
+                effectiveBinCount = max(currentMonth - startMonth + 1, 1)
+            } else {
+                effectiveBinCount = 1
+            }
+        }
 
         let categoryTotals = categoryMap
             .map { AnalyticsCategoryTotal(category: $0.key, total: $0.value) }
@@ -195,7 +240,8 @@ enum AnalyticsSnapshotBuilder {
             incomeCount: incomeCount,
             categoryTotals: categoryTotals,
             merchantTotals: merchantTotals,
-            topMerchantByCategory: topMerchantByCategory
+            topMerchantByCategory: topMerchantByCategory,
+            effectiveBinCount: effectiveBinCount
         )
     }
 

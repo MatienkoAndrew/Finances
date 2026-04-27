@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUI
 import SwiftData
 import Charts
 
@@ -11,35 +12,73 @@ struct AnalyticsView: View {
 
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
+    
+    @Query(sort: \TransactionTag.createdAt, order: .reverse)
+    private var tags: [TransactionTag]
 
     @Query
     private var settingsList: [AppSettings]
 
+    @State private var selectedMode: AnalyticsViewMode = .time
     @State private var selectedScale: AnalyticsTimeScale = .week
     @State private var pageAnchorDate: Date = .now
     @State private var selectedBreakdown: AnalyticsBreakdown = .daily
+    
+    // Для режима Tags
+    @State private var selectedTag: TransactionTag?
 
     @State private var selectedChartPointID: String?
-    @State private var lastHapticChartPointID: String?
-
     @State private var selectedCategoryName: String?
     @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
-    
-    @State private var pageChangeToken = UUID()
+
+    @State private var pagingSessionStartAnchorDate: Date?
+    @State private var didInitializeAnchor = false
 
     private var settings: AppSettings? {
         settingsList.first
     }
+    
+    // MARK: - Filtered Transactions
+    
+    private var filteredTransactions: [Transaction] {
+        switch selectedMode {
+        case .time:
+            return transactions
+        case .tags:
+            guard let tag = selectedTag else { return [] }
+            return transactions.filter { $0.hasTag(tag.name) }
+        }
+    }
 
     private var snapshot: AnalyticsSnapshot {
-        AnalyticsSnapshotBuilder.build(
-            transactions: transactions,
-            scale: selectedScale,
-            anchorDate: pageAnchorDate,
-            settings: settings,
-            trackedRates: trackedRates
-        )
+        if selectedMode == .tags {
+            // В режиме Tags показываем транзакции метки с выбранным масштабом
+            let anchorDate: Date
+            if let tag = selectedTag, let start = tag.startDate {
+                // Используем начало периода метки как anchor
+                anchorDate = start
+            } else {
+                anchorDate = .now
+            }
+            
+            return AnalyticsSnapshotBuilder.build(
+                transactions: filteredTransactions,
+                scale: selectedScale, // Используем выбранный scale (W/M/Y)
+                anchorDate: anchorDate,
+                settings: settings,
+                trackedRates: trackedRates
+            )
+        } else {
+            // В режиме Time используем стандартную логику
+            return AnalyticsSnapshotBuilder.build(
+                transactions: filteredTransactions,
+                scale: selectedScale,
+                anchorDate: pageAnchorDate,
+                settings: settings,
+                trackedRates: trackedRates
+            )
+        }
     }
 
     private var previousSnapshot: AnalyticsSnapshot {
@@ -56,7 +95,7 @@ struct AnalyticsView: View {
         }
 
         return AnalyticsSnapshotBuilder.build(
-            transactions: transactions,
+            transactions: filteredTransactions,
             scale: selectedScale,
             anchorDate: previousAnchor,
             settings: settings,
@@ -65,11 +104,32 @@ struct AnalyticsView: View {
     }
 
     private var currentAnalyticsScope: AnalyticsScope {
-        let page = snapshot.page
-        return AnalyticsScope(
-            title: page.displayTitle,
-            contains: { page.contains($0) }
-        )
+        switch selectedMode {
+        case .time:
+            let page = snapshot.page
+            return AnalyticsScope(
+                title: page.displayTitle,
+                contains: { page.contains($0) }
+            )
+        case .tags:
+            guard let tag = selectedTag else {
+                return AnalyticsScope(title: "Нет метки", contains: { _ in false })
+            }
+            
+            // Если у метки задан период, используем его для фильтрации
+            if let start = tag.startDate, let end = tag.endDate {
+                return AnalyticsScope(
+                    title: tag.name,
+                    contains: { date in date >= start && date <= end }
+                )
+            } else {
+                // Если периода нет, принимаем все даты
+                return AnalyticsScope(
+                    title: tag.name,
+                    contains: { _ in true }
+                )
+            }
+        }
     }
 
     private var selectedChartPoint: AnalyticsChartPoint? {
@@ -80,13 +140,20 @@ struct AnalyticsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
-                    scalePicker
-                    periodNavigation
+                    modePicker
+                    
+                    if selectedMode == .time {
+                        scalePicker
+                        periodNavigation
+                    } else {
+                        tagPicker
+                        scalePicker
+                        periodNavigation // Добавим навигацию и для Tags
+                    }
+                    
                     topSummarySection
                     chartSection
                     periodSummaryCards
-//                    trendSection
-//                    highlightsSection
                     breakdownPicker
                     selectedBreakdownSection
                 }
@@ -117,19 +184,143 @@ struct AnalyticsView: View {
             }
         }
         .onAppear {
-            pageAnchorDate = .now
+            guard !didInitializeAnchor else { return }
+            didInitializeAnchor = true
+            pageAnchorDate = latestAllowedAnchorDate
+        }
+        .onChange(of: selectedScale) { _, _ in
+            pagingSessionStartAnchorDate = nil
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+            pageAnchorDate = snappedAnchorDate(
+                min(pageAnchorDate, latestAllowedAnchorDate),
+                scale: selectedScale
+            )
+        }
+        .onChange(of: selectedMode) { _, newMode in
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+            
+            // При переключении в режим Tags, автоматически выбираем первую метку
+            if newMode == .tags {
+                if selectedTag == nil {
+                    selectedTag = tags.first
+                }
+                // Устанавливаем anchor на начало периода метки
+                if let tag = selectedTag, let start = tag.startDate {
+                    pageAnchorDate = start
+                }
+            }
+        }
+        .onChange(of: selectedTag) { _, newTag in
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+            
+            // При смене метки обновляем anchor date
+            if selectedMode == .tags, let tag = newTag, let start = tag.startDate {
+                pageAnchorDate = start
+            }
         }
     }
 
     // MARK: - Top
+    
+    private var modePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(AnalyticsViewMode.allCases) { mode in
+                Button {
+                    withAnimation {
+                        selectedMode = mode
+                        if mode == .tags && selectedTag == nil {
+                            selectedTag = tags.first
+                        }
+                    }
+                } label: {
+                    Text(mode.rawValue)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            selectedMode == mode
+                            ? Color.accentColor
+                            : Color.clear
+                        )
+                        .foregroundStyle(selectedMode == mode ? .white : .primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(Color.gray.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+    
+    private var tagPicker: some View {
+        VStack(spacing: 12) {
+            if tags.isEmpty {
+                HStack {
+                    Image(systemName: "tag.slash")
+                        .foregroundStyle(.secondary)
+                    Text("Нет меток")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    NavigationLink {
+                        TagsManagementView()
+                    } label: {
+                        Text("Создать")
+                            .font(.subheadline)
+                    }
+                }
+                .padding()
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Picker("Метка", selection: $selectedTag) {
+                    ForEach(tags) { tag in
+                        Text("\(tag.displayIcon) \(tag.name)")
+                            .tag(tag as TransactionTag?)
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding()
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                
+                if let tag = selectedTag {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(tag.name)
+                                .font(.headline)
+                            if tag.startDate != nil || tag.endDate != nil {
+                                Text(tag.periodDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text("\(filteredTransactions.count)")
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Text("транзакций")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(ColorHelper.fromHex(tag.colorHex ?? "#007AFF").opacity(0.1))
+                    )
+                }
+            }
+        }
+    }
 
     private var scalePicker: some View {
         HStack(spacing: 0) {
             ForEach(AnalyticsTimeScale.allCases) { scale in
                 Button {
                     selectedScale = scale
-                    selectedChartPointID = nil
-                    selectedCategoryName = nil
                 } label: {
                     Text(scale.rawValue)
                         .font(.headline)
@@ -157,7 +348,18 @@ struct AnalyticsView: View {
     }
 
     private var periodNavigation: some View {
-        HStack {
+        HStack(spacing: 16) {
+            Button {
+                moveToPreviousPeriod()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             Spacer()
 
             Text(snapshot.page.displayTitle)
@@ -165,32 +367,67 @@ struct AnalyticsView: View {
                 .contentTransition(.opacity)
 
             Spacer()
+
+            Button {
+                moveToNextPeriod()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(canMoveToNextPeriod ? Color.primary : Color.secondary.opacity(0.3))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canMoveToNextPeriod)
         }
         .frame(height: 44)
     }
 
     private var topSummarySection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(selectedChartPoint == nil ? selectedScale.averageTitle : selectedScale.selectedPointTitle)
+            Text(topSummaryTitle)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             Text(
-                formattedRubAmount(
-                    selectedChartPoint?.total ?? snapshot.averageExpensePerBin
-                )
+                formattedRubAmount(topSummaryAmount)
             )
             .font(.system(size: 24, weight: .bold))
             .minimumScaleFactor(0.7)
             .lineLimit(1)
             .contentTransition(.numericText())
 
-            Text(selectedChartPoint?.title ?? snapshot.page.displayTitle)
+            Text(topSummarySubtitle)
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
                 .contentTransition(.opacity)
         }
-        .id(pageChangeToken)
+    }
+    
+    private var topSummaryAmount: Double {
+        if selectedMode == .tags {
+            // В режиме Tags показываем общую сумму всех расходов по метке
+            return snapshot.totalExpensesRub
+        } else {
+            // В режиме Time показываем выбранную точку или среднее
+            return selectedChartPoint?.total ?? snapshot.averageExpensePerBin
+        }
+    }
+    
+    private var topSummaryTitle: String {
+        if selectedMode == .tags {
+            return selectedTag != nil ? "ВСЕГО ПО МЕТКЕ" : "МЕТКА НЕ ВЫБРАНА"
+        } else {
+            return selectedChartPoint == nil ? selectedScale.averageTitle : selectedScale.selectedPointTitle
+        }
+    }
+    
+    private var topSummarySubtitle: String {
+        if selectedMode == .tags {
+            return selectedTag?.name ?? "—"
+        } else {
+            return selectedChartPoint?.title ?? snapshot.page.displayTitle
+        }
     }
 
     private var chartSection: some View {
@@ -206,26 +443,19 @@ struct AnalyticsView: View {
                     points: snapshot.chartPoints,
                     selectedPointID: $selectedChartPointID
                 ) { point in
-                    if let point {
-                        if lastHapticChartPointID != point.id {
-                            let generator = UIImpactFeedbackGenerator(style: .light)
-                            generator.impactOccurred(intensity: 0.7)
-                            lastHapticChartPointID = point.id
-                        }
-                    } else {
-                        lastHapticChartPointID = nil
+                    if point != nil {
+                        selectedCategoryName = nil
                     }
-                } onPeriodSwipe: { swipeInfo in
-                    handleProportionalSwipe(swipeInfo)
+                } onPeriodDragBegan: {
+                    beginInteractivePaging()
+                } onPeriodDragChanged: { translation in
+                    updateInteractivePaging(with: translation)
+                } onPeriodSwipeEnded: { swipeInfo in
+                    finishInteractivePaging(with: swipeInfo)
                 }
                 .padding()
                 .background(Color.gray.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 18))
-                .id(pageChangeToken)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)
-                ))
             }
         }
     }
@@ -271,91 +501,6 @@ struct AnalyticsView: View {
                 systemImage: "equal.circle.fill"
             )
         }
-    }
-
-    // MARK: - Trend / Highlights
-
-    private var trendSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Тренд")
-                .font(.title3.bold())
-
-            if let trendMessage {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(trendHeadline)
-                        .font(.headline)
-
-                    Text(trendMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(Color.gray.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-            } else {
-                Text("Недостаточно данных для сравнения с предыдущим периодом")
-                    .foregroundStyle(.secondary)
-                    .padding()
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-            }
-        }
-    }
-
-    private var highlightsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Highlights")
-                .font(.title3.bold())
-
-            VStack(spacing: 12) {
-                if let peakPoint = snapshot.peakChartPoint {
-                    highlightCard(
-                        title: selectedScale == .year ? "Пиковый месяц" : "Пиковый день",
-                        value: formattedRubAmount(peakPoint.total),
-                        subtitle: peakPoint.title,
-                        systemImage: "flame.fill"
-                    )
-                }
-
-                if let topCategory = snapshot.categoryTotals.first {
-                    highlightCard(
-                        title: "Топ категория",
-                        value: formattedRubAmount(topCategory.total),
-                        subtitle: "\(topCategory.category) • \(formattedPercent(categoryShare(for: topCategory.category)))",
-                        systemImage: "chart.bar.fill"
-                    )
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func highlightCard(
-        title: String,
-        value: String,
-        subtitle: String,
-        systemImage: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.orange)
-
-                Text(title)
-                    .font(.headline)
-            }
-
-            Text(value)
-                .font(.title2.bold())
-
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     // MARK: - Breakdown picker
@@ -659,187 +804,241 @@ struct AnalyticsView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Interactive paging
 
-    private var canMoveForward: Bool {
-        let currentRealPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now)
-        return snapshot.page.startDate < currentRealPage.startDate
+    private struct PagingConfiguration {
+        let livePixelsPerUnit: CGFloat
+        let endPixelsPerUnit: CGFloat
+        let unitSeconds: TimeInterval
+        let minimumEndUnits: Double
+        let maximumEndUnits: Double
+        let fullPeriodUnits: Double
     }
 
-    /// Обрабатывает пропорциональный свайп с учётом дистанции и скорости
-    private func handleProportionalSwipe(_ swipeInfo: ProportionalSwipeInfo) {
-        let calendar = Calendar.current
-        
-        // Рассчитываем пропорциональный сдвиг в днях/месяцах
-        let offsetDays = calculateProportionalOffset(for: swipeInfo)
-        
-        // Проверяем направление
-        let multiplier: Double = swipeInfo.direction == .forward ? 1.0 : -1.0
-        let totalDays = offsetDays * multiplier
-        
-        // Вычисляем новую дату
-        let nextDate = calendar.date(byAdding: .day, value: Int(totalDays), to: pageAnchorDate) ?? pageAnchorDate
-        
-        // Проверка границы будущего
-        if swipeInfo.direction == .forward {
-            let currentRealPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now)
-            let nextPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: nextDate)
-            
-            if nextPage.startDate >= currentRealPage.endDateExclusive {
-                // Достигли будущего — предупреждающая вибрация и отскок
-                let notification = UINotificationFeedbackGenerator()
-                notification.notificationOccurred(.warning)
-                
-                // Визуальный bounce-эффект уже обрабатывается в InteractiveBarChartView
-                return
-            }
+    private var pagingConfiguration: PagingConfiguration {
+        switch selectedScale {
+        case .week:
+            return PagingConfiguration(
+                livePixelsPerUnit: 82,
+                endPixelsPerUnit: 72,
+                unitSeconds: 24 * 60 * 60,
+                minimumEndUnits: 1,
+                maximumEndUnits: 7,
+                fullPeriodUnits: 7
+            )
+
+        case .month:
+            return PagingConfiguration(
+                livePixelsPerUnit: 40,
+                endPixelsPerUnit: 34,
+                unitSeconds: 24 * 60 * 60,
+                minimumEndUnits: 2,
+                maximumEndUnits: 31,
+                fullPeriodUnits: 30
+            )
+
+        case .year:
+            return PagingConfiguration(
+                livePixelsPerUnit: 115,
+                endPixelsPerUnit: 100,
+                unitSeconds: 30 * 24 * 60 * 60,
+                minimumEndUnits: 1,
+                maximumEndUnits: 12,
+                fullPeriodUnits: 12
+            )
         }
-        
-        // Выбираем анимацию в зависимости от силы свайпа
-        let animation: Animation
-        switch swipeInfo.intensity {
-        case .minimal, .light:
-            animation = .spring(response: 0.5, dampingFraction: 0.80)
-        case .medium:
-            animation = .spring(response: 0.35, dampingFraction: 0.78)
-        case .strong:
-            animation = .spring(response: 0.28, dampingFraction: 0.75)
+    }
+
+    private var latestAllowedAnchorDate: Date {
+        AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now).startDate
+    }
+
+    private func beginInteractivePaging() {
+        guard pagingSessionStartAnchorDate == nil else { return }
+
+        pagingSessionStartAnchorDate = pageAnchorDate
+        selectedChartPointID = nil
+        selectedCategoryName = nil
+    }
+
+    private func updateInteractivePaging(with translation: CGFloat) {
+        guard let startAnchor = pagingSessionStartAnchorDate else { return }
+
+        let config = pagingConfiguration
+        let rawUnits = -Double(translation / config.livePixelsPerUnit)
+        let limitedUnits = min(max(rawUnits, -config.maximumEndUnits), config.maximumEndUnits)
+
+        let candidate = startAnchor.addingTimeInterval(limitedUnits * config.unitSeconds)
+        pageAnchorDate = clampAnchorDate(candidate)
+    }
+
+    private func finishInteractivePaging(with swipeInfo: ProportionalSwipeInfo) -> PeriodSwipeResult {
+        guard let startAnchor = pagingSessionStartAnchorDate else {
+            return .cancelled
         }
-        
+
+        defer {
+            pagingSessionStartAnchorDate = nil
+        }
+
+        let target = projectedAnchorDate(from: startAnchor, swipeInfo: swipeInfo)
+        let clampedTarget = clampAnchorDate(target)
+        let hitFutureBoundary = target > latestAllowedAnchorDate
+        let finalAnchor = snappedAnchorDate(clampedTarget, scale: selectedScale)
+
+        let animation = animation(for: swipeInfo)
         withAnimation(animation) {
-            pageAnchorDate = nextDate
+            pageAnchorDate = finalAnchor
             selectedChartPointID = nil
             selectedCategoryName = nil
-            pageChangeToken = UUID()
         }
+
+        return hitFutureBoundary ? .blockedAtFuture : .applied
     }
-    
-    /// Рассчитывает пропорциональный сдвиг в днях на основе параметров свайпа
-    private func calculateProportionalOffset(for swipeInfo: ProportionalSwipeInfo) -> Double {
+
+    private func projectedAnchorDate(from startAnchor: Date, swipeInfo: ProportionalSwipeInfo) -> Date {
+        let config = pagingConfiguration
         let absDistance = abs(swipeInfo.distance)
         let absVelocity = abs(swipeInfo.velocity)
-        
-        // Калибровочные коэффициенты для каждого масштаба
-        let baseCalibration: CGFloat
-        switch selectedScale {
-        case .week:
-            baseCalibration = 80  // Для недельного масштаба
-        case .month:
-            baseCalibration = 100 // Для месячного масштаба
-        case .year:
-            baseCalibration = 60  // Для годового масштаба (более чувствительный)
+
+        let baseUnits = Double(absDistance / config.endPixelsPerUnit)
+        let velocityMultiplier = velocityMultiplier(for: absVelocity)
+
+        let computedUnits = baseUnits * velocityMultiplier
+
+        let finalUnits: Double
+        switch swipeInfo.intensity {
+        case .minimal:
+            finalUnits = max(computedUnits, config.minimumEndUnits)
+
+        case .light:
+            finalUnits = min(
+                max(computedUnits, config.minimumEndUnits),
+                config.maximumEndUnits
+            )
+
+        case .medium:
+            finalUnits = min(
+                max(computedUnits * 1.12, config.minimumEndUnits),
+                config.maximumEndUnits
+            )
+
+        case .strong:
+            finalUnits = config.fullPeriodUnits
         }
-        
-        // Базовый сдвиг = distance / K
-        let baseOffset = absDistance / baseCalibration
-        
-        // Множитель скорости (от 1.0 до 3.0)
-        let velocityMultiplier: CGFloat
-        if absVelocity > 2000 {
-            velocityMultiplier = 3.0
-        } else if absVelocity > 1500 {
-            velocityMultiplier = 2.5
-        } else if absVelocity > 1000 {
-            velocityMultiplier = 2.0
-        } else if absVelocity > 500 {
-            velocityMultiplier = 1.5
-        } else {
-            velocityMultiplier = 1.0
-        }
-        
-        // Ограничения по масштабу
-        let scaleLimits: (min: Double, max: Double)
-        switch selectedScale {
-        case .week:
-            // Неделя: от 1 дня до 14 дней (2 недели максимум)
-            scaleLimits = (1.0, 14.0)
-        case .month:
-            // Месяц: от 2 дней до 60 дней (2 месяца максимум)
-            scaleLimits = (2.0, 60.0)
-        case .year:
-            // Год: от 15 дней до 365 дней (1 год максимум)
-            scaleLimits = (15.0, 365.0)
-        }
-        
-        // Итоговый сдвиг с учётом всех множителей
-        let rawOffset = Double(baseOffset * velocityMultiplier)
-        let clampedOffset = min(max(rawOffset, scaleLimits.min), scaleLimits.max)
-        
-        return clampedOffset
+
+        let signedUnits = swipeInfo.direction == .forward ? finalUnits : -finalUnits
+        return startAnchor.addingTimeInterval(signedUnits * config.unitSeconds)
     }
 
-    private func movePeriod(by delta: Int) {
+    private func velocityMultiplier(for velocity: CGFloat) -> Double {
+        switch velocity {
+        case ..<500:
+            return 1.0
+        case 500..<900:
+            return 1.22
+        case 900..<1500:
+            return 1.55
+        case 1500..<2200:
+            return 2.05
+        default:
+            return 2.65
+        }
+    }
+
+    private func animation(for swipeInfo: ProportionalSwipeInfo) -> Animation {
+        let absVelocity = abs(swipeInfo.velocity)
+
+        let response: Double
+        if absVelocity > 1500 {
+            response = 0.24
+        } else if absVelocity > 700 {
+            response = 0.32
+        } else {
+            response = 0.44
+        }
+
+        return .spring(response: response, dampingFraction: 0.82)
+    }
+
+    private func clampAnchorDate(_ date: Date) -> Date {
+        min(date, latestAllowedAnchorDate)
+    }
+
+    private func snappedAnchorDate(_ date: Date, scale: AnalyticsTimeScale) -> Date {
         let calendar = Calendar.current
 
-        let nextDate: Date
-        switch selectedScale {
-        case .week:
-            nextDate = calendar.date(byAdding: .weekOfYear, value: delta, to: pageAnchorDate) ?? pageAnchorDate
-        case .month:
-            nextDate = calendar.date(byAdding: .month, value: delta, to: pageAnchorDate) ?? pageAnchorDate
+        switch scale {
+        case .week, .month:
+            return calendar.startOfDay(for: date)
+
         case .year:
-            nextDate = calendar.date(byAdding: .year, value: delta, to: pageAnchorDate) ?? pageAnchorDate
-        }
-
-        if delta > 0 && !canMoveForward {
-            return
-        }
-
-        let generator = UIImpactFeedbackGenerator(style: .soft)
-        generator.impactOccurred(intensity: 0.8)
-
-        withAnimation(.snappy(duration: 0.28, extraBounce: 0.04)) {
-            pageAnchorDate = nextDate
-            selectedChartPointID = nil
-            selectedCategoryName = nil
-            pageChangeToken = UUID()
+            return calendar.dateInterval(of: .month, for: date)?.start ?? date
         }
     }
+
+    // MARK: - Period navigation
+
+    private var canMoveToNextPeriod: Bool {
+        let calendar = Calendar.current
+        let nextAnchor: Date
+        
+        switch selectedScale {
+        case .week:
+            nextAnchor = calendar.date(byAdding: .weekOfYear, value: 1, to: pageAnchorDate) ?? pageAnchorDate
+        case .month:
+            nextAnchor = calendar.date(byAdding: .month, value: 1, to: pageAnchorDate) ?? pageAnchorDate
+        case .year:
+            nextAnchor = calendar.date(byAdding: .year, value: 1, to: pageAnchorDate) ?? pageAnchorDate
+        }
+        
+        return nextAnchor <= latestAllowedAnchorDate
+    }
+
+    private func moveToPreviousPeriod() {
+        let calendar = Calendar.current
+        
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            switch selectedScale {
+            case .week:
+                pageAnchorDate = calendar.date(byAdding: .weekOfYear, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+            case .month:
+                pageAnchorDate = calendar.date(byAdding: .month, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+            case .year:
+                pageAnchorDate = calendar.date(byAdding: .year, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+            }
+            
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+        }
+    }
+
+    private func moveToNextPeriod() {
+        guard canMoveToNextPeriod else { return }
+        
+        let calendar = Calendar.current
+        
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            switch selectedScale {
+            case .week:
+                pageAnchorDate = calendar.date(byAdding: .weekOfYear, value: 1, to: pageAnchorDate) ?? pageAnchorDate
+            case .month:
+                pageAnchorDate = calendar.date(byAdding: .month, value: 1, to: pageAnchorDate) ?? pageAnchorDate
+            case .year:
+                pageAnchorDate = calendar.date(byAdding: .year, value: 1, to: pageAnchorDate) ?? pageAnchorDate
+            }
+            
+            pageAnchorDate = clampAnchorDate(pageAnchorDate)
+            selectedChartPointID = nil
+            selectedCategoryName = nil
+        }
+    }
+
+    // MARK: - Trend / insights helpers
 
     private var trendDeltaFraction: Double? {
         guard previousSnapshot.averageExpensePerBin > 0 else { return nil }
         return (snapshot.averageExpensePerBin - previousSnapshot.averageExpensePerBin) / previousSnapshot.averageExpensePerBin
-    }
-
-    private var trendHeadline: String {
-        guard let delta = trendDeltaFraction else {
-            return "Тренд недоступен"
-        }
-
-        if abs(delta) < 0.03 {
-            return "Расходы почти не изменились"
-        } else if delta > 0 {
-            return "Ты тратишь больше"
-        } else {
-            return "Ты тратишь меньше"
-        }
-    }
-
-    private var trendMessage: String? {
-        guard let delta = trendDeltaFraction else { return nil }
-
-        let periodName: String
-        switch selectedScale {
-        case .week:
-            periodName = "прошлой неделей"
-        case .month:
-            periodName = "прошлым месяцем"
-        case .year:
-            periodName = "прошлым годом"
-        }
-
-        if abs(delta) < 0.03 {
-            return "Средний расход почти не изменился по сравнению с \(periodName)."
-        }
-
-        let percent = formattedPercent(abs(delta))
-        let unit: String = selectedScale == .year ? "Средний расход в месяц" : "Средний расход в день"
-
-        if delta > 0 {
-            return "\(unit) выше на \(percent) по сравнению с \(periodName)."
-        } else {
-            return "\(unit) ниже на \(percent) по сравнению с \(periodName)."
-        }
     }
 
     private var selectedCategoryPoint: AnalyticsCategoryTotal? {

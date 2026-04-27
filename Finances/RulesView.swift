@@ -47,6 +47,7 @@ struct RulesView: View {
                                     let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
                                         transactions,
                                         rules: rules,
+                                        categories: categories,
                                         overwriteExisting: false
                                     )
 
@@ -61,6 +62,7 @@ struct RulesView: View {
                                     let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
                                         transactions,
                                         rules: rules,
+                                        categories: categories,
                                         overwriteExisting: true
                                     )
 

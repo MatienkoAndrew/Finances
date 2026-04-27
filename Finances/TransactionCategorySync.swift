@@ -70,6 +70,7 @@ enum TransactionCategorySync {
     static func autoCategorizeTransactions(
         _ transactions: [Transaction],
         rules: [CategoryRule],
+        categories: [ExpenseCategoryItem],
         overwriteExisting: Bool = false
     ) -> Int {
         var updatedCount = 0
@@ -84,7 +85,8 @@ enum TransactionCategorySync {
             let guessed = CategoryRuleEngine.matchCategoryName(
                 operationType: transaction.ruleOperationType,
                 details: transaction.details,
-                rules: rules
+                rules: rules,
+                existingCategories: categories
             )
 
             guard let guessed else { continue }

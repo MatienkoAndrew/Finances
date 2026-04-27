@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUI
 import SwiftData
 
 struct AddRuleView: View {
@@ -312,6 +313,7 @@ struct AddRuleView: View {
         let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
             transactions,
             rules: [transientRule],
+            categories: categories,
             overwriteExisting: true
         )
 

@@ -15,7 +15,8 @@ struct FinancesApp: App {
             ExchangeRateEntry.self,
             TrackedExchangeRate.self,
             Account.self,
-            Transaction.self
+            Transaction.self,
+            TransactionTag.self
         ])
     }
 }

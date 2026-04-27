@@ -17,7 +17,6 @@ struct DefaultCategoryDefinition {
 enum DefaultCategoryDefinitions {
     static let items: [DefaultCategoryDefinition] = [
         .init(name: "Еда", iconName: "fork.knife", colorHex: "#FF9500"),
-        .init(name: "Кофе", iconName: "cup.and.saucer.fill", colorHex: "#A2845E"),
         .init(name: "Продукты", iconName: "cart.fill", colorHex: "#34C759"),
         .init(name: "Транспорт", iconName: "car.fill", colorHex: "#007AFF"),
         .init(name: "Подписки", iconName: "creditcard.fill", colorHex: "#AF52DE"),

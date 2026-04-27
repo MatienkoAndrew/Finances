@@ -147,8 +147,6 @@ struct AddExpenseView: View {
 
                 Section("Категория") {
                     Picker("Категория", selection: $selectedCategoryName) {
-                        Text("Без категории").tag(nil as String?)
-
                         ForEach(categories) { category in
                             Text(category.name).tag(Optional(category.name))
                         }

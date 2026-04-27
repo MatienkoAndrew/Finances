@@ -104,20 +104,6 @@ struct TransactionRowView: View {
     private var categoryMenu: some View {
         if transaction.kind == .expense {
             Menu {
-                Button {
-                    updateCategory(nil)
-                } label: {
-                    HStack {
-                        Text("Без категории")
-                        if transaction.categoryName == nil {
-                            Spacer()
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-
-                Divider()
-
                 ForEach(categories) { category in
                     Button {
                         updateCategory(category.name)
@@ -154,7 +140,7 @@ struct TransactionRowView: View {
 
     @ViewBuilder
     private var categoryChipLabel: some View {
-        let name = transaction.categoryName ?? "Без категории"
+        let name = transaction.categoryName ?? "Другое"
 
         if let categoryItem {
             HStack(spacing: 6) {

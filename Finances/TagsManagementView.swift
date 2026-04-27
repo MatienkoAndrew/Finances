@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUI
 import SwiftData
 
 struct TagsManagementView: View {
@@ -94,7 +95,7 @@ struct TagRowView: View {
                 .frame(width: 40, height: 40)
                 .background(
                     Circle()
-                        .fill(Color(hex: tag.colorHex ?? "#007AFF").opacity(0.15))
+                        .fill(ColorHelper.fromHex(tag.colorHex ?? "#007AFF").opacity(0.15))
                 )
             
             VStack(alignment: .leading, spacing: 4) {
@@ -351,7 +352,7 @@ struct ColorPickerRow: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 12) {
                 ForEach(colors, id: \.hex) { color in
                     Circle()
-                        .fill(Color(hex: color.hex))
+                        .fill(ColorHelper.fromHex(color.hex))
                         .frame(width: 44, height: 44)
                         .overlay {
                             if selectedColorHex == color.hex {
@@ -369,10 +370,10 @@ struct ColorPickerRow: View {
     }
 }
 
-// MARK: - Color Extension
+// MARK: - Color Helper
 
-extension Color {
-    init(hex: String) {
+struct ColorHelper {
+    static func fromHex(_ hex: String) -> Color {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
@@ -388,7 +389,7 @@ extension Color {
             (a, r, g, b) = (255, 0, 0, 0)
         }
 
-        self.init(
+        return Color(
             .sRGB,
             red: Double(r) / 255,
             green: Double(g) / 255,

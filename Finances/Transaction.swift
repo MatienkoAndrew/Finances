@@ -31,6 +31,9 @@ final class Transaction {
 
     var categoryName: String?
     var note: String?
+    
+    /// Метки для группировки транзакций (страны, проекты и т.д.)
+    var tagNames: [String]?
 
     var fingerprint: String?
     var sourceFileName: String?
@@ -54,6 +57,7 @@ final class Transaction {
         rubAmount: Double? = nil,
         categoryName: String? = nil,
         note: String? = nil,
+        tagNames: [String]? = nil,
         fingerprint: String? = nil,
         sourceFileName: String? = nil,
         importedAt: Date? = nil,
@@ -73,6 +77,7 @@ final class Transaction {
         self.rubAmount = rubAmount
         self.categoryName = categoryName
         self.note = note
+        self.tagNames = tagNames
         self.fingerprint = fingerprint
         self.sourceFileName = sourceFileName
         self.importedAt = importedAt
@@ -117,6 +122,31 @@ extension Transaction {
 
     var isCrossCurrencyTransfer: Bool {
         kind == .transfer && creditedCurrencyCode != currencyCode
+    }
+    
+    // MARK: - Tags
+    
+    /// Добавить метку к транзакции
+    func addTag(_ tagName: String) {
+        if tagNames == nil {
+            tagNames = []
+        }
+        if !tagNames!.contains(tagName) {
+            tagNames!.append(tagName)
+        }
+    }
+    
+    /// Удалить метку из транзакции
+    func removeTag(_ tagName: String) {
+        tagNames?.removeAll { $0 == tagName }
+        if tagNames?.isEmpty == true {
+            tagNames = nil
+        }
+    }
+    
+    /// Проверить, есть ли метка
+    func hasTag(_ tagName: String) -> Bool {
+        tagNames?.contains(tagName) == true
     }
 }
 

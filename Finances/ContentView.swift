@@ -21,6 +21,9 @@ struct ContentView: View {
     @Query(sort: \CategoryRule.priority, order: .reverse)
     private var categoryRules: [CategoryRule]
     
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
+    
     @Query(sort: \ExchangeRateEntry.date, order: .reverse)
     private var rates: [ExchangeRateEntry]
 
@@ -203,7 +206,8 @@ struct ContentView: View {
             let guessed = CategoryRuleEngine.matchCategoryName(
                 operationType: expense.operationType,
                 details: expense.details,
-                rules: categoryRules
+                rules: categoryRules,
+                existingCategories: categories
             )
 
             if let guessed {
@@ -238,6 +242,7 @@ struct ContentView: View {
                     existingTransactions: transactions,
                     accounts: accounts,
                     rules: categoryRules,
+                    categories: categories,
                     rates: rates,
                     fallbackKztPerRub: settings?.kztPerRub
                 )

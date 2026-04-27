@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
@@ -14,6 +15,9 @@ struct TransactionsView: View {
     @Query(sort: \CategoryRule.priority, order: .reverse)
     private var categoryRules: [CategoryRule]
 
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
+    private var categories: [ExpenseCategoryItem]
+
     @Query(sort: \ExchangeRateEntry.date, order: .reverse)
     private var rates: [ExchangeRateEntry]
 
@@ -26,6 +30,7 @@ struct TransactionsView: View {
     @State private var searchText: String = ""
     @State private var isShowingAddTransaction = false
     @State private var isShowingImporter = false
+    @State private var isShowingQuickTag = false
 
     @State private var importErrorMessage: String?
     @State private var importResultMessage: String?
@@ -128,6 +133,12 @@ struct TransactionsView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        isShowingQuickTag = true
+                    } label: {
+                        Image(systemName: "tag.fill")
+                    }
+                    
+                    Button {
                         isShowingImporter = true
                     } label: {
                         Image(systemName: "doc.badge.plus")
@@ -142,6 +153,9 @@ struct TransactionsView: View {
             }
             .sheet(isPresented: $isShowingAddTransaction) {
                 AddTransactionView()
+            }
+            .sheet(isPresented: $isShowingQuickTag) {
+                QuickTagView()
             }
             .fileImporter(
                 isPresented: $isShowingImporter,
@@ -361,6 +375,7 @@ struct TransactionsView: View {
                     existingTransactions: transactions,
                     accounts: accounts,
                     rules: categoryRules,
+                    categories: categories,
                     rates: rates,
                     fallbackKztPerRub: settings?.kztPerRub
                 )

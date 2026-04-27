@@ -77,21 +77,6 @@ struct ExpenseRowView: View {
     @ViewBuilder
     private var categoryMenu: some View {
         Menu {
-            Button {
-                expense.categoryName = nil
-                saveChanges()
-            } label: {
-                HStack {
-                    Text("Без категории")
-                    if expense.categoryName == nil {
-                        Spacer()
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-
-            Divider()
-
             ForEach(categories) { category in
                 Button {
                     expense.categoryName = category.name
@@ -153,7 +138,7 @@ struct ExpenseRowView: View {
             }
         } else {
             HStack(spacing: 4) {
-                Text("Без категории")
+                Text("Другое")
                 Image(systemName: "chevron.down")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
