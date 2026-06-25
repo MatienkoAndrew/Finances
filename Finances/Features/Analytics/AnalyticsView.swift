@@ -896,7 +896,16 @@ struct AnalyticsView: View {
                     AxisMarks(position: .bottom)
                 }
                 .chartYAxis {
-                    AxisMarks(position: .leading)
+                    AxisMarks(position: .leading) { value in
+                        AxisValueLabel {
+                            if let name = value.as(String.self) {
+                                let isSelected = selectedCategoryName == name
+                                Text(name)
+                                    .font(isSelected ? .caption.bold() : .caption)
+                                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                            }
+                        }
+                    }
                 }
                 .chartOverlay { proxy in
                     GeometryReader { geometry in
