@@ -15,6 +15,15 @@ enum AnalyticsTimeScale: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    // Подпись для верхних вкладок (стиль Alipay).
+    var tabTitle: String {
+        switch self {
+        case .week: return "Неделя"
+        case .month: return "Месяц"
+        case .year: return "Год"
+        }
+    }
+
     var averageTitle: String {
         switch self {
         case .week, .month:

@@ -161,7 +161,6 @@ struct AnalyticsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     if selectedMode == .time {
-                        scalePicker
                         periodNavigation
                     } else {
                         tagPicker
@@ -187,8 +186,13 @@ struct AnalyticsView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Аналитика")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if selectedMode == .time {
+                        scaleTabs
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     tagToggleButton
                 }
@@ -361,35 +365,28 @@ struct AnalyticsView: View {
         }
     }
 
-    private var scalePicker: some View {
-        HStack(spacing: 0) {
+    // Верхние вкладки масштаба в стиле Alipay: текст + подчёркивание.
+    private var scaleTabs: some View {
+        HStack(spacing: 22) {
             ForEach(AnalyticsTimeScale.allCases) { scale in
+                let isSelected = selectedScale == scale
+
                 Button {
                     selectedScale = scale
                 } label: {
-                    Text(scale.rawValue)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            selectedScale == scale
-                            ? Color.white
-                            : Color.clear
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    VStack(spacing: 3) {
+                        Text(scale.tabTitle)
+                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+
+                        Capsule()
+                            .fill(isSelected ? Color.primary : Color.clear)
+                            .frame(width: 16, height: 2)
+                    }
                 }
                 .buttonStyle(.plain)
-
-                if scale != AnalyticsTimeScale.allCases.last {
-                    Divider()
-                        .frame(height: 20)
-                        .padding(.horizontal, 8)
-                }
             }
         }
-        .padding(6)
-        .background(Color.gray.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     private var periodNavigation: some View {
