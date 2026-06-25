@@ -781,8 +781,8 @@ struct AnalyticsView: View {
                             )
                         } label: {
                             HStack {
-                                if let categoryItem = categoryItem(for: item.category) {
-                                    HStack(spacing: 8) {
+                                HStack(spacing: 8) {
+                                    if let categoryItem = categoryItem(for: item.category) {
                                         Circle()
                                             .fill(Color(hex: categoryItem.colorHex) ?? .gray)
                                             .frame(width: 24, height: 24)
@@ -791,17 +791,25 @@ struct AnalyticsView: View {
                                                     .font(.system(size: 10, weight: .bold))
                                                     .foregroundStyle(.white)
                                             }
-
-                                        Text(item.category)
                                     }
-                                } else {
+
                                     Text(item.category)
+
+                                    Text(categoryPercentLabel(item.total))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
                                 }
 
                                 Spacer()
 
-                                Text(formattedRubAmount(item.total))
-                                    .fontWeight(.semibold)
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(formattedRubAmount(item.total))
+                                        .fontWeight(.semibold)
+
+                                    Text("(\(item.count) всего)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             .padding()
                             .background(Color.gray.opacity(0.08))
@@ -1197,6 +1205,12 @@ struct AnalyticsView: View {
 
     private var selectedCategoryPoint: AnalyticsCategoryTotal? {
         snapshot.categoryTotals.first { $0.category == selectedCategoryName }
+    }
+
+    // Доля категории в процентах с одним знаком: "92.3%".
+    private func categoryPercentLabel(_ total: Double) -> String {
+        guard snapshot.totalExpensesRub > 0 else { return "0%" }
+        return String(format: "%.1f%%", total / snapshot.totalExpensesRub * 100)
     }
 
     private func categoryShare(for categoryName: String) -> Double {

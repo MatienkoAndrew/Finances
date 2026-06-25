@@ -41,6 +41,7 @@ struct AnalyticsCategoryTotal: Identifiable {
     var id: String { category }
     let category: String
     let total: Double
+    let count: Int
 }
 
 struct AnalyticsMerchantTotal: Identifiable {
@@ -115,6 +116,7 @@ enum AnalyticsSnapshotBuilder {
         var incomeCount = 0
 
         var categoryMap: [String: Double] = [:]
+        var categoryCountMap: [String: Int] = [:]
         var merchantMap: [String: Double] = [:]
         var merchantByCategory: [String: [String: Double]] = [:]
 
@@ -140,6 +142,7 @@ enum AnalyticsSnapshotBuilder {
 
                 let category = transaction.categoryName ?? "Без категории"
                 categoryMap[category, default: 0] += rub
+                categoryCountMap[category, default: 0] += 1
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] += rub
@@ -220,7 +223,7 @@ enum AnalyticsSnapshotBuilder {
         }
 
         let categoryTotals = categoryMap
-            .map { AnalyticsCategoryTotal(category: $0.key, total: $0.value) }
+            .map { AnalyticsCategoryTotal(category: $0.key, total: $0.value, count: categoryCountMap[$0.key] ?? 0) }
             .sorted { $0.total > $1.total }
 
         let merchantTotals = merchantMap
