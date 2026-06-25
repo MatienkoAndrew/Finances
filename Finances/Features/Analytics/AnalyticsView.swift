@@ -172,9 +172,9 @@ struct AnalyticsView: View {
                         }
                     }
                     
+                    periodSummaryCards
                     topSummarySection
                     chartSection
-                    periodSummaryCards
                     breakdownPicker
                     selectedBreakdownSection
 
