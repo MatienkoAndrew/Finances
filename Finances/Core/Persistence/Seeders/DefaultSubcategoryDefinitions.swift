@@ -40,6 +40,50 @@ enum DefaultSubcategoryDefinitions {
             .init(name: "Самокат", emoji: "🛴"),
             .init(name: "Поезд/электричка", emoji: "🚆"),
             .init(name: "Другое", emoji: "🚦")
+        ],
+        "Подписки": [
+            .init(name: "Музыка", emoji: "🎵"),
+            .init(name: "Облако", emoji: "☁️"),
+            .init(name: "Связь", emoji: "📱"),
+            .init(name: "ИИ", emoji: "🤖"),
+            .init(name: "Другое", emoji: "🧩")
+        ],
+        "Покупки": [
+            .init(name: "Одежда", emoji: "👕"),
+            .init(name: "Обувь", emoji: "👟"),
+            .init(name: "Электроника", emoji: "📱"),
+            .init(name: "Дом/быт", emoji: "🏠"),
+            .init(name: "Косметика", emoji: "💄"),
+            .init(name: "Подарки", emoji: "🎁"),
+            .init(name: "Маркетплейсы", emoji: "📦"),
+            .init(name: "Другое", emoji: "🛍️")
+        ],
+        "Жильё": [
+            .init(name: "Аренда", emoji: "🔑"),
+            .init(name: "Ипотека", emoji: "🏦"),
+            .init(name: "Коммуналка", emoji: "🧾"),
+            .init(name: "Интернет", emoji: "📶"),
+            .init(name: "Ремонт", emoji: "🔨"),
+            .init(name: "Мебель/техника", emoji: "🛋️"),
+            .init(name: "Другое", emoji: "🏡")
+        ],
+        "Путешествия": [
+            .init(name: "Авиабилеты", emoji: "🛫"),
+            .init(name: "Отели", emoji: "🏨"),
+            .init(name: "Ж/д билеты", emoji: "🚆"),
+            .init(name: "Аренда авто", emoji: "🚗"),
+            .init(name: "Экскурсии", emoji: "🗺️"),
+            .init(name: "Виза/страховка", emoji: "🛂"),
+            .init(name: "Другое", emoji: "✈️")
+        ],
+        "Здоровье": [
+            .init(name: "Аптека", emoji: "💊"),
+            .init(name: "Врач/клиника", emoji: "🩺"),
+            .init(name: "Анализы", emoji: "🧪"),
+            .init(name: "Стоматология", emoji: "🦷"),
+            .init(name: "Спорт/фитнес", emoji: "🏋️"),
+            .init(name: "Косметолог", emoji: "💆"),
+            .init(name: "Другое", emoji: "🏥")
         ]
     ]
 
