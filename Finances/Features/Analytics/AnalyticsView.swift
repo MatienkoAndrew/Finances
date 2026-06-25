@@ -180,6 +180,12 @@ struct AnalyticsView: View {
                     periodSummaryCards
                     breakdownPicker
                     selectedBreakdownSection
+
+                    if selectedBreakdown == .category {
+                        // Доп. место прокрутки, чтобы график категорий можно
+                        // было поднять выше пальца при выборе бара.
+                        Color.clear.frame(height: 300)
+                    }
                 }
                 .padding()
             }
