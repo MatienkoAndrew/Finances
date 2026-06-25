@@ -43,6 +43,8 @@ enum PeriodSwipeResult {
 
 struct InteractiveBarChartView: View {
     let points: [AnalyticsChartPoint]
+    let average: Double
+    let averageLabel: String
     @Binding var selectedPointID: String?
 
     let onSelectionChanged: (AnalyticsChartPoint?) -> Void
@@ -79,6 +81,7 @@ struct InteractiveBarChartView: View {
                 let regularWidth = min(max(slotWidth * 0.84, 16), 42)
 
                 let barsAreaHeight = max(chartHeight - bottomPagingZoneHeight, 1)
+                let usableHeight = max(barsAreaHeight - 6, 1)
 
                 ZStack(alignment: .bottomLeading) {
                     HStack(spacing: 0) {
@@ -102,7 +105,6 @@ struct InteractiveBarChartView: View {
                     ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
                         let isSelected = selectedPointID == point.id
                         let barWidth = isSelected ? selectedWidth : regularWidth
-                        let usableHeight = max(barsAreaHeight - 6, 1)
                         let normalizedHeight = CGFloat(point.total / maxValue)
                         let targetBarHeight = max(normalizedHeight * usableHeight, point.total > 0 ? 4 : 1)
                         let currentBarHeight = animatedHeights[point.id] ?? (didRunInitialEntranceAnimation ? targetBarHeight : 0)
@@ -156,6 +158,38 @@ struct InteractiveBarChartView: View {
                                     }
                                 }
                             }
+                    }
+
+                    if average > 0 {
+                        let averageRatio = min(CGFloat(average / maxValue), 1)
+                        let averageY = barsAreaHeight - averageRatio * usableHeight
+
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: averageY))
+                            path.addLine(to: CGPoint(x: chartWidth, y: averageY))
+                        }
+                        .stroke(
+                            Color.secondary.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                        )
+                        .opacity(selectedPointID == nil ? 1 : 0.35)
+                        .allowsHitTesting(false)
+
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            Text(averageLabel)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule().fill(Color.secondary.opacity(0.12))
+                                )
+                        }
+                        .frame(width: chartWidth)
+                        .position(x: chartWidth / 2, y: max(averageY - 12, 9))
+                        .opacity(selectedPointID == nil ? 1 : 0.35)
+                        .allowsHitTesting(false)
                     }
                 }
                 .contentShape(Rectangle())
