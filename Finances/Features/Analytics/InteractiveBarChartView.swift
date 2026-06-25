@@ -128,12 +128,9 @@ struct InteractiveBarChartView: View {
 
                 ZStack(alignment: .bottomLeading) {
                     HStack(spacing: 0) {
-                        ForEach(points) { _ in
-                            VerticalDashedLine()
-                                .stroke(
-                                    Color.secondary.opacity(0.18),
-                                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
-                                )
+                        ForEach(points) { point in
+                            Rectangle()
+                                .fill(Color.secondary.opacity(point.showsGridline ? 0.18 : 0))
                                 .frame(width: 1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -425,15 +422,5 @@ struct InteractiveBarChartView: View {
         withAnimation(.spring(response: 0.30, dampingFraction: 0.82).delay(0.04)) {
             edgeBounceAmount = 0
         }
-    }
-}
-
-/// Вертикальная линия по центру своей области — для пунктирных разделителей баров.
-private struct VerticalDashedLine: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-        return path
     }
 }

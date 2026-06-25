@@ -26,6 +26,8 @@ struct AnalyticsChartPoint: Identifiable {
     let axisLabel: String
     let title: String
     let total: Double
+    // Рисовать ли вертикальную линию-разделитель у этой точки.
+    var showsGridline: Bool = true
 }
 
 struct AnalyticsTimeTotal: Identifiable {
@@ -159,7 +161,8 @@ enum AnalyticsSnapshotBuilder {
                 date: bin.date,
                 axisLabel: bin.axisLabel,
                 title: bin.title,
-                total: chartTotals[index]
+                total: chartTotals[index],
+                showsGridline: bin.showsGridline
             )
         }
 
@@ -287,6 +290,7 @@ enum AnalyticsSnapshotBuilder {
         let date: Date
         let axisLabel: String
         let title: String
+        var showsGridline: Bool = true
     }
 
     private static func makeBins(for scale: AnalyticsTimeScale, page: AnalyticsPeriodPage) -> [BinDescriptor] {
@@ -313,11 +317,14 @@ enum AnalyticsSnapshotBuilder {
             return dates.enumerated().map { index, date in
                 let day = calendar.component(.day, from: date)
                 let show = day == 1 || day % 7 == 0 || index == lastIndex
+                // Вертикальная линия только в начале каждой недели (понедельник).
+                let isWeekStart = calendar.component(.weekday, from: date) == 2
 
                 return BinDescriptor(
                     date: date,
                     axisLabel: show ? "\(day)" : "",
-                    title: formattedShortDate(date)
+                    title: formattedShortDate(date),
+                    showsGridline: isWeekStart
                 )
             }
 
@@ -325,11 +332,15 @@ enum AnalyticsSnapshotBuilder {
             return strideDates(from: page.startDate, to: page.endDateExclusive, component: .month).map { date in
                 let formatter = DateFormatter()
                 formatter.locale = Locale(identifier: "ru_RU")
-                formatter.dateFormat = "MMM"
+                formatter.dateFormat = "MMMM"
+
+                // Подпись года — одна заглавная буква месяца (Июнь/Июль → «И»).
+                let monthName = formatter.string(from: date)
+                let initial = String(monthName.prefix(1)).uppercased()
 
                 return BinDescriptor(
                     date: date,
-                    axisLabel: formatter.string(from: date).capitalized,
+                    axisLabel: initial,
                     title: formattedMonthYear(date)
                 )
             }
