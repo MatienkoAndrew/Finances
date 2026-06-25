@@ -22,7 +22,6 @@ struct AnalyticsView: View {
     @State private var selectedMode: AnalyticsViewMode = .time
     @State private var selectedScale: AnalyticsTimeScale = .week
     @State private var pageAnchorDate: Date = .now
-    @State private var selectedBreakdown: AnalyticsBreakdown = .category
     
     // Для режима Tags
     @State private var selectedTag: TransactionTag?
@@ -175,14 +174,12 @@ struct AnalyticsView: View {
                     periodSummaryCards
                     topSummarySection
                     chartSection
-                    breakdownPicker
-                    selectedBreakdownSection
 
-                    if selectedBreakdown == .category {
-                        // Доп. место прокрутки, чтобы график категорий можно
-                        // было поднять выше пальца при выборе бара.
-                        Color.clear.frame(height: 300)
-                    }
+                    // Разбивки идут одна за другой, без переключателя.
+                    dailySection
+                    categorySection
+                    categoryChartSection
+                    merchantSection
                 }
                 .padding()
             }
@@ -533,49 +530,6 @@ struct AnalyticsView: View {
         }
     }
 
-    // MARK: - Breakdown picker
-
-    private var breakdownPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(AnalyticsBreakdown.allCases, id: \.self) { breakdown in
-                    Button {
-                        selectedBreakdown = breakdown
-                    } label: {
-                        Text(breakdown.rawValue)
-                            .font(.subheadline)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(
-                                selectedBreakdown == breakdown
-                                ? Color.primary.opacity(0.10)
-                                : Color.gray.opacity(0.08)
-                            )
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var selectedBreakdownSection: some View {
-        switch selectedBreakdown {
-        case .daily:
-            dailySection
-
-        case .category:
-            VStack(spacing: 16) {
-                categorySection
-                categoryChartSection
-            }
-
-        case .merchant:
-            merchantSection
-        }
-    }
-
     // MARK: - Lower sections
 
     private var dailySection: some View {
@@ -583,10 +537,15 @@ struct AnalyticsView: View {
             Text(dailySectionTitle)
                 .font(.title3.bold())
 
-            if snapshot.lowerTimeTotals.isEmpty {
+            if snapshot.chartPoints.isEmpty {
                 Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
+            } else if selectedMode == .time && selectedScale == .week {
+                weekDailyStrip
+            } else if selectedMode == .time && selectedScale == .month {
+                monthDailyCalendar
             } else {
+                // Год и режим меток — прежний список строк.
                 VStack(spacing: 10) {
                     ForEach(snapshot.lowerTimeTotals) { item in
                         dailySectionRow(for: item)
@@ -594,6 +553,133 @@ struct AnalyticsView: View {
                 }
             }
         }
+    }
+
+    // Неделя: горизонтальная лента из 7 карточек (дата + сумма), стиль Alipay.
+    private var weekDailyStrip: some View {
+        HStack(spacing: 8) {
+            ForEach(snapshot.chartPoints) { point in
+                NavigationLink {
+                    TransactionListByDateView(date: point.date)
+                } label: {
+                    VStack(spacing: 6) {
+                        Text(Self.dayMonthFormatter.string(from: point.date))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Text(dayCellAmount(point.total))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 4)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // Месяц: сетка-календарь с суммой по дням и подсветкой по интенсивности трат.
+    private var monthDailyCalendar: some View {
+        var calendar = Calendar.current
+        calendar.locale = Locale(identifier: "ru_RU")
+
+        let points = snapshot.chartPoints
+        let maxTotal = max(points.map(\.total).max() ?? 0, 1)
+        let leadingBlanks = points.first.map { first in
+            (calendar.component(.weekday, from: first.date) - calendar.firstWeekday + 7) % 7
+        } ?? 0
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+
+        return VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(orderedWeekdaySymbols(calendar), id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            LazyVGrid(columns: columns, spacing: 6) {
+                ForEach(0..<leadingBlanks, id: \.self) { _ in
+                    Color.clear.frame(height: 52)
+                }
+
+                ForEach(points) { point in
+                    monthDayCell(point, maxTotal: maxTotal, calendar: calendar)
+                }
+            }
+        }
+    }
+
+    private func monthDayCell(
+        _ point: AnalyticsChartPoint,
+        maxTotal: Double,
+        calendar: Calendar
+    ) -> some View {
+        let day = calendar.component(.day, from: point.date)
+        let hasSpend = point.total > 0
+        let intensity = hasSpend ? min(point.total / maxTotal, 1) : 0
+        let background = hasSpend
+            ? Color.red.opacity(0.10 + 0.30 * intensity)
+            : Color.gray.opacity(0.08)
+
+        return NavigationLink {
+            TransactionListByDateView(date: point.date)
+        } label: {
+            VStack(spacing: 3) {
+                Text("\(day)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(hasSpend ? dayCellAmount(point.total) : "—")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Короткие названия дней недели в порядке от firstWeekday (Пн … Вс для ru).
+    private func orderedWeekdaySymbols(_ calendar: Calendar) -> [String] {
+        let symbols = calendar.shortWeekdaySymbols.map { $0.capitalized }
+        let shift = calendar.firstWeekday - 1
+        guard shift > 0 else { return symbols }
+        return Array(symbols[shift...] + symbols[..<shift])
+    }
+
+    private static let dayMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "MM.dd"
+        return formatter
+    }()
+
+    private static let dayCellAmountFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = ""
+        formatter.decimalSeparator = ","
+        return formatter
+    }()
+
+    private func dayCellAmount(_ value: Double) -> String {
+        Self.dayCellAmountFormatter.string(from: NSNumber(value: value)) ?? "0"
     }
 
     private var dailySectionTitle: String {
