@@ -177,8 +177,8 @@ struct AnalyticsView: View {
 
                     // Разбивки идут одна за другой, без переключателя.
                     dailySection
-                    categorySection
                     categoryChartSection
+                    categorySection
                     merchantSection
                 }
                 .padding()
@@ -671,8 +671,8 @@ struct AnalyticsView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
         formatter.groupingSeparator = ""
         formatter.decimalSeparator = ","
         return formatter
@@ -872,114 +872,34 @@ struct AnalyticsView: View {
                 Text("Нет данных для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    Chart {
-                        ForEach(snapshot.categoryTotals) { item in
-                            let isSelected = selectedCategoryName == item.category
-                            let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
+                Chart {
+                    ForEach(snapshot.categoryTotals) { item in
+                        let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
 
-                            BarMark(
-                                x: .value("Сумма", item.total),
-                                y: .value("Категория", item.category),
-                                height: .fixed(isSelected ? 26 : 18)
-                            )
-                            .foregroundStyle(isSelected ? color : color.opacity(0.72))
-                            .cornerRadius(isSelected ? 8 : 5)
-                            .annotation(position: .trailing) {
-                                Text(shortAmount(item.total))
-                                    .font(isSelected ? .caption.bold() : .caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .frame(height: chartHeightForCategories)
-                    .chartXAxis {
-                        AxisMarks(position: .bottom)
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading)
-                    }
-                    .chartOverlay { proxy in
-                        GeometryReader { geometry in
-                            Rectangle()
-                                .fill(.clear)
-                                .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onChanged { value in
-                                            let plotFrame = geometry[proxy.plotAreaFrame]
-                                            let yInPlot = value.location.y - plotFrame.origin.y
-
-                                            guard yInPlot >= 0, yInPlot <= proxy.plotAreaSize.height else {
-                                                return
-                                            }
-
-                                            if let nearestCategoryName = nearestCategory(
-                                                at: yInPlot,
-                                                plotHeight: proxy.plotAreaSize.height
-                                            ) {
-                                                if selectedCategoryName != nearestCategoryName {
-                                                    selectedCategoryName = nearestCategoryName
-
-                                                    if lastHapticCategoryName != nearestCategoryName {
-                                                        let generator = UIImpactFeedbackGenerator(style: .light)
-                                                        generator.impactOccurred(intensity: 0.7)
-                                                        lastHapticCategoryName = nearestCategoryName
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        .onEnded { value in
-                                            let totalTranslation = abs(value.translation.width) + abs(value.translation.height)
-
-                                            if totalTranslation < 10, let selectedCategoryName {
-                                                categoryNavigationTarget = selectedCategoryName
-                                            }
-
-                                            selectedCategoryName = nil
-                                            lastHapticCategoryName = nil
-                                        }
-                                )
-                        }
-                    }
-
-                    if let selectedCategoryPoint {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(selectedCategoryPoint.category)
-                                .font(.caption)
+                        BarMark(
+                            x: .value("Сумма", item.total),
+                            y: .value("Категория", item.category),
+                            height: .fixed(18)
+                        )
+                        .foregroundStyle(color.opacity(0.72))
+                        .cornerRadius(5)
+                        .annotation(position: .trailing) {
+                            Text(formattedPercent(categoryShare(for: item.category)))
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
-
-                            Text(formattedRubAmount(selectedCategoryPoint.total))
-                                .font(.headline.bold())
-
-                            HStack(spacing: 8) {
-                                Text(formattedPercent(categoryShare(for: selectedCategoryPoint.category)))
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.gray.opacity(0.10))
-                                    .clipShape(Capsule())
-
-                                if let merchant = snapshot.topMerchantByCategory[selectedCategoryPoint.category], !merchant.isEmpty {
-                                    Text("Топ: \(merchant)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
+                }
+                .frame(height: chartHeightForCategories)
+                .chartXAxis {
+                    AxisMarks(position: .bottom)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading)
                 }
                 .padding()
                 .background(Color.gray.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 18))
-                .animation(.smooth(duration: 0.25), value: selectedCategoryName)
             }
         }
     }
