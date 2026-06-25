@@ -874,18 +874,19 @@ struct AnalyticsView: View {
             } else {
                 Chart {
                     ForEach(snapshot.categoryTotals) { item in
+                        let isSelected = selectedCategoryName == item.category
                         let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
 
                         BarMark(
                             x: .value("Сумма", item.total),
                             y: .value("Категория", item.category),
-                            height: .fixed(18)
+                            height: .fixed(isSelected ? 26 : 18)
                         )
-                        .foregroundStyle(color.opacity(0.72))
-                        .cornerRadius(5)
+                        .foregroundStyle(isSelected ? color : color.opacity(0.72))
+                        .cornerRadius(isSelected ? 8 : 5)
                         .annotation(position: .trailing) {
                             Text(formattedPercent(categoryShare(for: item.category)))
-                                .font(.caption2)
+                                .font(isSelected ? .caption.bold() : .caption2)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -897,9 +898,53 @@ struct AnalyticsView: View {
                 .chartYAxis {
                     AxisMarks(position: .leading)
                 }
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let plotFrame = geometry[proxy.plotAreaFrame]
+                                        let yInPlot = value.location.y - plotFrame.origin.y
+
+                                        guard yInPlot >= 0, yInPlot <= proxy.plotAreaSize.height else {
+                                            return
+                                        }
+
+                                        if let nearestCategoryName = nearestCategory(
+                                            at: yInPlot,
+                                            plotHeight: proxy.plotAreaSize.height
+                                        ) {
+                                            if selectedCategoryName != nearestCategoryName {
+                                                selectedCategoryName = nearestCategoryName
+
+                                                if lastHapticCategoryName != nearestCategoryName {
+                                                    let generator = UIImpactFeedbackGenerator(style: .light)
+                                                    generator.impactOccurred(intensity: 0.7)
+                                                    lastHapticCategoryName = nearestCategoryName
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .onEnded { value in
+                                        let totalTranslation = abs(value.translation.width) + abs(value.translation.height)
+
+                                        if totalTranslation < 10, let selectedCategoryName {
+                                            categoryNavigationTarget = selectedCategoryName
+                                        }
+
+                                        selectedCategoryName = nil
+                                        lastHapticCategoryName = nil
+                                    }
+                            )
+                    }
+                }
                 .padding()
                 .background(Color.gray.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 18))
+                .animation(.smooth(duration: 0.25), value: selectedCategoryName)
             }
         }
     }
