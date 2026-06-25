@@ -506,7 +506,6 @@ struct AnalyticsView: View {
                 InteractiveBarChartView(
                     points: snapshot.chartPoints,
                     average: snapshot.averageExpensePerBin,
-                    averageLabel: formattedRubAmount(snapshot.averageExpensePerBin),
                     selectedPointID: $selectedChartPointID
                 ) { point in
                     if point != nil {

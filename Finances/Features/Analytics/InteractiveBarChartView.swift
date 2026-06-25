@@ -44,7 +44,6 @@ enum PeriodSwipeResult {
 struct InteractiveBarChartView: View {
     let points: [AnalyticsChartPoint]
     let average: Double
-    let averageLabel: String
     @Binding var selectedPointID: String?
 
     let onSelectionChanged: (AnalyticsChartPoint?) -> Void
@@ -69,6 +68,39 @@ struct InteractiveBarChartView: View {
     private let bottomPagingZoneHeight: CGFloat = 28
     private let labelsTopSpacing: CGFloat = 4
 
+    // Ширина правого отступа под подписи оси значений (как в Health).
+    private let axisGutter: CGFloat = 46
+
+    private struct AxisLevel: Identifiable {
+        let id = UUID()
+        let value: Double
+        let dimmed: Bool
+    }
+
+    private static let axisValueFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        formatter.groupingSeparator = "\u{00A0}"
+        return formatter
+    }()
+
+    private func axisValueLabel(_ value: Double) -> String {
+        Self.axisValueFormatter.string(from: NSNumber(value: value.rounded())) ?? "0"
+    }
+
+    // Уровни правой оси: верхнее значение, среднее и еле заметный ноль.
+    private func makeAxisLevels(maxValue: Double) -> [AxisLevel] {
+        var levels: [AxisLevel] = [AxisLevel(value: maxValue, dimmed: false)]
+
+        if average > 0, average < maxValue * 0.97 {
+            levels.append(AxisLevel(value: average, dimmed: false))
+        }
+
+        levels.append(AxisLevel(value: 0, dimmed: true))
+        return levels
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: labelsTopSpacing) {
             GeometryReader { geometry in
@@ -76,12 +108,15 @@ struct InteractiveBarChartView: View {
                 let chartWidth = geometry.size.width
                 let maxValue = max(points.map(\.total).max() ?? 0, 1)
 
-                let slotWidth = chartWidth / CGFloat(max(points.count, 1))
+                let plotWidth = max(chartWidth - axisGutter, 1)
+                let slotWidth = plotWidth / CGFloat(max(points.count, 1))
                 let selectedWidth = min(max(slotWidth * 0.92, 20), 46)
                 let regularWidth = min(max(slotWidth * 0.84, 16), 42)
 
                 let barsAreaHeight = max(chartHeight - bottomPagingZoneHeight, 1)
                 let usableHeight = max(barsAreaHeight - 6, 1)
+
+                let axisLevels = makeAxisLevels(maxValue: maxValue)
 
                 ZStack(alignment: .bottomLeading) {
                     HStack(spacing: 0) {
@@ -92,15 +127,33 @@ struct InteractiveBarChartView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .frame(height: barsAreaHeight, alignment: .bottom)
+                    .frame(width: plotWidth, height: barsAreaHeight, alignment: .bottomLeading)
                     .allowsHitTesting(false)
 
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.12))
-                        .frame(height: 1)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .offset(y: -bottomPagingZoneHeight)
+                    // Правая ось значений + горизонтальные линии сетки (стиль Health).
+                    ForEach(axisLevels) { level in
+                        let ratio = min(CGFloat(level.value / maxValue), 1)
+                        let lineY = barsAreaHeight - ratio * usableHeight
+                        let labelY = min(max(lineY, 8), barsAreaHeight)
+
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: lineY))
+                            path.addLine(to: CGPoint(x: plotWidth, y: lineY))
+                        }
+                        .stroke(
+                            Color.secondary.opacity(level.dimmed ? 0.10 : 0.16),
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                        )
                         .allowsHitTesting(false)
+
+                        Text(axisValueLabel(level.value))
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondary.opacity(level.dimmed ? 0.4 : 0.65))
+                            .lineLimit(1)
+                            .frame(width: axisGutter - 4, alignment: .trailing)
+                            .position(x: plotWidth + (axisGutter - 4) / 2, y: labelY)
+                            .allowsHitTesting(false)
+                    }
 
                     ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
                         let isSelected = selectedPointID == point.id
@@ -159,38 +212,6 @@ struct InteractiveBarChartView: View {
                                 }
                             }
                     }
-
-                    if average > 0 {
-                        let averageRatio = min(CGFloat(average / maxValue), 1)
-                        let averageY = barsAreaHeight - averageRatio * usableHeight
-
-                        Path { path in
-                            path.move(to: CGPoint(x: 0, y: averageY))
-                            path.addLine(to: CGPoint(x: chartWidth, y: averageY))
-                        }
-                        .stroke(
-                            Color.secondary.opacity(0.55),
-                            style: StrokeStyle(lineWidth: 1, dash: [5, 4])
-                        )
-                        .opacity(selectedPointID == nil ? 1 : 0.35)
-                        .allowsHitTesting(false)
-
-                        HStack(spacing: 0) {
-                            Spacer(minLength: 0)
-                            Text(averageLabel)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    Capsule().fill(Color.secondary.opacity(0.12))
-                                )
-                        }
-                        .frame(width: chartWidth)
-                        .position(x: chartWidth / 2, y: max(averageY - 12, 9))
-                        .opacity(selectedPointID == nil ? 1 : 0.35)
-                        .allowsHitTesting(false)
-                    }
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -203,7 +224,7 @@ struct InteractiveBarChartView: View {
 
                             switch dragMode {
                             case .selection:
-                                handleSelectionDragChanged(value: value, chartWidth: chartWidth)
+                                handleSelectionDragChanged(value: value, plotWidth: plotWidth)
 
                             case .paging:
                                 handlePagingDragChanged(value: value)
@@ -256,11 +277,11 @@ struct InteractiveBarChartView: View {
         }
     }
 
-    private func handleSelectionDragChanged(value: DragGesture.Value, chartWidth: CGFloat) {
+    private func handleSelectionDragChanged(value: DragGesture.Value, plotWidth: CGFloat) {
         guard !points.isEmpty else { return }
 
-        let clampedX = min(max(value.location.x, 0), max(chartWidth - 1, 0))
-        let rawIndex = Int((clampedX / max(chartWidth, 1)) * CGFloat(points.count))
+        let clampedX = min(max(value.location.x, 0), max(plotWidth - 1, 0))
+        let rawIndex = Int((clampedX / max(plotWidth, 1)) * CGFloat(points.count))
         let index = min(max(rawIndex, 0), points.count - 1)
         let point = points[index]
 
