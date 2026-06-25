@@ -82,7 +82,8 @@ enum DefaultSubcategoryDefinitions {
             .init(name: "Анализы", emoji: "🧪"),
             .init(name: "Стоматология", emoji: "🦷"),
             .init(name: "Спорт/фитнес", emoji: "🏋️"),
-            .init(name: "Косметолог", emoji: "💆"),
+            .init(name: "Косметолог", emoji: "🧴"),
+            .init(name: "Массаж", emoji: "💆"),
             .init(name: "Другое", emoji: "🏥")
         ]
     ]
