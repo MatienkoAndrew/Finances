@@ -312,17 +312,16 @@ enum AnalyticsSnapshotBuilder {
 
         case .month:
             let dates = strideDates(from: page.startDate, to: page.endDateExclusive, component: .day)
-            let lastIndex = max(dates.count - 1, 0)
 
-            return dates.enumerated().map { index, date in
+            return dates.map { date in
                 let day = calendar.component(.day, from: date)
-                let show = day == 1 || day % 7 == 0 || index == lastIndex
-                // Вертикальная линия только в начале каждой недели (понедельник).
+                // Линия и подпись — только в начале каждой недели (понедельник),
+                // так подписи всегда совпадают с вертикальными линиями.
                 let isWeekStart = calendar.component(.weekday, from: date) == 2
 
                 return BinDescriptor(
                     date: date,
-                    axisLabel: show ? "\(day)" : "",
+                    axisLabel: isWeekStart ? "\(day)" : "",
                     title: formattedShortDate(date),
                     showsGridline: isWeekStart
                 )

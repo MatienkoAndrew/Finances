@@ -118,8 +118,10 @@ struct InteractiveBarChartView: View {
 
                 let plotWidth = max(chartWidth - axisGutter, 1)
                 let slotWidth = plotWidth / CGFloat(max(points.count, 1))
-                let selectedWidth = min(max(slotWidth * 0.92, 20), 46)
-                let regularWidth = min(max(slotWidth * 0.84, 16), 42)
+                // Доля слота — чтобы между барами оставался зазор на любом
+                // масштабе (7 баров в неделе или 31 в месяце), без наезда.
+                let selectedWidth = min(max(slotWidth * 0.84, 5), 46)
+                let regularWidth = min(max(slotWidth * 0.74, 3), 42)
 
                 let barsAreaHeight = max(chartHeight - bottomPagingZoneHeight, 1)
                 let usableHeight = max(barsAreaHeight - 6, 1)
@@ -269,9 +271,9 @@ struct InteractiveBarChartView: View {
                         .font(.caption)
                         .foregroundStyle(selectedPointID == point.id ? .primary : .secondary)
                         .fontWeight(selectedPointID == point.id ? .semibold : .regular)
-                        .frame(maxWidth: .infinity)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .fixedSize()
+                        .frame(maxWidth: .infinity)
                         .animation(.spring(response: 0.26, dampingFraction: 0.84), value: selectedPointID)
                 }
             }
