@@ -20,9 +20,18 @@ enum DefaultSubcategoryDefinitions {
 
     static let byCategory: [String: [DefaultSubcategoryDefinition]] = [
         "Еда": [
-            .init(name: "Кофе", emoji: "☕️"),
-            .init(name: "Супермаркеты", emoji: "🛒"),
-            .init(name: "Другое", emoji: "🍽️")
+            .init(name: "Кафе", emoji: "☕️"),
+            .init(name: "Супермаркет", emoji: "🛒"),
+            .init(name: "Ресторан", emoji: "🍽️"),
+            .init(name: "Другое", emoji: "🍴")
+        ],
+        "Транспорт": [
+            .init(name: "Такси", emoji: "🚕"),
+            .init(name: "Общественный транспорт", emoji: "🚌"),
+            .init(name: "Аренда велосипеда", emoji: "🚲"),
+            .init(name: "Аренда байка", emoji: "🏍️"),
+            .init(name: "Каршеринг", emoji: "🚗"),
+            .init(name: "Другое", emoji: "🛣️")
         ]
     ]
 
