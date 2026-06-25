@@ -22,7 +22,7 @@ struct AnalyticsView: View {
     @State private var selectedMode: AnalyticsViewMode = .time
     @State private var selectedScale: AnalyticsTimeScale = .week
     @State private var pageAnchorDate: Date = .now
-    @State private var selectedBreakdown: AnalyticsBreakdown = .daily
+    @State private var selectedBreakdown: AnalyticsBreakdown = .category
     
     // Для режима Tags
     @State private var selectedTag: TransactionTag?
@@ -542,28 +542,6 @@ struct AnalyticsView: View {
                 )
             }
             .buttonStyle(.plain)
-
-            NavigationLink {
-                TransactionListByKindView(
-                    kind: .income,
-                    scope: currentAnalyticsScope
-                )
-            } label: {
-                AnalyticsCardView(
-                    title: "Доходы",
-                    value: formattedRubAmount(snapshot.totalIncomeRub),
-                    secondaryValue: "\(snapshot.incomeCount) операций",
-                    systemImage: "arrow.down.circle.fill"
-                )
-            }
-            .buttonStyle(.plain)
-
-            AnalyticsCardView(
-                title: "Итог",
-                value: signedFormattedRubAmount(snapshot.netFlowRub),
-                secondaryValue: snapshot.page.displayTitle,
-                systemImage: "equal.circle.fill"
-            )
         }
     }
 
@@ -601,8 +579,8 @@ struct AnalyticsView: View {
 
         case .category:
             VStack(spacing: 16) {
-                categoryChartSection
                 categorySection
+                categoryChartSection
             }
 
         case .merchant:
@@ -820,48 +798,7 @@ struct AnalyticsView: View {
                 Text("Нет данных для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    // Резервируем фиксированную высоту для инфоблока
-                    Group {
-                        if let selectedCategoryPoint {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(selectedCategoryPoint.category)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                Text(formattedRubAmount(selectedCategoryPoint.total))
-                                    .font(.headline.bold())
-
-                                HStack(spacing: 8) {
-                                    Text(formattedPercent(categoryShare(for: selectedCategoryPoint.category)))
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.gray.opacity(0.10))
-                                        .clipShape(Capsule())
-
-                                    if let merchant = snapshot.topMerchantByCategory[selectedCategoryPoint.category], !merchant.isEmpty {
-                                        Text("Топ: \(merchant)")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(.thinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        } else {
-                            // Пустой блок той же высоты для резервирования места
-                            Color.clear
-                                .frame(height: 76)
-                        }
-                    }
-                    .frame(height: 76) // Фиксированная высота
-                    .animation(.smooth(duration: 0.25), value: selectedCategoryName)
-
+                VStack(alignment: .leading, spacing: 12) {
                     Chart {
                         ForEach(snapshot.categoryTotals) { item in
                             let isSelected = selectedCategoryName == item.category
@@ -931,10 +868,44 @@ struct AnalyticsView: View {
                                 )
                         }
                     }
+
+                    if let selectedCategoryPoint {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(selectedCategoryPoint.category)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(formattedRubAmount(selectedCategoryPoint.total))
+                                .font(.headline.bold())
+
+                            HStack(spacing: 8) {
+                                Text(formattedPercent(categoryShare(for: selectedCategoryPoint.category)))
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.gray.opacity(0.10))
+                                    .clipShape(Capsule())
+
+                                if let merchant = snapshot.topMerchantByCategory[selectedCategoryPoint.category], !merchant.isEmpty {
+                                    Text("Топ: \(merchant)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(.thinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
                 .padding()
                 .background(Color.gray.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 18))
+                .animation(.smooth(duration: 0.25), value: selectedCategoryName)
             }
         }
     }

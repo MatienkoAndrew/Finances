@@ -76,16 +76,35 @@ struct InteractiveBarChartView: View {
         let dimmed: Bool
     }
 
-    private static let axisValueFormatter: NumberFormatter = {
+    private static let compactAxisFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        formatter.groupingSeparator = "\u{00A0}"
+        formatter.maximumFractionDigits = 1
+        formatter.minimumFractionDigits = 0
+        formatter.decimalSeparator = ","
+        formatter.groupingSeparator = ""
         return formatter
     }()
 
+    // Компактная подпись значения: 300к, 1,8М (как в Health).
     private func axisValueLabel(_ value: Double) -> String {
-        Self.axisValueFormatter.string(from: NSNumber(value: value.rounded())) ?? "0"
+        guard value > 0 else { return "0" }
+
+        let scaled: Double
+        let suffix: String
+        if value >= 1_000_000 {
+            scaled = value / 1_000_000
+            suffix = "М"
+        } else if value >= 1_000 {
+            scaled = value / 1_000
+            suffix = "к"
+        } else {
+            scaled = value
+            suffix = ""
+        }
+
+        let number = Self.compactAxisFormatter.string(from: NSNumber(value: scaled)) ?? "0"
+        return number + suffix
     }
 
     // Верхняя граница оси: округляем максимум бара вверх до следующего
