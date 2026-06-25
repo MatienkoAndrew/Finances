@@ -23,6 +23,9 @@ enum DefaultSubcategoryDefinitions {
             .init(name: "Кафе", emoji: "☕️"),
             .init(name: "Супермаркет", emoji: "🛒"),
             .init(name: "Ресторан", emoji: "🍽️"),
+            .init(name: "Доставка", emoji: "🛵"),
+            .init(name: "Фастфуд", emoji: "🍔"),
+            .init(name: "Бар", emoji: "🍺"),
             .init(name: "Другое", emoji: "🍴")
         ],
         "Транспорт": [
@@ -31,7 +34,12 @@ enum DefaultSubcategoryDefinitions {
             .init(name: "Аренда велосипеда", emoji: "🚲"),
             .init(name: "Аренда байка", emoji: "🏍️"),
             .init(name: "Каршеринг", emoji: "🚗"),
-            .init(name: "Другое", emoji: "🛣️")
+            .init(name: "Заправка", emoji: "⛽"),
+            .init(name: "Парковка", emoji: "🅿️"),
+            .init(name: "Платные дороги", emoji: "🛣️"),
+            .init(name: "Самокат", emoji: "🛴"),
+            .init(name: "Поезд/электричка", emoji: "🚆"),
+            .init(name: "Другое", emoji: "🚦")
         ]
     ]
 
