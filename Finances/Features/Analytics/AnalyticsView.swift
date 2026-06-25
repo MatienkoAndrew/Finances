@@ -160,8 +160,6 @@ struct AnalyticsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
-                    modePicker
-                    
                     if selectedMode == .time {
                         scalePicker
                         periodNavigation
@@ -190,6 +188,11 @@ struct AnalyticsView: View {
                 .padding()
             }
             .navigationTitle("Аналитика")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    tagToggleButton
+                }
+            }
             .background {
                 NavigationLink(
                     isActive: Binding(
@@ -255,35 +258,17 @@ struct AnalyticsView: View {
 
     // MARK: - Top
     
-    private var modePicker: some View {
-        HStack(spacing: 0) {
-            ForEach(AnalyticsViewMode.allCases) { mode in
-                Button {
-                    withAnimation {
-                        selectedMode = mode
-                        if mode == .tags && selectedTag == nil {
-                            selectedTag = tags.first
-                        }
-                    }
-                } label: {
-                    Text(mode.rawValue)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            selectedMode == mode
-                            ? Color.accentColor
-                            : Color.clear
-                        )
-                        .foregroundStyle(selectedMode == mode ? .white : .primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
+    // Иконка-тумблер в правом верхнем углу: переключает экран между
+    // режимами времени и меток (заменяет прежний сегмент Time/Tags).
+    private var tagToggleButton: some View {
+        Button {
+            withAnimation {
+                selectedMode = selectedMode == .tags ? .time : .tags
             }
+        } label: {
+            Image(systemName: selectedMode == .tags ? "tag.fill" : "tag")
         }
-        .padding(6)
-        .background(Color.gray.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .accessibilityLabel(selectedMode == .tags ? "Закрыть метки" : "Метки")
     }
     
     private var tagPicker: some View {
