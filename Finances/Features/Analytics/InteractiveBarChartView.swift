@@ -43,7 +43,6 @@ enum PeriodSwipeResult {
 
 struct InteractiveBarChartView: View {
     let points: [AnalyticsChartPoint]
-    let average: Double
     @Binding var selectedPointID: String?
 
     let onSelectionChanged: (AnalyticsChartPoint?) -> Void
@@ -89,16 +88,24 @@ struct InteractiveBarChartView: View {
         Self.axisValueFormatter.string(from: NSNumber(value: value.rounded())) ?? "0"
     }
 
-    // Уровни правой оси: верхнее значение, среднее и еле заметный ноль.
-    private func makeAxisLevels(maxValue: Double) -> [AxisLevel] {
-        var levels: [AxisLevel] = [AxisLevel(value: maxValue, dimmed: false)]
+    // Верхняя граница оси: округляем максимум бара вверх до следующего
+    // «круглого» шага своего порядка (22к → 30к, 15к → 20к, 1.8М → 2М).
+    private func niceAxisMaximum(for value: Double) -> Double {
+        guard value > 0 else { return 0 }
+        let exponent = floor(log10(value))
+        let step = pow(10, exponent)
+        return (floor(value / step) + 1) * step
+    }
 
-        if average > 0, average < maxValue * 0.97 {
-            levels.append(AxisLevel(value: average, dimmed: false))
-        }
+    // Уровни правой оси: верхнее значение, его половина и еле заметный ноль.
+    private func makeAxisLevels(axisMax: Double) -> [AxisLevel] {
+        guard axisMax > 0 else { return [AxisLevel(value: 0, dimmed: true)] }
 
-        levels.append(AxisLevel(value: 0, dimmed: true))
-        return levels
+        return [
+            AxisLevel(value: axisMax, dimmed: false),
+            AxisLevel(value: axisMax / 2, dimmed: false),
+            AxisLevel(value: 0, dimmed: true)
+        ]
     }
 
     var body: some View {
@@ -107,6 +114,7 @@ struct InteractiveBarChartView: View {
                 let chartHeight = geometry.size.height
                 let chartWidth = geometry.size.width
                 let maxValue = max(points.map(\.total).max() ?? 0, 1)
+                let axisMax = max(niceAxisMaximum(for: maxValue), 1)
 
                 let plotWidth = max(chartWidth - axisGutter, 1)
                 let slotWidth = plotWidth / CGFloat(max(points.count, 1))
@@ -116,13 +124,16 @@ struct InteractiveBarChartView: View {
                 let barsAreaHeight = max(chartHeight - bottomPagingZoneHeight, 1)
                 let usableHeight = max(barsAreaHeight - 6, 1)
 
-                let axisLevels = makeAxisLevels(maxValue: maxValue)
+                let axisLevels = makeAxisLevels(axisMax: axisMax)
 
                 ZStack(alignment: .bottomLeading) {
                     HStack(spacing: 0) {
                         ForEach(points) { _ in
-                            Rectangle()
-                                .fill(Color.secondary.opacity(0.10))
+                            VerticalDashedLine()
+                                .stroke(
+                                    Color.secondary.opacity(0.18),
+                                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                                )
                                 .frame(width: 1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -132,7 +143,7 @@ struct InteractiveBarChartView: View {
 
                     // Правая ось значений + горизонтальные линии сетки (стиль Health).
                     ForEach(axisLevels) { level in
-                        let ratio = min(CGFloat(level.value / maxValue), 1)
+                        let ratio = min(CGFloat(level.value / axisMax), 1)
                         let lineY = barsAreaHeight - ratio * usableHeight
                         let labelY = min(max(lineY, 8), barsAreaHeight)
 
@@ -158,7 +169,7 @@ struct InteractiveBarChartView: View {
                     ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
                         let isSelected = selectedPointID == point.id
                         let barWidth = isSelected ? selectedWidth : regularWidth
-                        let normalizedHeight = CGFloat(point.total / maxValue)
+                        let normalizedHeight = CGFloat(point.total / axisMax)
                         let targetBarHeight = max(normalizedHeight * usableHeight, point.total > 0 ? 4 : 1)
                         let currentBarHeight = animatedHeights[point.id] ?? (didRunInitialEntranceAnimation ? targetBarHeight : 0)
                         let centerX = slotWidth * (CGFloat(index) + 0.5)
@@ -267,7 +278,7 @@ struct InteractiveBarChartView: View {
                         .animation(.spring(response: 0.26, dampingFraction: 0.84), value: selectedPointID)
                 }
             }
-            .padding(.horizontal, 2)
+            .padding(.trailing, axisGutter)
         }
         .offset(x: livePagingOffset + edgeBounceAmount)
         .onAppear {
@@ -414,5 +425,15 @@ struct InteractiveBarChartView: View {
         withAnimation(.spring(response: 0.30, dampingFraction: 0.82).delay(0.04)) {
             edgeBounceAmount = 0
         }
+    }
+}
+
+/// Вертикальная линия по центру своей области — для пунктирных разделителей баров.
+private struct VerticalDashedLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        return path
     }
 }

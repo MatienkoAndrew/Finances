@@ -505,7 +505,6 @@ struct AnalyticsView: View {
             } else {
                 InteractiveBarChartView(
                     points: snapshot.chartPoints,
-                    average: snapshot.averageExpensePerBin,
                     selectedPointID: $selectedChartPointID
                 ) { point in
                     if point != nil {
