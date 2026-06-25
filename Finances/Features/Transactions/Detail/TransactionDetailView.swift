@@ -29,12 +29,14 @@ struct TransactionDetailView: View {
     @State private var editedToCurrencyCode: String = "VND"
     @State private var editedDetails: String = ""
     @State private var editedCategoryName: String?
+    @State private var editedSubcategoryName: String?
     @State private var editedNote: String = ""
     @State private var editedFromAccount: Account?
     @State private var editedToAccount: Account?
 
     @State private var isShowingCurrencyPicker = false
     @State private var isShowingToCurrencyPicker = false
+    @State private var isShowingCategoryPicker = false
 
     private var settings: AppSettings? {
         settingsList.first
@@ -169,16 +171,25 @@ struct TransactionDetailView: View {
 
             if transaction.kind == .expense {
                 Section("Категория") {
-                    Picker("Категория", selection: $editedCategoryName) {
-                        ForEach(categories) { category in
-                            Text(category.name).tag(category.name as String?)
+                    Button {
+                        isShowingCategoryPicker = true
+                    } label: {
+                        HStack {
+                            Text("Категория")
+                                .foregroundStyle(.primary)
+
+                            Spacer()
+
+                            Text(categorySelectionLabel)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .onChange(of: editedCategoryName) { _, newValue in
-                        transaction.categoryName = newValue
-                        try? modelContext.save()
-                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -236,9 +247,36 @@ struct TransactionDetailView: View {
                 editedToCurrencyCode = CurrencyDisplay.normalizedCode(from: newCode)
             }
         }
+        .sheet(isPresented: $showingTagPicker) {
+            TagPickerView(transaction: transaction)
+        }
+        .sheet(isPresented: $isShowingCategoryPicker) {
+            CategoryPickerSheet(
+                categories: categories,
+                initialCategory: editedCategoryName,
+                initialSubcategory: editedSubcategoryName
+            ) { category, subcategory in
+                editedCategoryName = category
+                editedSubcategoryName = subcategory
+                transaction.categoryName = category
+                transaction.subcategoryName = subcategory
+                // Явный выбор пользователем — помечаем как ручной, чтобы
+                // массовое применение правил не затирало категорию.
+                transaction.isCategoryManuallySet = true
+                try? modelContext.save()
+            }
+        }
         .onAppear {
             syncEditedStateFromTransaction()
         }
+    }
+
+    private var categorySelectionLabel: String {
+        let category = editedCategoryName ?? "Другое"
+        if let sub = editedSubcategoryName, !sub.isEmpty {
+            return "\(category) · \(sub)"
+        }
+        return category
     }
 
     private var liveRubPreview: Double? {
@@ -265,6 +303,7 @@ struct TransactionDetailView: View {
         editedToCurrencyCode = CurrencyDisplay.normalizedCode(from: transaction.creditedCurrencyCode)
         editedDetails = transaction.details
         editedCategoryName = transaction.categoryName
+        editedSubcategoryName = transaction.subcategoryName
         editedNote = transaction.note ?? ""
         editedFromAccount = transaction.fromAccount
         editedToAccount = transaction.toAccount
@@ -278,6 +317,11 @@ struct TransactionDetailView: View {
         transaction.currencyCode = CurrencyDisplay.normalizedCode(from: editedCurrencyCode)
         transaction.details = editedDetails.trimmingCharacters(in: .whitespacesAndNewlines)
         transaction.categoryName = editedCategoryName
+        transaction.subcategoryName = editedSubcategoryName
+        // Сохранение через "Редактировать → Сохранить" — это явное подтверждение
+        // категории пользователем. Помечаем как ручную, чтобы массовое
+        // применение правил впредь не затирало её.
+        transaction.isCategoryManuallySet = true
 
         let trimmedNote = editedNote.trimmingCharacters(in: .whitespacesAndNewlines)
         transaction.note = trimmedNote.isEmpty ? nil : trimmedNote
@@ -314,6 +358,10 @@ struct TransactionDetailView: View {
             settings: settings,
             trackedRates: trackedRates
         )
+
+        // Если пользователь сменил валюту — могут измениться авто-метки по стране.
+        // Не удаляем уже стоящие теги, только добавляем новые подходящие.
+        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags)
 
         try? modelContext.save()
         isEditing = false
@@ -424,7 +472,9 @@ struct TransactionDetailView: View {
                         
                         Button(role: .destructive) {
                             withAnimation {
-                                transaction.removeTag(tagName)
+                                // manual: true — пользователь сам снял эту метку,
+                                // авто-теггер больше её не вернёт.
+                                transaction.removeTag(tagName, manual: true)
                                 try? modelContext.save()
                             }
                         } label: {
@@ -441,9 +491,6 @@ struct TransactionDetailView: View {
             } label: {
                 Label("Добавить метку", systemImage: "tag.fill")
             }
-        }
-        .sheet(isPresented: $showingTagPicker) {
-            TagPickerView(transaction: transaction)
         }
     }
 }
@@ -521,7 +568,9 @@ struct TagPickerView: View {
     }
     
     private func addTag(_ tag: TransactionTag) {
-        transaction.addTag(tag.name)
+        // manual: true — пользователь явно выбрал метку из пикера.
+        // Если он раньше снимал её, разблокируем авто-теггер заново.
+        transaction.addTag(tag.name, manual: true)
         try? modelContext.save()
         dismiss()
     }
