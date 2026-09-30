@@ -39,6 +39,8 @@ struct TransactionsView: View {
     /// Метка последнего импорта — для кнопки «Отменить импорт» в итоговом алерте.
     @State private var lastImportedAt: Date?
     @State private var undoResultMessage: String?
+    /// Сверка с «Доступно на …» после последнего импорта — для кнопки «Выровнять баланс».
+    @State private var lastBalanceCheck: BalanceCheck?
 
     private var settings: AppSettings? {
         settingsList.first
@@ -191,6 +193,12 @@ struct TransactionsView: View {
             )) {
                 Button("OK", role: .cancel) {
                     importResultMessage = nil
+                }
+
+                if let lastBalanceCheck, !lastBalanceCheck.isMatching {
+                    Button("Выровнять баланс") {
+                        alignBalance(lastBalanceCheck)
+                    }
                 }
 
                 if let lastImportedAt {
@@ -462,8 +470,16 @@ struct TransactionsView: View {
             ))
 
             lastImportedAt = importResult.importedAt
-            importResultMessage = importResult.summaryMessage
-                + (removedDuplicates.isEmpty ? "" : "\nУдалено старых дублей: \(removedDuplicates.count).")
+            lastBalanceCheck = balanceCheck(for: statement)
+
+            var message = importResult.summaryMessage
+            if !removedDuplicates.isEmpty {
+                message += "\nУдалено старых дублей: \(removedDuplicates.count)."
+            }
+            if let lastBalanceCheck {
+                message += "\n\n" + lastBalanceCheck.message
+            }
+            importResultMessage = message
         } catch {
             importErrorMessage = error.localizedDescription
         }
@@ -484,9 +500,30 @@ struct TransactionsView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
     }
 
+    private func balanceCheck(for statement: KaspiStatement) -> BalanceCheck? {
+        guard let kaspi = AccountLookup.kaspi(in: accounts),
+              let current = try? modelContext.fetch(FetchDescriptor<Transaction>()) else { return nil }
+        return BalanceReconciliation.check(statement: statement, transactions: current, kaspi: kaspi)
+    }
+
+    private func alignBalance(_ check: BalanceCheck) {
+        importResultMessage = nil
+        lastBalanceCheck = nil
+
+        guard let kaspi = AccountLookup.kaspi(in: accounts) else { return }
+
+        do {
+            try BalanceReconciliation.align(check, kaspi: kaspi, context: modelContext)
+        } catch {
+            modelContext.rollback()
+            importErrorMessage = error.localizedDescription
+        }
+    }
+
     private func undoImport(importedAt: Date) {
         importResultMessage = nil
         lastImportedAt = nil
+        lastBalanceCheck = nil
 
         do {
             undoResultMessage = try ImportHistory.undo(importedAt: importedAt, context: modelContext).message

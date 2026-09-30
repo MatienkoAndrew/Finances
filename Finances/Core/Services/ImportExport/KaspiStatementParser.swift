@@ -43,6 +43,13 @@ nonisolated struct KaspiStatement {
     let summaryTotals: [KaspiOperationType: Double]
     /// Строки, похожие на операцию (начинаются с даты и суммы), но не распознанные.
     let unrecognizedLines: [String]
+    /// «Доступно на …» из шапки выписки — по датам.
+    let availableBalances: [Date: Double]
+
+    /// Остаток на конец периода по выписке.
+    var closingBalance: Double? {
+        periodEnd.flatMap { availableBalances[$0] }
+    }
 
     /// Типы операций, по которым сумма распознанных строк не сходится с итогом выписки.
     /// Пусто — значит, все операции прочитаны без потерь.
@@ -93,6 +100,10 @@ nonisolated enum KaspiStatementParser {
         + amountPattern + #"\s*₸"#
     )
 
+    private static let availableBalanceRegex = try! Regex(
+        #"Доступно на (\d{2}\.\d{2}\.\d{2}):?\s+"# + amountPattern + #"\s*₸"#
+    )
+
     private static let exchangeRateDifferenceLine = "Курсовая разница"
     private static let blockedAmountPrefix = "- Сумма заблокирована"
 
@@ -124,6 +135,7 @@ nonisolated enum KaspiStatementParser {
         var summaryTotals: [KaspiOperationType: Double] = [:]
         var rows: [ParsedStatementRow] = []
         var unrecognizedLines: [String] = []
+        var availableBalances: [Date: Double] = [:]
 
         // Строка операции, к которой ещё могут относиться строки-продолжения.
         var pending: PendingRow?
@@ -173,6 +185,14 @@ nonisolated enum KaspiStatementParser {
             }
 
             if rows.isEmpty,
+               let match = text.firstMatch(of: availableBalanceRegex),
+               let date = parseDate(match.output[1].substring),
+               let amount = parseSignedAmount(sign: match.output[2].substring, digits: match.output[3].substring) {
+                availableBalances[date] = amount
+                continue
+            }
+
+            if rows.isEmpty,
                let match = text.firstMatch(of: summaryRegex),
                let title = match.output[1].substring,
                let type = KaspiOperationType.allCases.first(where: { $0.summaryTitle == title }),
@@ -194,7 +214,8 @@ nonisolated enum KaspiStatementParser {
             periodEnd: periodEnd,
             rows: rows,
             summaryTotals: summaryTotals,
-            unrecognizedLines: unrecognizedLines
+            unrecognizedLines: unrecognizedLines,
+            availableBalances: availableBalances
         )
     }
 
