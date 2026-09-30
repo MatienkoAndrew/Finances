@@ -186,6 +186,24 @@ enum TagAnalyticsBuilder {
                 merchantMap[merchant, default: 0] += rub
                 merchantByCategory[category, default: [:]][merchant, default: 0] += rub
 
+            case .income where transaction.reducesExpensesInAnalytics:
+                // Курсовая разница «в плюс» — возврат части покупки: уменьшает расходы,
+                // но отдельной операцией в счётчиках не считается.
+                totalExpensesRub -= rub
+
+                if let idx = bins.firstIndex(where: {
+                    transaction.date >= $0.start && transaction.date < $0.endExclusive
+                }) {
+                    chartTotals[idx] -= rub
+                }
+
+                let category = transaction.categoryName ?? "Без категории"
+                categoryMap[category, default: 0] -= rub
+
+                let merchant = normalizedMerchantName(transaction.details)
+                merchantMap[merchant, default: 0] -= rub
+                merchantByCategory[category, default: [:]][merchant, default: 0] -= rub
+
             case .income:
                 totalIncomeRub += rub
                 incomeCount += 1
