@@ -82,15 +82,23 @@ enum PDFImporter {
 
         var settledCount = 0
         var repairedCount = 0
+        var modifications: [TransactionModification] = []
 
         for match in matching.matches {
-            let outcome = update(
-                candidates[match.existingIndex],
-                with: rows[match.rowIndex],
-                context: context
-            )
+            let transaction = candidates[match.existingIndex]
+            let before = TransactionFieldValues(transaction)
+            let outcome = update(transaction, with: rows[match.rowIndex], context: context)
             if outcome.amountSettled { settledCount += 1 }
             if outcome.repaired { repairedCount += 1 }
+
+            let after = TransactionFieldValues(transaction)
+            if after != before {
+                modifications.append(TransactionModification(
+                    transactionKey: ImportHistory.key(of: transaction),
+                    before: before,
+                    after: after
+                ))
+            }
         }
 
         let newRows = matching.unmatchedRowIndices.map { rows[$0] }
@@ -116,11 +124,14 @@ enum PDFImporter {
         }
 
         return PDFImportResult(
+            importedAt: context.importedAt,
+            fileName: context.fileName,
             accountsToCreate: accountsToCreate,
             transactions: newTransactions,
             skippedDuplicatesCount: matching.matches.count,
             settledAmountsCount: settledCount,
             repairedCount: repairedCount,
+            modifications: modifications,
             mismatchedOperationTypes: statement.mismatchedTypes.map(\.summaryTitle),
             unrecognizedLinesCount: statement.unrecognizedLines.count
         )

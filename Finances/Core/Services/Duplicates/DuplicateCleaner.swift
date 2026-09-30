@@ -62,7 +62,7 @@ enum DuplicateCleaner {
         keeping keepSelection: [String: PersistentIdentifier] = [:],
         automatic: Bool,
         context: ModelContext
-    ) -> Int {
+    ) -> [RemovedDuplicate] {
         var removed: [RemovedDuplicate] = []
         let removedAt = Date()
 
@@ -78,31 +78,31 @@ enum DuplicateCleaner {
         }
 
         DuplicateRemovalLog.append(removed)
-        return removed.count
+        return removed
     }
 
     /// Автоочистка после импорта. Вызывать после вставки новых операций;
-    /// контекст сохраняет сама. Возвращает число удалённых дублей.
+    /// контекст сохраняет сама. Возвращает удалённые дубли.
     @discardableResult
-    static func autoCleanupIfEnabled(context: ModelContext) -> Int {
-        guard isAutoCleanupEnabled else { return 0 }
+    static func autoCleanupIfEnabled(context: ModelContext) -> [RemovedDuplicate] {
+        guard isAutoCleanupEnabled else { return [] }
 
         let transactions = (try? context.fetch(FetchDescriptor<Transaction>())) ?? []
         let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
         let groups = findGroups(in: transactions, accounts: accounts)
-        guard !groups.isEmpty else { return 0 }
+        guard !groups.isEmpty else { return [] }
 
-        let count = removeExtras(in: groups, automatic: true, context: context)
+        let removed = removeExtras(in: groups, automatic: true, context: context)
 
         do {
             try context.save()
         } catch {
             context.rollback()
-            DuplicateRemovalLog.removeLast(count)
-            return 0
+            DuplicateRemovalLog.remove(removed)
+            return []
         }
 
-        return count
+        return removed
     }
 
     // MARK: - Exempting and restoring
@@ -119,7 +119,7 @@ enum DuplicateCleaner {
         try context.save()
 
         exemptIdentities.insert(identity(of: transaction))
-        DuplicateRemovalLog.remove(entry)
+        DuplicateRemovalLog.remove([entry])
     }
 
     private static var exemptIdentities: Set<String> {
@@ -276,13 +276,10 @@ enum DuplicateRemovalLog {
         save(Array((entries + load()).prefix(limit)))
     }
 
-    static func remove(_ entry: RemovedDuplicate) {
-        save(load().filter { $0.id != entry.id })
-    }
-
-    /// Откат последнего `append`, если сохранение базы не удалось.
-    static func removeLast(_ count: Int) {
-        save(Array(load().dropFirst(count)))
+    static func remove(_ entries: [RemovedDuplicate]) {
+        guard !entries.isEmpty else { return }
+        let ids = Set(entries.map(\.id))
+        save(load().filter { !ids.contains($0.id) })
     }
 
     private static func save(_ entries: [RemovedDuplicate]) {

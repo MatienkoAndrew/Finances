@@ -190,7 +190,7 @@ struct DuplicatesView: View {
     }
 
     private func deleteExtras(in selectedGroups: [StoredDuplicateGroup]) {
-        let count = DuplicateCleaner.removeExtras(
+        let removed = DuplicateCleaner.removeExtras(
             in: selectedGroups,
             keeping: keepSelection,
             automatic: false,
@@ -201,7 +201,7 @@ struct DuplicatesView: View {
             try modelContext.save()
         } catch {
             modelContext.rollback()
-            DuplicateRemovalLog.removeLast(count)
+            DuplicateRemovalLog.remove(removed)
             errorMessage = error.localizedDescription
             return
         }
@@ -210,7 +210,7 @@ struct DuplicatesView: View {
         // Группы не пересекаются, поэтому достаточно убрать обработанные.
         let processed = Set(selectedGroups.map(\.id))
         groups.removeAll { processed.contains($0.id) }
-        removedCount += count
+        removedCount += removed.count
     }
 
     // MARK: - Formatting
