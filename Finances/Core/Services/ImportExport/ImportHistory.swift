@@ -100,15 +100,26 @@ struct ImportUndoSummary {
     }
 }
 
+/// Где лежат служебные файлы импорта (история, удалённые дубли) и их настройки.
+/// Тесты подменяют на временную папку и отдельный набор `UserDefaults`.
+@MainActor
+enum ImportStorage {
+    static var directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    static var defaults = UserDefaults.standard
+
+    static func fileURL(_ name: String) -> URL {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent(name)
+    }
+}
+
 /// История импортов PDF и их отмена.
 @MainActor
 enum ImportHistory {
     private static let limit = 100
 
     private static var fileURL: URL {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent("import-history.json")
+        ImportStorage.fileURL("import-history.json")
     }
 
     // MARK: - Records

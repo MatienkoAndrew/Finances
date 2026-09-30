@@ -21,7 +21,7 @@ enum DuplicateCleaner {
 
     /// По умолчанию включено.
     static var isAutoCleanupEnabled: Bool {
-        UserDefaults.standard.object(forKey: autoCleanupKey) as? Bool ?? true
+        ImportStorage.defaults.object(forKey: autoCleanupKey) as? Bool ?? true
     }
 
     // MARK: - Finding
@@ -123,8 +123,8 @@ enum DuplicateCleaner {
     }
 
     private static var exemptIdentities: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: exemptKey) ?? []) }
-        set { UserDefaults.standard.set(newValue.sorted(), forKey: exemptKey) }
+        get { Set(ImportStorage.defaults.stringArray(forKey: exemptKey) ?? []) }
+        set { ImportStorage.defaults.set(newValue.sorted(), forKey: exemptKey) }
     }
 
     /// Точные копии дают одинаковую подпись — «Не дубль» и восстановление относятся к обеим.
@@ -254,13 +254,12 @@ struct RemovedDuplicate: Codable, Identifiable, Equatable {
 }
 
 /// Журнал удалённых дублей — JSON-файл в Application Support, последние `limit` записей.
+@MainActor
 enum DuplicateRemovalLog {
     private static let limit = 500
 
     private static var fileURL: URL {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent("removed-duplicates.json")
+        ImportStorage.fileURL("removed-duplicates.json")
     }
 
     /// Новые сверху.
