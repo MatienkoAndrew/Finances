@@ -14,6 +14,9 @@ struct AddTransactionView: View {
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
 
+    @Query(sort: \TransactionTag.createdAt, order: .reverse)
+    private var allTags: [TransactionTag]
+
     @Query
     private var settingsList: [AppSettings]
 
@@ -36,6 +39,7 @@ struct AddTransactionView: View {
 
     @State private var details: String = ""
     @State private var selectedCategoryName: String?
+    @State private var selectedSubcategoryName: String?
     @State private var note: String = ""
 
     @State private var selectedFromAccount: Account?
@@ -45,7 +49,15 @@ struct AddTransactionView: View {
     @State private var isShowingToCurrencyPicker = false
 
     @State private var didApplyInitialDefaults = false
-    @State private var isShowingAddCategory = false
+    @State private var isShowingCategoryPicker = false
+
+    private var categorySelectionLabel: String {
+        let category = selectedCategoryName ?? "Другое"
+        if let sub = selectedSubcategoryName, !sub.isEmpty {
+            return "\(category) · \(sub)"
+        }
+        return category
+    }
 
     var body: some View {
         NavigationStack {
@@ -97,22 +109,8 @@ struct AddTransactionView: View {
                     }
                     
                     if selectedKind == .expense {
-                        Menu {
-                            ForEach(categories) { category in
-                                Button {
-                                    selectedCategoryName = category.name
-                                } label: {
-                                    Text(category.name)
-                                }
-                            }
-
-                            Divider()
-
-                            Button {
-                                isShowingAddCategory = true
-                            } label: {
-                                Label("Новая категория", systemImage: "plus.circle.fill")
-                            }
+                        Button {
+                            isShowingCategoryPicker = true
                         } label: {
                             HStack {
                                 Text("Категория")
@@ -120,14 +118,16 @@ struct AddTransactionView: View {
 
                                 Spacer()
 
-                                Text(selectedCategoryName ?? "Другое")
+                                Text(categorySelectionLabel)
                                     .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.trailing)
 
-                                Image(systemName: "chevron.up.chevron.down")
+                                Image(systemName: "chevron.right")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .buttonStyle(.plain)
                     }
 
                     TextField(detailsPlaceholder, text: $details, axis: .vertical)
@@ -221,9 +221,14 @@ struct AddTransactionView: View {
                     toCurrencyCode = CurrencyDisplay.normalizedCode(from: newCode)
                 }
             }
-            .sheet(isPresented: $isShowingAddCategory) {
-                AddCategorySheet { newCategoryName in
-                    selectedCategoryName = newCategoryName
+            .sheet(isPresented: $isShowingCategoryPicker) {
+                CategoryPickerSheet(
+                    categories: categories,
+                    initialCategory: selectedCategoryName,
+                    initialSubcategory: selectedSubcategoryName
+                ) { category, subcategory in
+                    selectedCategoryName = category
+                    selectedSubcategoryName = subcategory
                 }
             }
             .onAppear {
@@ -357,6 +362,7 @@ struct AddTransactionView: View {
                 details: trimmedDetails,
                 rubAmount: rubAmount,
                 categoryName: selectedCategoryName,
+                subcategoryName: selectedSubcategoryName,
                 note: trimmedNote.isEmpty ? nil : trimmedNote,
                 fromAccount: selectedFromAccount,
                 toAccount: nil
@@ -396,6 +402,10 @@ struct AddTransactionView: View {
         }
 
         modelContext.insert(transaction)
+
+        // Авто-применение меток по валюте мерчанта (например, HKD → «Гонконг»).
+        // Делается ДО save, чтобы новые tagNames улетели в один коммит.
+        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags)
 
         do {
             try modelContext.save()

@@ -1,25 +1,100 @@
 import Foundation
-import CryptoKit
 
-struct ParsedStatementRow {
-    let date: Date
-    let amount: Double
-    let accountCurrency: String
-    let operationType: String
-    let details: String
-    let foreignAmount: Double?
-    let foreignCurrency: String?
-    let fingerprint: String
+enum KaspiOperationType: String, CaseIterable {
+    case purchase = "Покупка"
+    case topUp = "Пополнение"
+    case transfer = "Перевод"
+    case withdrawal = "Снятие"
+    case misc = "Разное"
+
+    /// Как тип называется в блоке «Краткое содержание операций».
+    var summaryTitle: String {
+        switch self {
+        case .purchase: return "Покупки"
+        case .topUp: return "Пополнения"
+        case .transfer: return "Переводы"
+        case .withdrawal: return "Снятия"
+        case .misc: return "Разное"
+        }
+    }
 }
 
+struct ParsedStatementRow {
+    /// День операции (полдень по локальному времени — см. `KaspiStatementParser.makeDate`).
+    let date: Date
+    /// Сумма в валюте счёта со знаком, как в выписке: «+» — зачисление, «-» — списание.
+    let amount: Double
+    let accountCurrency: String
+    let operationType: KaspiOperationType
+    let details: String
+    /// Сумма в валюте операции со знаком, если операция была не в тенге.
+    let foreignAmount: Double?
+    let foreignCurrency: String?
+    /// Kaspi пересчитал сумму ранее проведённой валютной покупки
+    /// и довёл/вернул разницу отдельной строкой («Курсовая разница»).
+    let isExchangeRateDifference: Bool
+}
+
+struct KaspiStatement {
+    let periodStart: Date?
+    let periodEnd: Date?
+    let rows: [ParsedStatementRow]
+    /// Итоги из блока «Краткое содержание операций по карте».
+    let summaryTotals: [KaspiOperationType: Double]
+    /// Строки, похожие на операцию (начинаются с даты и суммы), но не распознанные.
+    let unrecognizedLines: [String]
+
+    /// Типы операций, по которым сумма распознанных строк не сходится с итогом выписки.
+    /// Пусто — значит, все операции прочитаны без потерь.
+    var mismatchedTypes: [KaspiOperationType] {
+        KaspiOperationType.allCases.filter { type in
+            guard let expected = summaryTotals[type] else { return false }
+            let actual = rows
+                .filter { $0.operationType == type }
+                .reduce(0) { $0 + $1.amount }
+            return abs(actual - expected) > 0.005
+        }
+    }
+}
+
+/// Парсер выписки Kaspi Gold.
+///
+/// Формат строк после `PDFLayoutTextExtractor`:
+/// ```
+/// 29.09.26 - 4 613,91 ₸ Покупка MAMSTERCHILAB ITAEWONJ
+/// (- 14 000,00 KRW)
+/// 29.09.26 + 4,57 ₸ Покупка GS25SEOKYOTEUNTEUNJUM
+/// Курсовая разница
+/// ```
 enum KaspiStatementParser {
-    private static let operationTypes: Set<String> = [
-        "Покупка",
-        "Пополнение",
-        "Перевод",
-        "Снятие",
-        "Разное"
-    ]
+    private static let amountPattern = #"([+-])\s*(\d[\d\s]*,\d{2})"#
+
+    private static let rowRegex = try! Regex(
+        #"^(\d{2}\.\d{2}\.\d{2})\s+"# + amountPattern + #"\s*₸"#
+        + #"(?:\s*\(\s*"# + amountPattern + #"\s+([A-Z]{3})\s*\))?"#
+        + #"\s+(\#(KaspiOperationType.allCases.map(\.rawValue).joined(separator: "|")))"#
+        + #"(?:\s+(.*))?$"#
+    )
+
+    private static let foreignAmountRegex = try! Regex(
+        #"^\(\s*"# + amountPattern + #"\s+([A-Z]{3})\s*\)$"#
+    )
+
+    /// Похоже на начало строки операции — используется, чтобы не пропустить
+    /// нераспознанную операцию молча.
+    private static let rowLikeRegex = try! Regex(#"^\d{2}\.\d{2}\.\d{2}\s+[+-]"#)
+
+    private static let periodRegex = try! Regex(
+        #"за период с (\d{2}\.\d{2}\.\d{2}) по (\d{2}\.\d{2}\.\d{2})"#
+    )
+
+    private static let summaryRegex = try! Regex(
+        #"^(\#(KaspiOperationType.allCases.map(\.summaryTitle).joined(separator: "|")))\s+"#
+        + amountPattern + #"\s*₸"#
+    )
+
+    private static let exchangeRateDifferenceLine = "Курсовая разница"
+    private static let blockedAmountPrefix = "- Сумма заблокирована"
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -28,198 +103,179 @@ enum KaspiStatementParser {
         return formatter
     }()
 
-    static func parse(lines: [PDFTextLine]) -> [ParsedStatementRow] {
-        let filteredLines = lines
-            .map(\.text)
-            .map(cleanupLine)
+    static func parse(lines: [PDFTextLine]) -> KaspiStatement {
+        let texts = lines
+            .map { normalizeWhitespace($0.text) }
             .filter { !$0.isEmpty }
-            .filter { !shouldSkipLine($0) }
 
-        var result: [ParsedStatementRow] = []
-        var index = 0
+        var periodStart: Date?
+        var periodEnd: Date?
+        var summaryTotals: [KaspiOperationType: Double] = [:]
+        var rows: [ParsedStatementRow] = []
+        var unrecognizedLines: [String] = []
 
-        while index < filteredLines.count {
-            let line = filteredLines[index]
+        // Строка операции, к которой ещё могут относиться строки-продолжения.
+        var pending: PendingRow?
 
-            guard let parsedMain = parseMainTransactionLine(line) else {
-                index += 1
+        func flushPending() {
+            if let row = pending?.build() {
+                rows.append(row)
+            }
+            pending = nil
+        }
+
+        for text in texts {
+            if let row = parseRowLine(text) {
+                flushPending()
+                pending = row
                 continue
             }
 
-            var foreignAmount: Double?
-            var foreignCurrency: String?
-
-            if index + 1 < filteredLines.count {
-                let nextLine = filteredLines[index + 1]
-
-                if !startsWithDate(nextLine),
-                   let parsedForeign = parseForeignAmountLine(nextLine) {
-
-                    if parsedMain.operationType == "Пополнение" {
-                        foreignAmount = abs(parsedForeign.amount)
-                    } else {
-                        foreignAmount = -abs(parsedForeign.amount)
-                    }
-
-                    foreignCurrency = parsedForeign.currency
-                    index += 1
+            if var current = pending {
+                if current.foreignAmount == nil, let foreign = parseForeignAmountLine(text) {
+                    current.foreignAmount = foreign.amount
+                    current.foreignCurrency = foreign.currency
+                    pending = current
+                    continue
                 }
+
+                if text == exchangeRateDifferenceLine {
+                    current.isExchangeRateDifference = true
+                    pending = current
+                    continue
+                }
+
+                // Сноска под таблицей, к конкретной строке не привязана.
+                if text.hasPrefix(blockedAmountPrefix) {
+                    continue
+                }
+
+                // Любая другая строка (колонтитул, шапка страницы) закрывает операцию.
+                flushPending()
             }
 
-            let fingerprint = makeFingerprint(
-                date: parsedMain.date,
-                amount: parsedMain.amount,
-                accountCurrency: parsedMain.accountCurrency,
-                operationType: parsedMain.operationType,
-                details: parsedMain.details,
-                foreignAmount: foreignAmount,
-                foreignCurrency: foreignCurrency
-            )
+            if rows.isEmpty, periodStart == nil,
+               let match = text.firstMatch(of: periodRegex) {
+                periodStart = parseDate(match.output[1].substring)
+                periodEnd = parseDate(match.output[2].substring)
+                continue
+            }
 
-            result.append(
-                ParsedStatementRow(
-                    date: parsedMain.date,
-                    amount: parsedMain.amount,
-                    accountCurrency: parsedMain.accountCurrency,
-                    operationType: parsedMain.operationType,
-                    details: parsedMain.details,
-                    foreignAmount: foreignAmount,
-                    foreignCurrency: foreignCurrency,
-                    fingerprint: fingerprint
-                )
-            )
+            if rows.isEmpty,
+               let match = text.firstMatch(of: summaryRegex),
+               let title = match.output[1].substring,
+               let type = KaspiOperationType.allCases.first(where: { $0.summaryTitle == title }),
+               summaryTotals[type] == nil,
+               let amount = parseSignedAmount(sign: match.output[2].substring, digits: match.output[3].substring) {
+                summaryTotals[type] = amount
+                continue
+            }
 
-            index += 1
+            if text.firstMatch(of: rowLikeRegex) != nil {
+                unrecognizedLines.append(text)
+            }
         }
 
-        return result
-    }
+        flushPending()
 
-    private static func parseMainTransactionLine(_ line: String) -> (
-        date: Date,
-        amount: Double,
-        accountCurrency: String,
-        operationType: String,
-        details: String
-    )? {
-        let parts = line.split(separator: " ").map(String.init)
-        guard parts.count >= 4 else { return nil }
-
-        let dateString = parts[0]
-        guard let date = dateFormatter.date(from: dateString) else { return nil }
-
-        guard let operationIndex = parts.firstIndex(where: { operationTypes.contains($0) }) else {
-            return nil
-        }
-
-        let amountTokens = Array(parts[1..<operationIndex])
-        let amountString = amountTokens.joined(separator: " ")
-
-        guard let parsedAmount = parseNumber(amountString) else {
-            return nil
-        }
-
-        let operationType = parts[operationIndex]
-        let detailsTokens = Array(parts[(operationIndex + 1)...])
-        let details = detailsTokens.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let signedAmount: Double
-        if operationType == "Пополнение" {
-            signedAmount = abs(parsedAmount)
-        } else {
-            signedAmount = -abs(parsedAmount)
-        }
-
-        return (
-            date: date,
-            amount: signedAmount,
-            accountCurrency: "₸",
-            operationType: operationType,
-            details: details
+        return KaspiStatement(
+            periodStart: periodStart,
+            periodEnd: periodEnd,
+            rows: rows,
+            summaryTotals: summaryTotals,
+            unrecognizedLines: unrecognizedLines
         )
     }
 
-    
-    private static func parseForeignAmountLine(_ line: String) -> (amount: Double, currency: String)? {
-        let parts = line.split(separator: " ").map(String.init)
-        guard parts.count >= 2 else { return nil }
+    // MARK: - Lines
 
-        let currency = parts.last!
-        let amountString = parts.dropLast().joined(separator: " ")
+    private struct PendingRow {
+        let date: Date
+        let amount: Double
+        let operationType: KaspiOperationType
+        let details: String
+        var foreignAmount: Double?
+        var foreignCurrency: String?
+        var isExchangeRateDifference = false
 
-        guard let amount = parseNumber(amountString) else { return nil }
-        return (amount, currency)
+        func build() -> ParsedStatementRow {
+            ParsedStatementRow(
+                date: date,
+                amount: amount,
+                accountCurrency: "KZT",
+                operationType: operationType,
+                details: details,
+                foreignAmount: foreignAmount,
+                foreignCurrency: foreignCurrency,
+                isExchangeRateDifference: isExchangeRateDifference
+            )
+        }
     }
 
-    private static func parseNumber(_ string: String) -> Double? {
-        let normalized = string
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-
-        return Double(normalized)
-    }
-
-    private static func startsWithDate(_ line: String) -> Bool {
-        let pattern = #"^\d{2}\.\d{2}\.\d{2}\b"#
-        return line.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    private static func shouldSkipLine(_ line: String) -> Bool {
-        if line.hasPrefix("АО Kaspi Bank") { return true }
-        if line == "Дата Сумма Операция Детали" { return true }
-        if line == "ВЫПИСКА" { return true }
-        if line.hasPrefix("по Kaspi Gold за период") { return true }
-        if line.hasPrefix("Краткое содержание операций") { return true }
-        if line.hasPrefix("Доступно на ") { return true }
-        if line.hasPrefix("Пополнения ") { return true }
-        if line.hasPrefix("Переводы ") { return true }
-        if line.hasPrefix("Покупки ") { return true }
-        if line.hasPrefix("Снятия ") { return true }
-        if line.hasPrefix("Разное ") { return true }
-        if line.hasPrefix("Сумма заблокирована") { return true }
-        return false
-    }
-
-    private static func cleanupLine(_ line: String) -> String {
-        line
-            .replacingOccurrences(of: "  ", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func makeFingerprint(
-        date: Date,
-        amount: Double,
-        accountCurrency: String,
-        operationType: String,
-        details: String,
-        foreignAmount: Double?,
-        foreignCurrency: String?
-    ) -> String {
-        let foreignAmountString: String
-        if let foreignAmount {
-            foreignAmountString = String(foreignAmount)
-        } else {
-            foreignAmountString = ""
+    private static func parseRowLine(_ text: String) -> PendingRow? {
+        guard let match = text.wholeMatch(of: rowRegex),
+              let date = parseDate(match.output[1].substring),
+              let amount = parseSignedAmount(sign: match.output[2].substring, digits: match.output[3].substring),
+              let typeRaw = match.output[7].substring,
+              let operationType = KaspiOperationType(rawValue: String(typeRaw)) else {
+            return nil
         }
 
-        let components: [String] = [
-            isoDateString(date),
-            String(amount),
-            accountCurrency,
-            operationType,
-            details,
-            foreignAmountString,
-            foreignCurrency ?? ""
-        ]
+        let details = match.output[8].substring.map(String.init) ?? ""
 
-        let raw = components.joined(separator: "|")
-        let digest = SHA256.hash(data: Data(raw.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+        var row = PendingRow(
+            date: date,
+            amount: amount,
+            operationType: operationType,
+            details: details.trimmingCharacters(in: .whitespaces)
+        )
+
+        // Валютная сумма обычно на следующей строке, но может оказаться и на этой.
+        if let foreign = parseSignedAmount(sign: match.output[4].substring, digits: match.output[5].substring),
+           let currency = match.output[6].substring {
+            row.foreignAmount = foreign
+            row.foreignCurrency = String(currency)
+        }
+
+        return row
     }
-    
-    private static func isoDateString(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.string(from: date)
+
+    private static func parseForeignAmountLine(_ text: String) -> (amount: Double, currency: String)? {
+        guard let match = text.wholeMatch(of: foreignAmountRegex),
+              let amount = parseSignedAmount(sign: match.output[1].substring, digits: match.output[2].substring),
+              let currency = match.output[3].substring else {
+            return nil
+        }
+        return (amount, String(currency))
+    }
+
+    // MARK: - Values
+
+    private static func parseSignedAmount(sign: Substring?, digits: Substring?) -> Double? {
+        guard let sign, let digits else { return nil }
+
+        let normalized = digits
+            .filter { !$0.isWhitespace }
+            .replacingOccurrences(of: ",", with: ".")
+
+        guard let value = Double(normalized) else { return nil }
+        return sign == "-" ? -value : value
+    }
+
+    private static func parseDate(_ string: Substring?) -> Date? {
+        guard let string, let day = dateFormatter.date(from: String(string)) else { return nil }
+        return makeDate(day)
+    }
+
+    /// Дата операции хранится на полдень, а не на полночь: так день не «уезжает»
+    /// на соседний, если приложение открыть в другом часовом поясе (±11 часов).
+    private static func makeDate(_ day: Date) -> Date {
+        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+    }
+
+    private static func normalizeWhitespace(_ text: String) -> String {
+        text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 }
