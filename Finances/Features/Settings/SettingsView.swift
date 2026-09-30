@@ -123,6 +123,10 @@ struct SettingsView: View {
                     NavigationLink("Метки") {
                         TagsManagementView()
                     }
+
+                    NavigationLink("Поиск дублей") {
+                        DuplicatesView()
+                    }
                 }
                 
                 Section("Резервное копирование") {

@@ -20,7 +20,7 @@ enum KaspiOperationType: String, CaseIterable {
 }
 
 struct ParsedStatementRow {
-    /// День операции (полдень по локальному времени — см. `KaspiStatementParser.makeDate`).
+    /// День операции (полдень по времени Kaspi — см. `KaspiStatementParser.makeDate`).
     let date: Date
     /// Сумма в валюте счёта со знаком, как в выписке: «+» — зачисление, «-» — списание.
     let amount: Double
@@ -96,10 +96,21 @@ enum KaspiStatementParser {
     private static let exchangeRateDifferenceLine = "Курсовая разница"
     private static let blockedAmountPrefix = "- Сумма заблокирована"
 
+    /// Даты в выписке — по времени Kaspi (Казахстан, UTC+5). Фиксированное смещение,
+    /// а не «Asia/Almaty»: до марта 2024 там было UTC+6, и день бы плавал.
+    static let timeZone = TimeZone(secondsFromGMT: 5 * 3600)!
+
+    static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar
+    }()
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "dd.MM.yy"
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
         return formatter
     }()
 
@@ -267,10 +278,11 @@ enum KaspiStatementParser {
         return makeDate(day)
     }
 
-    /// Дата операции хранится на полдень, а не на полночь: так день не «уезжает»
-    /// на соседний, если приложение открыть в другом часовом поясе (±11 часов).
+    /// Дата операции хранится на полдень по времени Kaspi, а не на полночь по местному:
+    /// день не «уезжает» на соседний в другом часовом поясе, и по времени суток
+    /// её можно отличить от старых импортов (см. `StatementDeduplicator.dayNumber`).
     private static func makeDate(_ day: Date) -> Date {
-        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+        calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
     }
 
     private static func normalizeWhitespace(_ text: String) -> String {
