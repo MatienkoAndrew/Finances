@@ -257,12 +257,7 @@ struct ContentView: View {
 
                 try modelContext.save()
 
-                if result.accountsToCreate.isEmpty {
-                    importResultMessage = "Импортировано \(result.transactions.count) новых операций"
-                } else {
-                    let createdNames = result.accountsToCreate.map(\.name).joined(separator: ", ")
-                    importResultMessage = "Импортировано \(result.transactions.count) новых операций. Созданы счета: \(createdNames)"
-                }
+                importResultMessage = result.summaryMessage
             } catch {
                 importErrorMessage = error.localizedDescription
             }

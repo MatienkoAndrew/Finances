@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 enum PDFImporterError: LocalizedError {
     case failedToAccessFile
@@ -21,6 +22,18 @@ enum PDFImporterError: LocalizedError {
 }
 
 enum PDFImporter {
+    static let exchangeRateDifferenceNote = "Курсовая разница"
+
+    /// Сколько последних дней периода выписки считаются «в обработке».
+    /// Для валютных операций Kaspi показывает там предварительную сумму в тенге,
+    /// а в следующей выписке — окончательную (разница — единицы и десятки тенге).
+    private static let pendingWindowDays = 4
+
+    /// Импортирует выписку Kaspi Gold.
+    ///
+    /// Новые операции возвращаются в `transactions` — их нужно вставить в контекст.
+    /// Уже существующие совпавшие транзакции обновляются на месте (уточнённая сумма,
+    /// исправленный знак «Курсовой разницы»), поэтому после вызова контекст нужно сохранить.
     static func importTransactions(
         from url: URL,
         existingTransactions: [Transaction],
@@ -38,280 +51,312 @@ enum PDFImporter {
         }
 
         let lines = try PDFLayoutTextExtractor.extractLines(from: url)
-        let parsedRows = KaspiStatementParser.parse(lines: lines)
+        let statement = KaspiStatementParser.parse(lines: lines)
+        let rows = statement.rows
 
-        guard !parsedRows.isEmpty else {
+        guard !rows.isEmpty else {
             throw PDFImporterError.noTransactionsFound
         }
 
-        var existingFingerprints = Set(
-            existingTransactions.compactMap(\.fingerprint)
+        let context = ImportContext(
+            kaspiAccount: AccountLookup.kaspi(in: accounts),
+            rules: rules,
+            categories: categories,
+            rates: rates,
+            fallbackKztPerRub: fallbackKztPerRub,
+            fileName: url.lastPathComponent,
+            importedAt: Date(),
+            settledBefore: settledBoundary(for: statement)
         )
 
-        let fileName = url.lastPathComponent
-        let importedAt = Date()
+        let candidates = matchCandidates(
+            existingTransactions,
+            statement: statement,
+            kaspiAccount: context.kaspiAccount
+        )
 
-        var workingAccounts = accounts
-        var accountsToCreate: [Account] = []
-        var importedTransactions: [Transaction] = []
+        let matching = StatementDeduplicator.match(
+            rows: rows,
+            existing: candidates.map { snapshot(of: $0, kaspiAccount: context.kaspiAccount) }
+        )
 
-        for row in parsedRows {
-            guard !existingFingerprints.contains(row.fingerprint) else {
-                continue
-            }
+        var settledCount = 0
+        var repairedCount = 0
 
-            let transaction = makeTransaction(
-                from: row,
-                accounts: &workingAccounts,
-                accountsToCreate: &accountsToCreate,
-                rules: rules,
-                categories: categories,
-                rates: rates,
-                fallbackKztPerRub: fallbackKztPerRub,
-                fileName: fileName,
-                importedAt: importedAt
+        for match in matching.matches {
+            let outcome = update(
+                candidates[match.existingIndex],
+                with: rows[match.rowIndex],
+                context: context
             )
-
-            importedTransactions.append(transaction)
-            existingFingerprints.insert(row.fingerprint)
+            if outcome.amountSettled { settledCount += 1 }
+            if outcome.repaired { repairedCount += 1 }
         }
 
-        guard !importedTransactions.isEmpty else {
+        let fingerprints = StatementDeduplicator.fingerprints(for: rows)
+        var workingAccounts = accounts
+        var accountsToCreate: [Account] = []
+
+        let newTransactions = matching.unmatchedRowIndices.map { index in
+            makeTransaction(
+                from: rows[index],
+                fingerprint: fingerprints[index],
+                context: context,
+                accounts: &workingAccounts,
+                accountsToCreate: &accountsToCreate
+            )
+        }
+
+        guard !newTransactions.isEmpty || settledCount > 0 || repairedCount > 0 else {
             throw PDFImporterError.noNewTransactionsFound
         }
 
         return PDFImportResult(
             accountsToCreate: accountsToCreate,
-            transactions: importedTransactions
+            transactions: newTransactions,
+            skippedDuplicatesCount: matching.matches.count,
+            settledAmountsCount: settledCount,
+            repairedCount: repairedCount,
+            mismatchedOperationTypes: statement.mismatchedTypes.map(\.summaryTitle),
+            unrecognizedLinesCount: statement.unrecognizedLines.count
         )
     }
 
+    // MARK: - Matching
+
+    private struct ImportContext {
+        let kaspiAccount: Account?
+        let rules: [CategoryRule]
+        let categories: [ExpenseCategoryItem]
+        let rates: [ExchangeRateEntry]
+        let fallbackKztPerRub: Double?
+        let fileName: String
+        let importedAt: Date
+        /// Операции до этой даты (не включительно) уже проведены окончательно.
+        let settledBefore: Date
+
+        func isSettled(_ row: ParsedStatementRow) -> Bool {
+            row.date < settledBefore
+        }
+    }
+
+    private static func settledBoundary(for statement: KaspiStatement) -> Date {
+        let calendar = Calendar.current
+        let periodEnd = statement.periodEnd ?? statement.rows.map(\.date).max() ?? Date()
+        let lastDay = calendar.startOfDay(for: periodEnd)
+        return calendar.date(byAdding: .day, value: -(pendingWindowDays - 1), to: lastDay) ?? lastDay
+    }
+
+    /// Транзакции, с которыми имеет смысл сравнивать строки выписки:
+    /// по счёту Kaspi (или созданные импортом) и в пределах периода выписки ± 1 день.
+    private static func matchCandidates(
+        _ transactions: [Transaction],
+        statement: KaspiStatement,
+        kaspiAccount: Account?
+    ) -> [Transaction] {
+        let calendar = Calendar.current
+        let rowDates = statement.rows.map(\.date)
+
+        guard let firstDate = statement.periodStart ?? rowDates.min(),
+              let lastDate = statement.periodEnd ?? rowDates.max(),
+              let lowerBound = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: firstDate)),
+              let upperBound = calendar.date(byAdding: .day, value: 2, to: calendar.startOfDay(for: lastDate)) else {
+            return []
+        }
+
+        return transactions.filter { transaction in
+            guard transaction.date >= lowerBound, transaction.date < upperBound else { return false }
+            return transaction.fingerprint != nil
+                || isKaspi(transaction.fromAccount, kaspiAccount)
+                || isKaspi(transaction.toAccount, kaspiAccount)
+        }
+    }
+
+    private static func snapshot(of transaction: Transaction, kaspiAccount: Account?) -> ExistingTransactionSnapshot {
+        ExistingTransactionSnapshot(
+            date: transaction.date,
+            details: transaction.details,
+            amount: abs(transaction.amount),
+            currencyCode: transaction.currencyCode,
+            foreignAmount: transaction.foreignAmount,
+            foreignCurrencyCode: transaction.foreignCurrencyCode,
+            direction: direction(of: transaction, kaspiAccount: kaspiAccount),
+            wasImported: transaction.fingerprint != nil
+        )
+    }
+
+    private static func direction(of transaction: Transaction, kaspiAccount: Account?) -> Int {
+        switch transaction.kind {
+        case .expense:
+            return -1
+        case .income:
+            return 1
+        case .transfer:
+            if isKaspi(transaction.toAccount, kaspiAccount) { return 1 }
+            return -1
+        }
+    }
+
+    private static func isKaspi(_ account: Account?, _ kaspiAccount: Account?) -> Bool {
+        guard let account, let kaspiAccount else { return false }
+        return account.persistentModelID == kaspiAccount.persistentModelID
+    }
+
+    // MARK: - Updating existing
+
+    private struct UpdateOutcome {
+        var amountSettled = false
+        var repaired = false
+    }
+
+    private static func update(
+        _ transaction: Transaction,
+        with row: ParsedStatementRow,
+        context: ImportContext
+    ) -> UpdateOutcome {
+        var outcome = UpdateOutcome()
+
+        // Старый парсер игнорировал знак и записывал «+» по покупке
+        // (курсовая разница, возврат) как расход.
+        if row.operationType == .purchase || row.operationType == .misc {
+            if row.amount > 0, transaction.kind == .expense {
+                transaction.kind = .income
+                transaction.toAccount = transaction.fromAccount ?? context.kaspiAccount
+                transaction.fromAccount = nil
+                if transaction.isCategoryManuallySet != true {
+                    transaction.categoryName = nil
+                    transaction.subcategoryName = nil
+                }
+                outcome.repaired = true
+            } else if row.amount < 0, transaction.kind == .income {
+                transaction.kind = .expense
+                transaction.fromAccount = transaction.toAccount ?? context.kaspiAccount
+                transaction.toAccount = nil
+                if transaction.categoryName == nil {
+                    transaction.categoryName = matchCategory(for: row, context: context)
+                }
+                outcome.repaired = true
+            }
+        }
+
+        if row.isExchangeRateDifference, (transaction.note ?? "").isEmpty {
+            transaction.note = exchangeRateDifferenceNote
+            outcome.repaired = true
+        }
+
+        // Предварительная сумма в тенге из прошлой выписки → окончательная.
+        let settledAmount = abs(row.amount)
+        if context.isSettled(row),
+           CurrencyDisplay.normalizedCode(from: transaction.currencyCode) == CurrencyDisplay.normalizedCode(from: row.accountCurrency),
+           abs(transaction.amount - settledAmount) >= 0.005 {
+            if let toCurrency = transaction.toCurrencyCode,
+               CurrencyDisplay.normalizedCode(from: toCurrency) == CurrencyDisplay.normalizedCode(from: transaction.currencyCode) {
+                transaction.toAmount = settledAmount
+            }
+            transaction.amount = settledAmount
+            transaction.rubAmount = makeRubAmount(
+                amount: settledAmount,
+                currencyCode: transaction.currencyCode,
+                date: transaction.date,
+                context: context
+            )
+            outcome.amountSettled = true
+        }
+
+        return outcome
+    }
+
+    // MARK: - Creating new
+
     private static func makeTransaction(
         from row: ParsedStatementRow,
+        fingerprint: String,
+        context: ImportContext,
         accounts: inout [Account],
-        accountsToCreate: inout [Account],
-        rules: [CategoryRule],
-        categories: [ExpenseCategoryItem],
-        rates: [ExchangeRateEntry],
-        fallbackKztPerRub: Double?,
-        fileName: String,
-        importedAt: Date
+        accountsToCreate: inout [Account]
     ) -> Transaction {
         let sourceCurrency = CurrencyDisplay.normalizedCode(from: row.accountCurrency)
         let foreignCurrency = row.foreignCurrency.map { CurrencyDisplay.normalizedCode(from: $0) }
-
         let absoluteAmount = abs(row.amount)
-        let absoluteForeignAmount = row.foreignAmount.map(abs)
+        let isCredit = row.amount > 0
+        let kaspiAccount = context.kaspiAccount
 
-        let rubAmount = makeRubAmount(
-            amount: absoluteAmount,
-            currencyCode: sourceCurrency,
-            date: row.date,
-            rates: rates,
-            fallbackKztPerRub: fallbackKztPerRub
-        )
+        let kind: TransactionKind
+        var fromAccount: Account?
+        var toAccount: Account?
+        var toAmount: Double?
+        var toCurrencyCode: String?
+        var categoryName: String?
 
-        let kaspiAccount = AccountLookup.kaspi(in: accounts)
-
-        switch row.operationType {
-        case "Покупка":
-            return Transaction(
-                date: row.date,
-                kindRaw: TransactionKind.expense.rawValue,
-                amount: absoluteAmount,
-                currencyCode: sourceCurrency,
-                details: row.details,
-                foreignAmount: absoluteForeignAmount,
-                foreignCurrencyCode: foreignCurrency,
-                rubAmount: rubAmount,
-                categoryName: CategoryRuleEngine.matchCategoryName(
-                    operationType: row.operationType,
-                    details: row.details,
-                    rules: rules,
-                    existingCategories: categories
-                ),
-                note: nil,
-                fingerprint: row.fingerprint,
-                sourceFileName: fileName,
-                importedAt: importedAt,
-                createdAt: importedAt,
-                fromAccount: kaspiAccount,
-                toAccount: nil
-            )
-
-        case "Пополнение":
-            return Transaction(
-                date: row.date,
-                kindRaw: TransactionKind.income.rawValue,
-                amount: absoluteAmount,
-                currencyCode: sourceCurrency,
-                details: row.details,
-                foreignAmount: absoluteForeignAmount,
-                foreignCurrencyCode: foreignCurrency,
-                rubAmount: rubAmount,
-                categoryName: nil,
-                note: nil,
-                fingerprint: row.fingerprint,
-                sourceFileName: fileName,
-                importedAt: importedAt,
-                createdAt: importedAt,
-                fromAccount: nil,
-                toAccount: kaspiAccount
-            )
-
-        case "Снятие":
+        switch (row.operationType, isCredit) {
+        case (.withdrawal, false):
+            // Снятие наличных — перевод с Kaspi на кошелёк наличных в валюте выдачи.
             let destinationCurrency = foreignCurrency ?? sourceCurrency
-            let destinationAmount = abs(row.foreignAmount ?? row.amount)
-
-            let destinationAccount = resolveOrCreateCashAccount(
+            kind = .transfer
+            fromAccount = kaspiAccount
+            toAccount = resolveOrCreateCashAccount(
                 currencyCode: destinationCurrency,
                 accounts: &accounts,
                 accountsToCreate: &accountsToCreate
             )
+            toAmount = abs(row.foreignAmount ?? row.amount)
+            toCurrencyCode = destinationCurrency
 
-            return Transaction(
-                date: row.date,
-                kindRaw: TransactionKind.transfer.rawValue,
-                amount: absoluteAmount,
-                currencyCode: sourceCurrency,
-                toAmount: destinationAmount,
-                toCurrencyCode: destinationCurrency,
-                details: row.details,
-                foreignAmount: absoluteForeignAmount,
-                foreignCurrencyCode: foreignCurrency,
-                rubAmount: rubAmount,
-                categoryName: nil,
-                note: nil,
-                fingerprint: row.fingerprint,
-                sourceFileName: fileName,
-                importedAt: importedAt,
-                createdAt: importedAt,
-                fromAccount: kaspiAccount,
-                toAccount: destinationAccount
-            )
+        case (.transfer, false):
+            kind = .transfer
+            fromAccount = kaspiAccount
 
-        case "Перевод":
-            return Transaction(
-                date: row.date,
-                kindRaw: TransactionKind.transfer.rawValue,
-                amount: absoluteAmount,
-                currencyCode: sourceCurrency,
-                toAmount: nil,
-                toCurrencyCode: nil,
-                details: row.details,
-                foreignAmount: absoluteForeignAmount,
-                foreignCurrencyCode: foreignCurrency,
-                rubAmount: rubAmount,
-                categoryName: nil,
-                note: nil,
-                fingerprint: row.fingerprint,
-                sourceFileName: fileName,
-                importedAt: importedAt,
-                createdAt: importedAt,
-                fromAccount: kaspiAccount,
-                toAccount: nil
-            )
+        case (_, true):
+            kind = .income
+            toAccount = kaspiAccount
 
-        case "Разное":
-            if row.amount >= 0 {
-                return Transaction(
-                    date: row.date,
-                    kindRaw: TransactionKind.income.rawValue,
-                    amount: absoluteAmount,
-                    currencyCode: sourceCurrency,
-                    details: row.details,
-                    foreignAmount: absoluteForeignAmount,
-                    foreignCurrencyCode: foreignCurrency,
-                    rubAmount: rubAmount,
-                    categoryName: nil,
-                    note: nil,
-                    fingerprint: row.fingerprint,
-                    sourceFileName: fileName,
-                    importedAt: importedAt,
-                    createdAt: importedAt,
-                    fromAccount: nil,
-                    toAccount: kaspiAccount
-                )
-            } else {
-                return Transaction(
-                    date: row.date,
-                    kindRaw: TransactionKind.expense.rawValue,
-                    amount: absoluteAmount,
-                    currencyCode: sourceCurrency,
-                    details: row.details,
-                    foreignAmount: absoluteForeignAmount,
-                    foreignCurrencyCode: foreignCurrency,
-                    rubAmount: rubAmount,
-                    categoryName: CategoryRuleEngine.matchCategoryName(
-                        operationType: row.operationType,
-                        details: row.details,
-                        rules: rules,
-                        existingCategories: categories
-                    ),
-                    note: nil,
-                    fingerprint: row.fingerprint,
-                    sourceFileName: fileName,
-                    importedAt: importedAt,
-                    createdAt: importedAt,
-                    fromAccount: kaspiAccount,
-                    toAccount: nil
-                )
-            }
-
-        default:
-            if row.amount >= 0 {
-                return Transaction(
-                    date: row.date,
-                    kindRaw: TransactionKind.income.rawValue,
-                    amount: absoluteAmount,
-                    currencyCode: sourceCurrency,
-                    details: row.details,
-                    foreignAmount: absoluteForeignAmount,
-                    foreignCurrencyCode: foreignCurrency,
-                    rubAmount: rubAmount,
-                    categoryName: nil,
-                    note: nil,
-                    fingerprint: row.fingerprint,
-                    sourceFileName: fileName,
-                    importedAt: importedAt,
-                    createdAt: importedAt,
-                    fromAccount: nil,
-                    toAccount: kaspiAccount
-                )
-            } else {
-                return Transaction(
-                    date: row.date,
-                    kindRaw: TransactionKind.expense.rawValue,
-                    amount: absoluteAmount,
-                    currencyCode: sourceCurrency,
-                    details: row.details,
-                    foreignAmount: absoluteForeignAmount,
-                    foreignCurrencyCode: foreignCurrency,
-                    rubAmount: rubAmount,
-                    categoryName: CategoryRuleEngine.matchCategoryName(
-                        operationType: row.operationType,
-                        details: row.details,
-                        rules: rules,
-                        existingCategories: categories
-                    ),
-                    note: nil,
-                    fingerprint: row.fingerprint,
-                    sourceFileName: fileName,
-                    importedAt: importedAt,
-                    createdAt: importedAt,
-                    fromAccount: kaspiAccount,
-                    toAccount: nil
-                )
-            }
+        case (_, false):
+            kind = .expense
+            fromAccount = kaspiAccount
+            categoryName = matchCategory(for: row, context: context)
         }
+
+        return Transaction(
+            date: row.date,
+            kindRaw: kind.rawValue,
+            amount: absoluteAmount,
+            currencyCode: sourceCurrency,
+            toAmount: toAmount,
+            toCurrencyCode: toCurrencyCode,
+            details: row.details,
+            foreignAmount: row.foreignAmount.map(abs),
+            foreignCurrencyCode: foreignCurrency,
+            rubAmount: makeRubAmount(
+                amount: absoluteAmount,
+                currencyCode: sourceCurrency,
+                date: row.date,
+                context: context
+            ),
+            categoryName: categoryName,
+            note: row.isExchangeRateDifference ? exchangeRateDifferenceNote : nil,
+            fingerprint: fingerprint,
+            sourceFileName: context.fileName,
+            importedAt: context.importedAt,
+            createdAt: context.importedAt,
+            fromAccount: fromAccount,
+            toAccount: toAccount
+        )
+    }
+
+    private static func matchCategory(for row: ParsedStatementRow, context: ImportContext) -> String? {
+        CategoryRuleEngine.matchCategoryName(
+            operationType: row.operationType.rawValue,
+            details: row.details,
+            rules: context.rules,
+            existingCategories: context.categories
+        )
     }
 
     private static func makeRubAmount(
         amount: Double,
         currencyCode: String,
         date: Date,
-        rates: [ExchangeRateEntry],
-        fallbackKztPerRub: Double?
+        context: ImportContext
     ) -> Double? {
         switch CurrencyDisplay.normalizedCode(from: currencyCode) {
         case "RUB":
@@ -321,8 +366,8 @@ enum PDFImporter {
             return HistoricalCurrencyConverter.rubAmount(
                 for: amount,
                 on: date,
-                rates: rates,
-                fallbackKztPerRub: fallbackKztPerRub
+                rates: context.rates,
+                fallbackKztPerRub: context.fallbackKztPerRub
             )
 
         default:
@@ -330,7 +375,6 @@ enum PDFImporter {
         }
     }
 
-    @discardableResult
     private static func resolveOrCreateCashAccount(
         currencyCode: String,
         accounts: inout [Account],
