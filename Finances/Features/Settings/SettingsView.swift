@@ -127,6 +127,10 @@ struct SettingsView: View {
                     NavigationLink("Поиск дублей") {
                         DuplicatesView()
                     }
+
+                    NavigationLink("История импортов") {
+                        ImportHistoryView()
+                    }
                 }
                 
                 Section("Резервное копирование") {
@@ -381,7 +385,7 @@ struct SettingsView: View {
                 let message = replaceExisting 
                     ? "Данные успешно заменены" 
                     : "Данные успешно импортированы"
-                let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
+                let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext).count
                 importSuccessMessage = removedDuplicates > 0
                     ? "\(message). Удалено дублей: \(removedDuplicates)."
                     : message

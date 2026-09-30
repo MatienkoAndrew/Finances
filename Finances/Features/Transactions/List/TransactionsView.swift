@@ -34,6 +34,9 @@ struct TransactionsView: View {
 
     @State private var importErrorMessage: String?
     @State private var importResultMessage: String?
+    /// Метка последнего импорта — для кнопки «Отменить импорт» в итоговом алерте.
+    @State private var lastImportedAt: Date?
+    @State private var undoResultMessage: String?
 
     private var settings: AppSettings? {
         settingsList.first
@@ -181,8 +184,24 @@ struct TransactionsView: View {
                 Button("OK", role: .cancel) {
                     importResultMessage = nil
                 }
+
+                if let lastImportedAt {
+                    Button("Отменить импорт", role: .destructive) {
+                        undoImport(importedAt: lastImportedAt)
+                    }
+                }
             } message: {
                 Text(importResultMessage ?? "")
+            }
+            .alert("Импорт отменён", isPresented: Binding(
+                get: { undoResultMessage != nil },
+                set: { if !$0 { undoResultMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {
+                    undoResultMessage = nil
+                }
+            } message: {
+                Text(undoResultMessage ?? "")
             }
         }
     }
@@ -391,11 +410,33 @@ struct TransactionsView: View {
                 try modelContext.save()
 
                 let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
+
+                ImportHistory.add(ImportRecord(
+                    importedAt: importResult.importedAt,
+                    fileName: importResult.fileName,
+                    createdAccountKeys: importResult.accountsToCreate.map(ImportHistory.key(of:)),
+                    modifications: importResult.modifications,
+                    removedDuplicateIDs: removedDuplicates.map(\.id)
+                ))
+
+                lastImportedAt = importResult.importedAt
                 importResultMessage = importResult.summaryMessage
-                    + (removedDuplicates > 0 ? "\nУдалено старых дублей: \(removedDuplicates)." : "")
+                    + (removedDuplicates.isEmpty ? "" : "\nУдалено старых дублей: \(removedDuplicates.count).")
             } catch {
                 importErrorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func undoImport(importedAt: Date) {
+        importResultMessage = nil
+        lastImportedAt = nil
+
+        do {
+            undoResultMessage = try ImportHistory.undo(importedAt: importedAt, context: modelContext).message
+        } catch {
+            modelContext.rollback()
+            importErrorMessage = error.localizedDescription
         }
     }
 }

@@ -9,6 +9,9 @@
 import Foundation
 
 struct PDFImportResult {
+    /// Метка импорта: у всех добавленных операций такой же `importedAt`.
+    let importedAt: Date
+    let fileName: String
     let accountsToCreate: [Account]
     /// Новые операции — их нужно вставить в контекст.
     let transactions: [Transaction]
@@ -19,6 +22,8 @@ struct PDFImportResult {
     let settledAmountsCount: Int
     /// Уже импортированные операции, у которых исправлен знак (возврат, курсовая разница).
     let repairedCount: Int
+    /// Что именно поменялось у существующих операций — для отмены импорта.
+    let modifications: [TransactionModification]
     /// Типы операций, по которым сумма не сошлась с итогами выписки.
     let mismatchedOperationTypes: [String]
     /// Строки, похожие на операции, которые не удалось разобрать.
