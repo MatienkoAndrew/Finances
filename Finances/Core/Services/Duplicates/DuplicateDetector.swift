@@ -30,10 +30,14 @@ struct DuplicateGroup {
 ///
 /// 1. Точные копии: одинаковый fingerprint, а у ручных операций — одинаковые
 ///    `createdAt`, дата, описание и сумма. Так выглядят записи, задвоенные бэкапом.
-/// 2. Повторные импорты: импорты сравниваются между собой так же, как новая выписка
-///    с базой (`StatementDeduplicator`). Внутри одного импорта одинаковые операции —
-///    это разные покупки, между импортами — одна и та же. Так находятся дубли
-///    из-за предварительной суммы в тенге (старый импорт считал их разными).
+/// 2. Повторные импорты: одна валютная операция из разных импортов с разной суммой
+///    в тенге — предварительной и окончательной. Старый импорт считал такие строки
+///    разными и записывал обе.
+///
+///    Одинаковая сумма в тенге — наоборот, признак *разных* покупок: настоящую копию
+///    старый импорт отсеял бы по fingerprint, а новый — сопоставлением. Такие строки
+///    появляются, когда новый импорт дозагружает вторую одинаковую покупку за день,
+///    которую старый потерял, — удалять их нельзя.
 ///
 /// Ручные операции со вторым шагом не сравниваются: у них другое описание,
 /// и совпадение по сумме и дню слишком часто было бы ложным.
@@ -72,8 +76,9 @@ enum DuplicateDetector {
             }
         }
 
-        // 2. Повторные импорты: от новых импортов к старым, каждый пакет
-        //    сравнивается со всем, что уже набрано из более новых.
+        // 2. Повторные импорты: от новых импортов к старым; строка пакета — дубль
+        //    строки из более нового пакета с тем же ключом, тем же знаком и *другой*
+        //    суммой в тенге. Каждая строка может быть парой только один раз.
         let batches = Dictionary(
             grouping: representatives.values.filter { items[$0].importedAt != nil },
             by: { items[$0].importedAt! }
@@ -81,22 +86,38 @@ enum DuplicateDetector {
         .sorted { $0.key > $1.key }
         .map { $0.value.sorted() }
 
-        var kept: [Int] = []
+        var kept: [String: [Int]] = [:]
+        var paired = Set<Int>()
 
         for batch in batches {
-            let result = StatementDeduplicator.match(
-                batch.map { items[$0].snapshot },
-                against: kept.map { items[$0].snapshot },
-                matchRenamed: false,
-                calendar: calendar
-            )
+            var added: [(String, Int)] = []
 
-            for match in result.matches {
-                links.union(kept[match.existingIndex], batch[match.rowIndex])
-                repeatedImportRoots.insert(kept[match.existingIndex])
+            for index in batch {
+                let snapshot = items[index].snapshot
+                let key = StatementDeduplicator.matchKey(of: snapshot, calendar: calendar)
+
+                let partner = (kept[key] ?? [])
+                    .filter { candidate in
+                        let other = items[candidate].snapshot
+                        return !paired.contains(candidate)
+                            && other.direction == snapshot.direction
+                            && abs(other.amount - snapshot.amount) >= 0.005
+                    }
+                    .min { abs(items[$0].snapshot.amount - snapshot.amount) < abs(items[$1].snapshot.amount - snapshot.amount) }
+
+                if let partner {
+                    links.union(partner, index)
+                    paired.insert(partner)
+                    repeatedImportRoots.insert(partner)
+                } else {
+                    added.append((key, index))
+                }
             }
 
-            kept.append(contentsOf: result.unmatchedRowIndices.map { batch[$0] })
+            // Строки одного пакета между собой не сравниваются — это разные покупки.
+            for (key, index) in added {
+                kept[key, default: []].append(index)
+            }
         }
 
         let rootsWithRepeatedImport = Set(repeatedImportRoots.map { links.find($0) })

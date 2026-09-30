@@ -307,6 +307,18 @@ enum StatementDeduplicator {
         return era * 146_097 + dayOfEra
     }
 
+    /// Ключ «день + описание + сумма» (для валютных операций — сумма в валюте):
+    /// операции с одинаковым ключом — кандидаты в одну и ту же.
+    static func matchKey(of snapshot: TransactionSnapshot, calendar: Calendar = .current) -> String {
+        let amount = amountKey(
+            amount: snapshot.amount,
+            currency: snapshot.currencyCode,
+            foreignAmount: snapshot.foreignAmount,
+            foreignCurrency: snapshot.foreignCurrencyCode
+        )
+        return "\(dayNumber(of: snapshot, calendar: calendar))|\(normalizedDetails(snapshot.details))|\(amount.currency):\(amount.cents)"
+    }
+
     /// День транзакции для сопоставления.
     ///
     /// Импортированные — по времени Kaspi. Новые импорты хранят полдень, старые —

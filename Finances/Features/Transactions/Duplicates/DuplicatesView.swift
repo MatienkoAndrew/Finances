@@ -1,33 +1,24 @@
 import SwiftUI
 import SwiftData
 
-/// Поиск и удаление уже сохранённых дублей (см. `DuplicateDetector`).
+/// Поиск и удаление уже сохранённых дублей (см. `DuplicateCleaner`).
+///
+/// По умолчанию дубли удаляются автоматически после каждого импорта, а этот экран —
+/// для тех, кто хочет посмотреть сам: переключатель, ручной разбор и восстановление.
 struct DuplicatesView: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query private var transactions: [Transaction]
     @Query private var accounts: [Account]
 
-    /// Группы, которые пользователь отметил «Не дубль», — по подписи группы.
-    @AppStorage("duplicates_ignored_groups") private var ignoredGroupsRaw = ""
+    @AppStorage(DuplicateCleaner.autoCleanupKey) private var isAutoCleanupEnabled = true
 
-    @State private var groups: [DuplicateSet] = []
+    @State private var groups: [StoredDuplicateGroup] = []
     @State private var keepSelection: [String: PersistentIdentifier] = [:]
+    @State private var removedCount = 0
     @State private var isScanning = true
     @State private var isConfirmingDeleteAll = false
     @State private var errorMessage: String?
-
-    struct DuplicateSet: Identifiable {
-        /// Подпись группы — стабильна между запусками, нужна для «Не дубль».
-        let id: String
-        let reason: DuplicateGroup.Reason
-        let members: [Transaction]
-        let suggestedKeep: PersistentIdentifier
-    }
-
-    private var ignoredGroups: Set<String> {
-        Set(ignoredGroupsRaw.split(separator: "\n").map(String.init))
-    }
 
     private var extraCount: Int {
         groups.reduce(0) { $0 + $1.members.count - 1 }
@@ -35,6 +26,8 @@ struct DuplicatesView: View {
 
     var body: some View {
         List {
+            settingsSection
+
             if isScanning {
                 HStack {
                     ProgressView()
@@ -56,11 +49,17 @@ struct DuplicatesView: View {
             }
         }
         .navigationTitle("Дубли")
-        .task {
+        .onAppear {
+            // И при первом открытии, и при возврате с «Недавно удалённых».
             scan()
         }
+        .onChange(of: isAutoCleanupEnabled) { _, isEnabled in
+            if isEnabled, !groups.isEmpty {
+                deleteExtras(in: groups)
+            }
+        }
         .confirmationDialog(
-            "Удалить \(extraCount) \(pluralOperations(extraCount))?",
+            "Удалить \(extraCount) \(DuplicateFormat.pluralOperations(extraCount))?",
             isPresented: $isConfirmingDeleteAll,
             titleVisibility: .visible
         ) {
@@ -85,6 +84,29 @@ struct DuplicatesView: View {
 
     // MARK: - Sections
 
+    private var settingsSection: some View {
+        Section {
+            Toggle("Удалять автоматически", isOn: $isAutoCleanupEnabled)
+
+            NavigationLink {
+                RemovedDuplicatesView()
+            } label: {
+                HStack {
+                    Text("Недавно удалённые")
+                    Spacer()
+                    if removedCount > 0 {
+                        Text("\(removedCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } footer: {
+            Text(isAutoCleanupEnabled
+                 ? "После каждого импорта дубли удаляются сами. Всё удалённое можно вернуть в «Недавно удалённых»."
+                 : "Автоочистка выключена — найденные дубли можно разобрать вручную ниже.")
+        }
+    }
+
     private var summarySection: some View {
         Section {
             Text("Групп: \(groups.count), лишних операций: \(extraCount)")
@@ -95,11 +117,11 @@ struct DuplicatesView: View {
                 Label("Удалить все лишние", systemImage: "trash")
             }
         } footer: {
-            Text("В каждой группе отмечена операция, которая останется. Нажми на другую, чтобы оставить её. Перед удалением можно сделать резервную копию в настройках.")
+            Text("В каждой группе отмечена операция, которая останется. Нажми на другую, чтобы оставить её.")
         }
     }
 
-    private func groupSection(_ group: DuplicateSet) -> some View {
+    private func groupSection(_ group: StoredDuplicateGroup) -> some View {
         let keep = keepSelection[group.id] ?? group.suggestedKeep
 
         return Section {
@@ -120,12 +142,13 @@ struct DuplicatesView: View {
                 Spacer()
 
                 Button("Не дубль") {
-                    ignore(group)
+                    DuplicateCleaner.markNotDuplicate(group)
+                    groups.removeAll { $0.id == group.id }
                 }
             }
             .buttonStyle(.borderless)
         } header: {
-            Text(headerText(for: group))
+            Text(DuplicateFormat.header(date: group.members[0].date, details: group.members[0].details))
         } footer: {
             Text(footerText(for: group))
         }
@@ -138,7 +161,7 @@ struct DuplicatesView: View {
                 .font(.title3)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(amountText(for: transaction))
+                Text(DuplicateFormat.amount(transaction.amount, currency: transaction.currencyCode, kind: transaction.kind))
                     .font(.body.monospacedDigit())
 
                 ForEach(detailLines(for: transaction), id: \.self) { line in
@@ -160,53 +183,25 @@ struct DuplicatesView: View {
     // MARK: - Actions
 
     private func scan() {
-        let kaspiAccount = AccountLookup.kaspi(in: accounts)
-        let snapshot = transactions
-
-        let candidates = snapshot.map { transaction in
-            DuplicateCandidate(
-                snapshot: PDFImporter.snapshot(of: transaction, kaspiAccount: kaspiAccount),
-                fingerprint: transaction.fingerprint,
-                createdAt: transaction.createdAt,
-                importedAt: transaction.importedAt,
-                hasAccount: transaction.fromAccount != nil || transaction.toAccount != nil
-            )
-        }
-
-        let ignored = ignoredGroups
-
-        groups = DuplicateDetector.findGroups(in: candidates).compactMap { found in
-            let members = found.memberIndices.map { snapshot[$0] }
-            let id = signature(of: members)
-            guard !ignored.contains(id) else { return nil }
-
-            return DuplicateSet(
-                id: id,
-                reason: found.reason,
-                members: members,
-                suggestedKeep: snapshot[found.keepIndex].persistentModelID
-            )
-        }
-
+        groups = DuplicateCleaner.findGroups(in: transactions, accounts: accounts)
         keepSelection = keepSelection.filter { entry in groups.contains { $0.id == entry.key } }
+        removedCount = DuplicateRemovalLog.load().count
         isScanning = false
     }
 
-    private func deleteExtras(in selectedGroups: [DuplicateSet]) {
-        for group in selectedGroups {
-            let keepID = keepSelection[group.id] ?? group.suggestedKeep
-            guard let keep = group.members.first(where: { $0.persistentModelID == keepID }) else { continue }
-
-            for duplicate in group.members where duplicate.persistentModelID != keepID {
-                mergeUserData(from: duplicate, into: keep)
-                modelContext.delete(duplicate)
-            }
-        }
+    private func deleteExtras(in selectedGroups: [StoredDuplicateGroup]) {
+        let count = DuplicateCleaner.removeExtras(
+            in: selectedGroups,
+            keeping: keepSelection,
+            automatic: false,
+            context: modelContext
+        )
 
         do {
             try modelContext.save()
         } catch {
             modelContext.rollback()
+            DuplicateRemovalLog.removeLast(count)
             errorMessage = error.localizedDescription
             return
         }
@@ -215,55 +210,12 @@ struct DuplicatesView: View {
         // Группы не пересекаются, поэтому достаточно убрать обработанные.
         let processed = Set(selectedGroups.map(\.id))
         groups.removeAll { processed.contains($0.id) }
-    }
-
-    /// Не терять то, что пользователь проставил руками на удаляемой копии.
-    private func mergeUserData(from duplicate: Transaction, into keep: Transaction) {
-        let tags = (keep.tagNames ?? []) + (duplicate.tagNames ?? []).filter { !(keep.tagNames ?? []).contains($0) }
-        if !tags.isEmpty {
-            keep.tagNames = tags
-        }
-
-        if (keep.note ?? "").isEmpty, let note = duplicate.note, !note.isEmpty {
-            keep.note = note
-        }
-
-        let duplicateHasManualCategory = duplicate.isCategoryManuallySet == true && duplicate.categoryName != nil
-        if (duplicateHasManualCategory && keep.isCategoryManuallySet != true)
-            || (keep.categoryName == nil && duplicate.categoryName != nil) {
-            keep.categoryName = duplicate.categoryName
-            keep.subcategoryName = duplicate.subcategoryName
-            keep.isCategoryManuallySet = duplicate.isCategoryManuallySet
-        }
-    }
-
-    private func ignore(_ group: DuplicateSet) {
-        ignoredGroupsRaw = (ignoredGroups.union([group.id])).sorted().joined(separator: "\n")
-        groups.removeAll { $0.id == group.id }
+        removedCount += count
     }
 
     // MARK: - Formatting
 
-    private func signature(of members: [Transaction]) -> String {
-        members
-            .map { transaction in
-                [
-                    transaction.fingerprint ?? "-",
-                    "\(transaction.createdAt.timeIntervalSinceReferenceDate)",
-                    "\(transaction.date.timeIntervalSinceReferenceDate)",
-                    transaction.details
-                ].joined(separator: "|")
-            }
-            .sorted()
-            .joined(separator: ";")
-    }
-
-    private func headerText(for group: DuplicateSet) -> String {
-        let first = group.members[0]
-        return "\(first.date.formatted(date: .abbreviated, time: .omitted)) · \(first.details)"
-    }
-
-    private func footerText(for group: DuplicateSet) -> String {
+    private func footerText(for group: StoredDuplicateGroup) -> String {
         switch group.reason {
         case .exactCopy:
             return "Одна и та же запись несколько раз — например, после восстановления из резервной копии."
@@ -276,36 +228,20 @@ struct DuplicatesView: View {
         }
     }
 
-    private func amountText(for transaction: Transaction) -> String {
-        let sign: String
-        switch transaction.kind {
-        case .expense: sign = "− "
-        case .income: sign = "+ "
-        case .transfer: sign = "→ "
-        }
-
-        return sign + formatted(transaction.amount, currency: transaction.currencyCode)
-    }
-
     private func detailLines(for transaction: Transaction) -> [String] {
         var lines: [String] = []
 
         if let foreignAmount = transaction.foreignAmount, let foreignCurrency = transaction.foreignCurrencyCode {
-            lines.append(formatted(foreignAmount, currency: foreignCurrency))
+            lines.append(DuplicateFormat.number(foreignAmount, currency: foreignCurrency))
         }
 
-        if let importedAt = transaction.importedAt {
-            var line = "Импорт \(importedAt.formatted(date: .abbreviated, time: .shortened))"
-            if let fileName = transaction.sourceFileName {
-                line += " · \(fileName)"
-            }
-            lines.append(line)
-        } else {
-            lines.append("Добавлена вручную \(transaction.createdAt.formatted(date: .abbreviated, time: .shortened))")
-        }
+        lines.append(DuplicateFormat.source(
+            importedAt: transaction.importedAt,
+            fileName: transaction.sourceFileName,
+            createdAt: transaction.createdAt
+        ))
 
-        let account = (transaction.fromAccount ?? transaction.toAccount)?.name ?? "без счёта"
-        var meta = account
+        var meta = (transaction.fromAccount ?? transaction.toAccount)?.name ?? "без счёта"
         if let category = transaction.categoryName {
             meta += " · \(category)"
         }
@@ -320,8 +256,25 @@ struct DuplicatesView: View {
 
         return lines
     }
+}
 
-    private func formatted(_ value: Double, currency: String) -> String {
+/// Общее форматирование для экранов дублей.
+enum DuplicateFormat {
+    static func header(date: Date, details: String) -> String {
+        "\(date.formatted(date: .abbreviated, time: .omitted)) · \(details)"
+    }
+
+    static func amount(_ value: Double, currency: String, kind: TransactionKind) -> String {
+        let sign: String
+        switch kind {
+        case .expense: sign = "− "
+        case .income: sign = "+ "
+        case .transfer: sign = "→ "
+        }
+        return sign + number(value, currency: currency)
+    }
+
+    static func number(_ value: Double, currency: String) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.locale = Locale(identifier: "ru_RU")
@@ -334,7 +287,19 @@ struct DuplicatesView: View {
         return "\(number) \(CurrencyDisplay.normalizedCode(from: currency))"
     }
 
-    private func pluralOperations(_ count: Int) -> String {
+    static func source(importedAt: Date?, fileName: String?, createdAt: Date) -> String {
+        guard let importedAt else {
+            return "Добавлена вручную \(createdAt.formatted(date: .abbreviated, time: .shortened))"
+        }
+
+        var line = "Импорт \(importedAt.formatted(date: .abbreviated, time: .shortened))"
+        if let fileName {
+            line += " · \(fileName)"
+        }
+        return line
+    }
+
+    static func pluralOperations(_ count: Int) -> String {
         let mod10 = count % 10
         let mod100 = count % 100
         if mod10 == 1 && mod100 != 11 { return "операцию" }

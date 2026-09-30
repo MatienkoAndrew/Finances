@@ -390,7 +390,9 @@ struct TransactionsView: View {
 
                 try modelContext.save()
 
+                let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
                 importResultMessage = importResult.summaryMessage
+                    + (removedDuplicates > 0 ? "\nУдалено старых дублей: \(removedDuplicates)." : "")
             } catch {
                 importErrorMessage = error.localizedDescription
             }
