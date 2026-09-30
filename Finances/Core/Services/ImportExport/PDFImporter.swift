@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum PDFImporterError: LocalizedError {
+nonisolated enum PDFImporterError: LocalizedError {
     case failedToAccessFile
     case failedToReadPDF
     case noTransactionsFound
@@ -22,18 +22,30 @@ enum PDFImporterError: LocalizedError {
 }
 
 enum PDFImporter {
-    static let exchangeRateDifferenceNote = "Курсовая разница"
-
     /// Сколько последних дней периода выписки считаются «в обработке».
     /// Для валютных операций Kaspi показывает там предварительную сумму в тенге,
     /// а в следующей выписке — окончательную (разница — единицы и десятки тенге).
     private static let pendingWindowDays = 4
 
-    /// Импортирует выписку Kaspi Gold.
+    /// Читает и разбирает PDF. Медленная часть импорта — вызывать вне главного потока.
     ///
-    /// Новые операции возвращаются в `transactions` — их нужно вставить в контекст.
-    /// Уже существующие совпавшие транзакции обновляются на месте (уточнённая сумма,
-    /// исправленный знак «Курсовой разницы»), поэтому после вызова контекст нужно сохранить.
+    /// - Parameter progress: доля прочитанных страниц, от 0 до 1 (вызывается на том же потоке).
+    nonisolated static func readStatement(
+        from url: URL,
+        progress: ((Double) -> Void)? = nil
+    ) throws -> KaspiStatement {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let lines = try PDFLayoutTextExtractor.extractLines(from: url, progress: progress)
+        return KaspiStatementParser.parse(lines: lines)
+    }
+
+    /// Читает PDF и сразу импортирует — синхронно, на главном потоке.
     static func importTransactions(
         from url: URL,
         existingTransactions: [Transaction],
@@ -43,15 +55,34 @@ enum PDFImporter {
         rates: [ExchangeRateEntry],
         fallbackKztPerRub: Double?
     ) throws -> PDFImportResult {
-        let didAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if didAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
+        try importStatement(
+            readStatement(from: url),
+            fileName: url.lastPathComponent,
+            existingTransactions: existingTransactions,
+            accounts: accounts,
+            rules: rules,
+            categories: categories,
+            rates: rates,
+            fallbackKztPerRub: fallbackKztPerRub
+        )
+    }
 
-        let lines = try PDFLayoutTextExtractor.extractLines(from: url)
-        let statement = KaspiStatementParser.parse(lines: lines)
+    /// Импортирует разобранную выписку Kaspi Gold.
+    ///
+    /// Новые операции возвращаются в `transactions` — их нужно вставить в контекст.
+    /// Уже существующие совпавшие транзакции обновляются на месте (уточнённая сумма,
+    /// исправленный знак «Курсовой разницы»), поэтому после вызова контекст нужно сохранить.
+    static func importStatement(
+        _ statement: KaspiStatement,
+        fileName: String,
+        existingTransactions: [Transaction],
+        accounts: [Account],
+        rules: [CategoryRule],
+        categories: [ExpenseCategoryItem],
+        rates: [ExchangeRateEntry],
+        fallbackKztPerRub: Double?,
+        importedAt: Date = Date()
+    ) throws -> PDFImportResult {
         let rows = statement.rows
 
         guard !rows.isEmpty else {
@@ -64,8 +95,8 @@ enum PDFImporter {
             categories: categories,
             rates: rates,
             fallbackKztPerRub: fallbackKztPerRub,
-            fileName: url.lastPathComponent,
-            importedAt: Date(),
+            fileName: fileName,
+            importedAt: importedAt,
             settledBefore: settledBoundary(for: statement)
         )
 
@@ -239,7 +270,8 @@ enum PDFImporter {
                 transaction.kind = .income
                 transaction.toAccount = transaction.fromAccount ?? context.kaspiAccount
                 transaction.fromAccount = nil
-                if transaction.isCategoryManuallySet != true {
+                // Курсовая разница остаётся в категории покупки — в аналитике она её уменьшает.
+                if transaction.isCategoryManuallySet != true, !row.isExchangeRateDifference {
                     transaction.categoryName = nil
                     transaction.subcategoryName = nil
                 }
@@ -256,7 +288,7 @@ enum PDFImporter {
         }
 
         if row.isExchangeRateDifference, (transaction.note ?? "").isEmpty {
-            transaction.note = exchangeRateDifferenceNote
+            transaction.note = Transaction.exchangeRateDifferenceNote
             outcome.repaired = true
         }
 
@@ -325,6 +357,10 @@ enum PDFImporter {
         case (_, true):
             kind = .income
             toAccount = kaspiAccount
+            // Курсовая разница «в плюс» уменьшает расходы своей категории — нужна категория покупки.
+            if row.isExchangeRateDifference {
+                categoryName = matchCategory(for: row, context: context)
+            }
 
         case (_, false):
             kind = .expense
@@ -349,7 +385,7 @@ enum PDFImporter {
                 context: context
             ),
             categoryName: categoryName,
-            note: row.isExchangeRateDifference ? exchangeRateDifferenceNote : nil,
+            note: row.isExchangeRateDifference ? Transaction.exchangeRateDifferenceNote : nil,
             fingerprint: fingerprint,
             sourceFileName: context.fileName,
             importedAt: context.importedAt,

@@ -148,6 +148,22 @@ enum AnalyticsSnapshotBuilder {
                 merchantMap[merchant, default: 0] += rub
                 merchantByCategory[category, default: [:]][merchant, default: 0] += rub
 
+            case .income where transaction.reducesExpensesInAnalytics:
+                // Курсовая разница «в плюс» — возврат части покупки: уменьшает расходы,
+                // но отдельной операцией в счётчиках не считается.
+                totalExpensesRub -= rub
+
+                if let binIndex = binIndexForDate(transaction.date, scale: scale, page: page, calendar: calendar) {
+                    chartTotals[binIndex] -= rub
+                }
+
+                let category = transaction.categoryName ?? "Без категории"
+                categoryMap[category, default: 0] -= rub
+
+                let merchant = normalizedMerchantName(transaction.details)
+                merchantMap[merchant, default: 0] -= rub
+                merchantByCategory[category, default: [:]][merchant, default: 0] -= rub
+
             case .income:
                 totalIncomeRub += rub
                 incomeCount += 1

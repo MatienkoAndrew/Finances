@@ -1,6 +1,6 @@
 import Foundation
 
-enum KaspiOperationType: String, CaseIterable {
+nonisolated enum KaspiOperationType: String, CaseIterable {
     case purchase = "Покупка"
     case topUp = "Пополнение"
     case transfer = "Перевод"
@@ -19,7 +19,7 @@ enum KaspiOperationType: String, CaseIterable {
     }
 }
 
-struct ParsedStatementRow {
+nonisolated struct ParsedStatementRow {
     /// День операции (полдень по времени Kaspi — см. `KaspiStatementParser.makeDate`).
     let date: Date
     /// Сумма в валюте счёта со знаком, как в выписке: «+» — зачисление, «-» — списание.
@@ -35,7 +35,7 @@ struct ParsedStatementRow {
     let isExchangeRateDifference: Bool
 }
 
-struct KaspiStatement {
+nonisolated struct KaspiStatement {
     let periodStart: Date?
     let periodEnd: Date?
     let rows: [ParsedStatementRow]
@@ -43,6 +43,13 @@ struct KaspiStatement {
     let summaryTotals: [KaspiOperationType: Double]
     /// Строки, похожие на операцию (начинаются с даты и суммы), но не распознанные.
     let unrecognizedLines: [String]
+    /// «Доступно на …» из шапки выписки — по датам.
+    let availableBalances: [Date: Double]
+
+    /// Остаток на конец периода по выписке.
+    var closingBalance: Double? {
+        periodEnd.flatMap { availableBalances[$0] }
+    }
 
     /// Типы операций, по которым сумма распознанных строк не сходится с итогом выписки.
     /// Пусто — значит, все операции прочитаны без потерь.
@@ -66,7 +73,7 @@ struct KaspiStatement {
 /// 29.09.26 + 4,57 ₸ Покупка GS25SEOKYOTEUNTEUNJUM
 /// Курсовая разница
 /// ```
-enum KaspiStatementParser {
+nonisolated enum KaspiStatementParser {
     private static let amountPattern = #"([+-])\s*(\d[\d\s]*,\d{2})"#
 
     private static let rowRegex = try! Regex(
@@ -91,6 +98,10 @@ enum KaspiStatementParser {
     private static let summaryRegex = try! Regex(
         #"^(\#(KaspiOperationType.allCases.map(\.summaryTitle).joined(separator: "|")))\s+"#
         + amountPattern + #"\s*₸"#
+    )
+
+    private static let availableBalanceRegex = try! Regex(
+        #"Доступно на (\d{2}\.\d{2}\.\d{2}):?\s+"# + amountPattern + #"\s*₸"#
     )
 
     private static let exchangeRateDifferenceLine = "Курсовая разница"
@@ -124,6 +135,7 @@ enum KaspiStatementParser {
         var summaryTotals: [KaspiOperationType: Double] = [:]
         var rows: [ParsedStatementRow] = []
         var unrecognizedLines: [String] = []
+        var availableBalances: [Date: Double] = [:]
 
         // Строка операции, к которой ещё могут относиться строки-продолжения.
         var pending: PendingRow?
@@ -173,6 +185,14 @@ enum KaspiStatementParser {
             }
 
             if rows.isEmpty,
+               let match = text.firstMatch(of: availableBalanceRegex),
+               let date = parseDate(match.output[1].substring),
+               let amount = parseSignedAmount(sign: match.output[2].substring, digits: match.output[3].substring) {
+                availableBalances[date] = amount
+                continue
+            }
+
+            if rows.isEmpty,
                let match = text.firstMatch(of: summaryRegex),
                let title = match.output[1].substring,
                let type = KaspiOperationType.allCases.first(where: { $0.summaryTitle == title }),
@@ -194,7 +214,8 @@ enum KaspiStatementParser {
             periodEnd: periodEnd,
             rows: rows,
             summaryTotals: summaryTotals,
-            unrecognizedLines: unrecognizedLines
+            unrecognizedLines: unrecognizedLines,
+            availableBalances: availableBalances
         )
     }
 

@@ -118,20 +118,34 @@ extension Transaction {
         set { kindRaw = newValue.rawValue }
     }
 
+    /// Пометка, которую импорт ставит строкам «Курсовая разница» из выписки Kaspi.
+    static let exchangeRateDifferenceNote = "Курсовая разница"
+
+    var isExchangeRateDifference: Bool {
+        note == Self.exchangeRateDifferenceNote
+    }
+
+    /// Курсовая разница «в плюс» — Kaspi вернул часть уже списанной суммы покупки.
+    /// Это не доход: в аналитике она уменьшает расходы в своей категории и у своего мерчанта.
+    var reducesExpensesInAnalytics: Bool {
+        kind == .income && isExchangeRateDifference
+    }
+
     var countsAsExpenseInAnalytics: Bool {
-        kind == .expense
+        kind == .expense || reducesExpensesInAnalytics
     }
 
     var countsAsIncomeInAnalytics: Bool {
-        kind == .income
+        kind == .income && !reducesExpensesInAnalytics
     }
 
+    /// Вклад в расходы или доходы: у курсовой разницы «в плюс» — отрицательный вклад в расходы.
     var analyticsAmount: Double {
         switch kind {
         case .expense:
             return amount
         case .income:
-            return amount
+            return reducesExpensesInAnalytics ? -amount : amount
         case .transfer:
             return 0
         }

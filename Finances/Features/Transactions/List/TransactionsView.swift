@@ -30,6 +30,8 @@ struct TransactionsView: View {
     @State private var searchText: String = ""
     @State private var isShowingAddTransaction = false
     @State private var isShowingImporter = false
+    /// Доля прочитанных страниц PDF; `nil` — импорт не идёт.
+    @State private var importProgress: Double?
     @State private var isShowingQuickTag = false
 
     @State private var importErrorMessage: String?
@@ -37,6 +39,8 @@ struct TransactionsView: View {
     /// Метка последнего импорта — для кнопки «Отменить импорт» в итоговом алерте.
     @State private var lastImportedAt: Date?
     @State private var undoResultMessage: String?
+    /// Сверка с «Доступно на …» после последнего импорта — для кнопки «Выровнять баланс».
+    @State private var lastBalanceCheck: BalanceCheck?
 
     private var settings: AppSettings? {
         settingsList.first
@@ -146,6 +150,7 @@ struct TransactionsView: View {
                     } label: {
                         Image(systemName: "doc.badge.plus")
                     }
+                    .disabled(importProgress != nil)
 
                     Button {
                         isShowingAddTransaction = true
@@ -167,6 +172,11 @@ struct TransactionsView: View {
             ) { result in
                 handleImport(result)
             }
+            .overlay {
+                if let importProgress {
+                    importProgressView(importProgress)
+                }
+            }
             .alert("Ошибка импорта", isPresented: Binding(
                 get: { importErrorMessage != nil },
                 set: { if !$0 { importErrorMessage = nil } }
@@ -183,6 +193,12 @@ struct TransactionsView: View {
             )) {
                 Button("OK", role: .cancel) {
                     importResultMessage = nil
+                }
+
+                if let lastBalanceCheck, !lastBalanceCheck.isMatching {
+                    Button("Выровнять баланс") {
+                        alignBalance(lastBalanceCheck)
+                    }
                 }
 
                 if let lastImportedAt {
@@ -388,49 +404,126 @@ struct TransactionsView: View {
                 return
             }
 
-            do {
-                let importResult = try PDFImporter.importTransactions(
-                    from: url,
-                    existingTransactions: transactions,
-                    accounts: accounts,
-                    rules: categoryRules,
-                    categories: categories,
-                    rates: rates,
-                    fallbackKztPerRub: settings?.kztPerRub
-                )
+            importProgress = 0
 
-                for account in importResult.accountsToCreate {
-                    modelContext.insert(account)
+            Task {
+                defer { importProgress = nil }
+
+                do {
+                    let statement = try await readStatementInBackground(from: url)
+                    finishImport(statement, fileName: url.lastPathComponent)
+                } catch {
+                    importErrorMessage = error.localizedDescription
                 }
-
-                for transaction in importResult.transactions {
-                    modelContext.insert(transaction)
-                }
-
-                try modelContext.save()
-
-                let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
-
-                ImportHistory.add(ImportRecord(
-                    importedAt: importResult.importedAt,
-                    fileName: importResult.fileName,
-                    createdAccountKeys: importResult.accountsToCreate.map(ImportHistory.key(of:)),
-                    modifications: importResult.modifications,
-                    removedDuplicateIDs: removedDuplicates.map(\.id)
-                ))
-
-                lastImportedAt = importResult.importedAt
-                importResultMessage = importResult.summaryMessage
-                    + (removedDuplicates.isEmpty ? "" : "\nУдалено старых дублей: \(removedDuplicates.count).")
-            } catch {
-                importErrorMessage = error.localizedDescription
             }
+        }
+    }
+
+    /// Чтение PDF — самая долгая часть импорта, поэтому она идёт вне главного потока,
+    /// а прогресс по страницам приходит через поток значений.
+    private func readStatementInBackground(from url: URL) async throws -> KaspiStatement {
+        let (progress, continuation) = AsyncStream.makeStream(of: Double.self)
+
+        let reading = Task.detached(priority: .userInitiated) {
+            defer { continuation.finish() }
+            return try PDFImporter.readStatement(from: url) { continuation.yield($0) }
+        }
+
+        for await value in progress {
+            importProgress = value
+        }
+
+        return try await reading.value
+    }
+
+    private func finishImport(_ statement: KaspiStatement, fileName: String) {
+        do {
+            let importResult = try PDFImporter.importStatement(
+                statement,
+                fileName: fileName,
+                existingTransactions: transactions,
+                accounts: accounts,
+                rules: categoryRules,
+                categories: categories,
+                rates: rates,
+                fallbackKztPerRub: settings?.kztPerRub
+            )
+
+            for account in importResult.accountsToCreate {
+                modelContext.insert(account)
+            }
+
+            for transaction in importResult.transactions {
+                modelContext.insert(transaction)
+            }
+
+            try modelContext.save()
+
+            let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
+
+            ImportHistory.add(ImportRecord(
+                importedAt: importResult.importedAt,
+                fileName: importResult.fileName,
+                createdAccountKeys: importResult.accountsToCreate.map(ImportHistory.key(of:)),
+                modifications: importResult.modifications,
+                removedDuplicateIDs: removedDuplicates.map(\.id)
+            ))
+
+            lastImportedAt = importResult.importedAt
+            lastBalanceCheck = balanceCheck(for: statement)
+
+            var message = importResult.summaryMessage
+            if !removedDuplicates.isEmpty {
+                message += "\nУдалено старых дублей: \(removedDuplicates.count)."
+            }
+            if let lastBalanceCheck {
+                message += "\n\n" + lastBalanceCheck.message
+            }
+            importResultMessage = message
+        } catch {
+            importErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func importProgressView(_ progress: Double) -> some View {
+        VStack(spacing: 12) {
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .frame(width: 180)
+
+            Text(progress < 1 ? "Читаю выписку… \(Int(progress * 100))%" : "Сверяю с базой…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(24)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func balanceCheck(for statement: KaspiStatement) -> BalanceCheck? {
+        guard let kaspi = AccountLookup.kaspi(in: accounts),
+              let current = try? modelContext.fetch(FetchDescriptor<Transaction>()) else { return nil }
+        return BalanceReconciliation.check(statement: statement, transactions: current, kaspi: kaspi)
+    }
+
+    private func alignBalance(_ check: BalanceCheck) {
+        importResultMessage = nil
+        lastBalanceCheck = nil
+
+        guard let kaspi = AccountLookup.kaspi(in: accounts) else { return }
+
+        do {
+            try BalanceReconciliation.align(check, kaspi: kaspi, context: modelContext)
+        } catch {
+            modelContext.rollback()
+            importErrorMessage = error.localizedDescription
         }
     }
 
     private func undoImport(importedAt: Date) {
         importResultMessage = nil
         lastImportedAt = nil
+        lastBalanceCheck = nil
 
         do {
             undoResultMessage = try ImportHistory.undo(importedAt: importedAt, context: modelContext).message
