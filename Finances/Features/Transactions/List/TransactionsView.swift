@@ -30,6 +30,8 @@ struct TransactionsView: View {
     @State private var searchText: String = ""
     @State private var isShowingAddTransaction = false
     @State private var isShowingImporter = false
+    /// Доля прочитанных страниц PDF; `nil` — импорт не идёт.
+    @State private var importProgress: Double?
     @State private var isShowingQuickTag = false
 
     @State private var importErrorMessage: String?
@@ -146,6 +148,7 @@ struct TransactionsView: View {
                     } label: {
                         Image(systemName: "doc.badge.plus")
                     }
+                    .disabled(importProgress != nil)
 
                     Button {
                         isShowingAddTransaction = true
@@ -166,6 +169,11 @@ struct TransactionsView: View {
                 allowsMultipleSelection: false
             ) { result in
                 handleImport(result)
+            }
+            .overlay {
+                if let importProgress {
+                    importProgressView(importProgress)
+                }
             }
             .alert("Ошибка импорта", isPresented: Binding(
                 get: { importErrorMessage != nil },
@@ -388,44 +396,92 @@ struct TransactionsView: View {
                 return
             }
 
-            do {
-                let importResult = try PDFImporter.importTransactions(
-                    from: url,
-                    existingTransactions: transactions,
-                    accounts: accounts,
-                    rules: categoryRules,
-                    categories: categories,
-                    rates: rates,
-                    fallbackKztPerRub: settings?.kztPerRub
-                )
+            importProgress = 0
 
-                for account in importResult.accountsToCreate {
-                    modelContext.insert(account)
+            Task {
+                defer { importProgress = nil }
+
+                do {
+                    let statement = try await readStatementInBackground(from: url)
+                    finishImport(statement, fileName: url.lastPathComponent)
+                } catch {
+                    importErrorMessage = error.localizedDescription
                 }
-
-                for transaction in importResult.transactions {
-                    modelContext.insert(transaction)
-                }
-
-                try modelContext.save()
-
-                let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
-
-                ImportHistory.add(ImportRecord(
-                    importedAt: importResult.importedAt,
-                    fileName: importResult.fileName,
-                    createdAccountKeys: importResult.accountsToCreate.map(ImportHistory.key(of:)),
-                    modifications: importResult.modifications,
-                    removedDuplicateIDs: removedDuplicates.map(\.id)
-                ))
-
-                lastImportedAt = importResult.importedAt
-                importResultMessage = importResult.summaryMessage
-                    + (removedDuplicates.isEmpty ? "" : "\nУдалено старых дублей: \(removedDuplicates.count).")
-            } catch {
-                importErrorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Чтение PDF — самая долгая часть импорта, поэтому она идёт вне главного потока,
+    /// а прогресс по страницам приходит через поток значений.
+    private func readStatementInBackground(from url: URL) async throws -> KaspiStatement {
+        let (progress, continuation) = AsyncStream.makeStream(of: Double.self)
+
+        let reading = Task.detached(priority: .userInitiated) {
+            defer { continuation.finish() }
+            return try PDFImporter.readStatement(from: url) { continuation.yield($0) }
+        }
+
+        for await value in progress {
+            importProgress = value
+        }
+
+        return try await reading.value
+    }
+
+    private func finishImport(_ statement: KaspiStatement, fileName: String) {
+        do {
+            let importResult = try PDFImporter.importStatement(
+                statement,
+                fileName: fileName,
+                existingTransactions: transactions,
+                accounts: accounts,
+                rules: categoryRules,
+                categories: categories,
+                rates: rates,
+                fallbackKztPerRub: settings?.kztPerRub
+            )
+
+            for account in importResult.accountsToCreate {
+                modelContext.insert(account)
+            }
+
+            for transaction in importResult.transactions {
+                modelContext.insert(transaction)
+            }
+
+            try modelContext.save()
+
+            let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
+
+            ImportHistory.add(ImportRecord(
+                importedAt: importResult.importedAt,
+                fileName: importResult.fileName,
+                createdAccountKeys: importResult.accountsToCreate.map(ImportHistory.key(of:)),
+                modifications: importResult.modifications,
+                removedDuplicateIDs: removedDuplicates.map(\.id)
+            ))
+
+            lastImportedAt = importResult.importedAt
+            importResultMessage = importResult.summaryMessage
+                + (removedDuplicates.isEmpty ? "" : "\nУдалено старых дублей: \(removedDuplicates.count).")
+        } catch {
+            importErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func importProgressView(_ progress: Double) -> some View {
+        VStack(spacing: 12) {
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .frame(width: 180)
+
+            Text(progress < 1 ? "Читаю выписку… \(Int(progress * 100))%" : "Сверяю с базой…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(24)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
     }
 
     private func undoImport(importedAt: Date) {

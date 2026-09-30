@@ -2,7 +2,7 @@ import Foundation
 import PDFKit
 import CoreGraphics
 
-struct PDFTextLine {
+nonisolated struct PDFTextLine {
     let page: Int
     let y: CGFloat
     let text: String
@@ -15,7 +15,9 @@ struct PDFTextLine {
 /// из слов (`byWords`), но такой перебор выбрасывает пунктуацию —
 /// терялись знаки `+`/`-`, скобки у валютной суммы и символы в названиях
 /// мерчантов (`7-ELEVEN` → `7 ELEVEN`). Поэтому работаем посимвольно.
-enum PDFLayoutTextExtractor {
+///
+/// Вызывается вне главного потока (см. `PDFImporter.readStatement`).
+nonisolated enum PDFLayoutTextExtractor {
     /// Допуск по вертикали, в пределах которого символы считаются одной строкой.
     private static let rowTolerance: CGFloat = 3
 
@@ -24,14 +26,18 @@ enum PDFLayoutTextExtractor {
 
     private typealias Glyph = (text: String, rect: CGRect)
 
-    static func extractLines(from url: URL) throws -> [PDFTextLine] {
+    /// - Parameter progress: доля обработанных страниц, от 0 до 1.
+    static func extractLines(from url: URL, progress: ((Double) -> Void)? = nil) throws -> [PDFTextLine] {
         guard let document = PDFDocument(url: url) else {
             throw PDFImporterError.failedToReadPDF
         }
 
         var result: [PDFTextLine] = []
+        let pageCount = document.pageCount
 
-        for pageIndex in 0..<document.pageCount {
+        for pageIndex in 0..<pageCount {
+            defer { progress?(Double(pageIndex + 1) / Double(pageCount)) }
+
             guard let page = document.page(at: pageIndex),
                   let pageString = page.string,
                   !pageString.isEmpty else { continue }

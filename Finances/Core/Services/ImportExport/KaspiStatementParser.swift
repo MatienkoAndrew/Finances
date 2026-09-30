@@ -1,6 +1,6 @@
 import Foundation
 
-enum KaspiOperationType: String, CaseIterable {
+nonisolated enum KaspiOperationType: String, CaseIterable {
     case purchase = "Покупка"
     case topUp = "Пополнение"
     case transfer = "Перевод"
@@ -19,7 +19,7 @@ enum KaspiOperationType: String, CaseIterable {
     }
 }
 
-struct ParsedStatementRow {
+nonisolated struct ParsedStatementRow {
     /// День операции (полдень по времени Kaspi — см. `KaspiStatementParser.makeDate`).
     let date: Date
     /// Сумма в валюте счёта со знаком, как в выписке: «+» — зачисление, «-» — списание.
@@ -35,7 +35,7 @@ struct ParsedStatementRow {
     let isExchangeRateDifference: Bool
 }
 
-struct KaspiStatement {
+nonisolated struct KaspiStatement {
     let periodStart: Date?
     let periodEnd: Date?
     let rows: [ParsedStatementRow]
@@ -66,7 +66,7 @@ struct KaspiStatement {
 /// 29.09.26 + 4,57 ₸ Покупка GS25SEOKYOTEUNTEUNJUM
 /// Курсовая разница
 /// ```
-enum KaspiStatementParser {
+nonisolated enum KaspiStatementParser {
     private static let amountPattern = #"([+-])\s*(\d[\d\s]*,\d{2})"#
 
     private static let rowRegex = try! Regex(
