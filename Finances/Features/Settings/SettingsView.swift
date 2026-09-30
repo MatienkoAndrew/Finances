@@ -123,6 +123,10 @@ struct SettingsView: View {
                     NavigationLink("Метки") {
                         TagsManagementView()
                     }
+
+                    NavigationLink("Поиск дублей") {
+                        DuplicatesView()
+                    }
                 }
                 
                 Section("Резервное копирование") {
@@ -377,7 +381,10 @@ struct SettingsView: View {
                 let message = replaceExisting 
                     ? "Данные успешно заменены" 
                     : "Данные успешно импортированы"
-                importSuccessMessage = message
+                let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
+                importSuccessMessage = removedDuplicates > 0
+                    ? "\(message). Удалено дублей: \(removedDuplicates)."
+                    : message
                 selectedImportURL = nil
             } catch {
                 importErrorMessage = error.localizedDescription

@@ -41,6 +41,8 @@ struct RootTabView: View {
         .onAppear {
             CategorySeeder.seedIfNeeded(existing: categories, modelContext: modelContext)
             DefaultAccountsSeeder.seedIfNeeded(existingAccounts: accounts, modelContext: modelContext)
+            // Убирает дубли, накопившиеся до автоочистки (например, от старого импорта).
+            DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
         }
     }
 }

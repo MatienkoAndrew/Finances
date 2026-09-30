@@ -93,14 +93,18 @@ enum PDFImporter {
             if outcome.repaired { repairedCount += 1 }
         }
 
-        let fingerprints = StatementDeduplicator.fingerprints(for: rows)
+        let newRows = matching.unmatchedRowIndices.map { rows[$0] }
+        let fingerprints = StatementDeduplicator.fingerprints(
+            for: newRows,
+            avoiding: Set(existingTransactions.compactMap(\.fingerprint))
+        )
         var workingAccounts = accounts
         var accountsToCreate: [Account] = []
 
-        let newTransactions = matching.unmatchedRowIndices.map { index in
+        let newTransactions = zip(newRows, fingerprints).map { row, fingerprint in
             makeTransaction(
-                from: rows[index],
-                fingerprint: fingerprints[index],
+                from: row,
+                fingerprint: fingerprint,
                 context: context,
                 accounts: &workingAccounts,
                 accountsToCreate: &accountsToCreate
@@ -141,25 +145,26 @@ enum PDFImporter {
     }
 
     private static func settledBoundary(for statement: KaspiStatement) -> Date {
-        let calendar = Calendar.current
+        let calendar = KaspiStatementParser.calendar
         let periodEnd = statement.periodEnd ?? statement.rows.map(\.date).max() ?? Date()
         let lastDay = calendar.startOfDay(for: periodEnd)
         return calendar.date(byAdding: .day, value: -(pendingWindowDays - 1), to: lastDay) ?? lastDay
     }
 
     /// Транзакции, с которыми имеет смысл сравнивать строки выписки:
-    /// по счёту Kaspi (или созданные импортом) и в пределах периода выписки ± 1 день.
+    /// по счёту Kaspi (или созданные импортом) и рядом с периодом выписки. Окно с запасом:
+    /// точный день всё равно сверяет `StatementDeduplicator`.
     private static func matchCandidates(
         _ transactions: [Transaction],
         statement: KaspiStatement,
         kaspiAccount: Account?
     ) -> [Transaction] {
-        let calendar = Calendar.current
+        let calendar = KaspiStatementParser.calendar
         let rowDates = statement.rows.map(\.date)
 
         guard let firstDate = statement.periodStart ?? rowDates.min(),
               let lastDate = statement.periodEnd ?? rowDates.max(),
-              let lowerBound = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: firstDate)),
+              let lowerBound = calendar.date(byAdding: .day, value: -2, to: calendar.startOfDay(for: firstDate)),
               let upperBound = calendar.date(byAdding: .day, value: 2, to: calendar.startOfDay(for: lastDate)) else {
             return []
         }
@@ -172,8 +177,8 @@ enum PDFImporter {
         }
     }
 
-    private static func snapshot(of transaction: Transaction, kaspiAccount: Account?) -> ExistingTransactionSnapshot {
-        ExistingTransactionSnapshot(
+    static func snapshot(of transaction: Transaction, kaspiAccount: Account?) -> TransactionSnapshot {
+        TransactionSnapshot(
             date: transaction.date,
             details: transaction.details,
             amount: abs(transaction.amount),

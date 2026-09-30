@@ -1,8 +1,8 @@
 import Foundation
 import CryptoKit
 
-/// Снимок уже сохранённой транзакции — всё, что нужно для сопоставления со строкой выписки.
-struct ExistingTransactionSnapshot {
+/// Снимок транзакции — всё, что нужно для сопоставления со строкой выписки или другой транзакцией.
+struct TransactionSnapshot {
     let date: Date
     let details: String
     /// Сумма в валюте счёта без знака.
@@ -58,36 +58,39 @@ enum StatementDeduplicator {
 
     static func match(
         rows: [ParsedStatementRow],
-        existing: [ExistingTransactionSnapshot],
+        existing: [TransactionSnapshot],
         calendar: Calendar = .current
     ) -> Result {
-        // `ordinality(of: .day, in: .era)` для даты ровно в полночь возвращает
-        // предыдущий день, а старые импорты хранились именно на полночь.
-        func dayNumber(_ date: Date) -> Int {
-            let components = calendar.dateComponents([.year, .month, .day], from: date)
-            return daysFromCivil(year: components.year ?? 0, month: components.month ?? 1, day: components.day ?? 1)
-        }
-
         let incoming = rows.map { row in
-            Candidate(
-                day: dayNumber(row.date),
-                group: GroupKey(
-                    details: normalizedDetails(row.details),
-                    amount: amountKey(
-                        amount: row.amount,
-                        currency: row.accountCurrency,
-                        foreignAmount: row.foreignAmount,
-                        foreignCurrency: row.foreignCurrency
-                    )
-                ),
+            TransactionSnapshot(
+                date: row.date,
+                details: row.details,
+                amount: abs(row.amount),
+                currencyCode: row.accountCurrency,
+                foreignAmount: row.foreignAmount.map(abs),
+                foreignCurrencyCode: row.foreignCurrency,
                 direction: row.amount >= 0 ? 1 : -1,
-                accountAmount: abs(row.amount)
+                wasImported: true
             )
         }
 
-        let stored = existing.map { snapshot in
+        return match(incoming, against: existing, matchRenamed: true, calendar: calendar)
+    }
+
+    /// Сопоставляет два набора транзакций. Внутри одного набора одинаковые операции
+    /// считаются разными (это разные покупки), между наборами — одной и той же.
+    ///
+    /// - Parameter matchRenamed: разрешить пары с разным описанием (тот же день и сумма),
+    ///   если транзакция из `existing` была импортирована — пользователь мог её переименовать.
+    static func match(
+        _ incomingSnapshots: [TransactionSnapshot],
+        against existing: [TransactionSnapshot],
+        matchRenamed: Bool,
+        calendar: Calendar = .current
+    ) -> Result {
+        func candidate(_ snapshot: TransactionSnapshot) -> Candidate {
             Candidate(
-                day: dayNumber(snapshot.date),
+                day: dayNumber(of: snapshot, calendar: calendar),
                 group: GroupKey(
                     details: normalizedDetails(snapshot.details),
                     amount: amountKey(
@@ -102,12 +105,14 @@ enum StatementDeduplicator {
             )
         }
 
+        let incoming = incomingSnapshots.map(candidate)
+        let stored = existing.map(candidate)
+
         var rowToStored: [Int: Int] = [:]
 
-        // 1. То же описание и сумма, дата ± 1 день. День может «съехать» у старых
-        //    импортов: они хранили дату на полночь того часового пояса, где делался
-        //    импорт. Группы выравниваются целиком, а не жадно — иначе при сдвиге
-        //    всех дат ежедневные одинаковые покупки (проезд, кофе) разбирают пары соседей.
+        // 1. Тот же день, описание и сумма. Допуска «± день» нет намеренно: иначе проезд
+        //    в последний день одной выписки съедал бы такой же проезд в первый день
+        //    следующей. Сдвиг дат у старых импортов учитывает `dayNumber`.
         let storedByGroup = Dictionary(grouping: stored.indices, by: { stored[$0].group })
         let incomingByGroup = Dictionary(grouping: incoming.indices, by: { incoming[$0].group })
 
@@ -122,7 +127,7 @@ enum StatementDeduplicator {
         //    импортированную операцию. Только среди импортированных, не ручных.
         var matchedStored = Set(rowToStored.values)
 
-        for (rowIndex, row) in incoming.enumerated() where rowToStored[rowIndex] == nil {
+        for (rowIndex, row) in incoming.enumerated() where matchRenamed && rowToStored[rowIndex] == nil {
             let best = stored.indices
                 .filter { index in
                     !matchedStored.contains(index)
@@ -148,10 +153,9 @@ enum StatementDeduplicator {
     }
 
     /// Оптимально сопоставляет строки одной группы (одно описание и сумма):
-    /// максимум пар с разницей дат не больше дня, при равенстве — минимальная суммарная
-    /// «стоимость» (сдвиг дат, несовпадение знака, разница суммы в тенге).
-    /// Обе стороны отсортированы по дате, пары не пересекаются — это оптимально
-    /// для точек на прямой и считается простой динамикой.
+    /// максимум пар в один и тот же день, при равенстве — минимальная суммарная
+    /// «стоимость» (несовпадение суммы в тенге и знака). Обе стороны отсортированы,
+    /// пары не пересекаются — поэтому хватает простой динамики.
     private static func align(
         _ rowIndices: [Int],
         _ storedIndices: [Int],
@@ -187,7 +191,7 @@ enum StatementDeduplicator {
                 if i > 0, j > 0 {
                     let row = incoming[rows[i - 1]]
                     let old = stored[olds[j - 1]]
-                    if abs(row.day - old.day) <= 1 {
+                    if row.day == old.day {
                         let paired = Cell(pairs: dp[i - 1][j - 1].pairs + 1, cost: dp[i - 1][j - 1].cost + pairCost(row, old))
                         if paired.isBetter(than: best) { best = paired }
                     }
@@ -206,7 +210,7 @@ enum StatementDeduplicator {
             let old = stored[olds[j - 1]]
             let cell = dp[i][j]
 
-            if abs(row.day - old.day) <= 1,
+            if row.day == old.day,
                cell.pairs == dp[i - 1][j - 1].pairs + 1,
                abs(cell.cost - (dp[i - 1][j - 1].cost + pairCost(row, old))) < 1e-6 {
                 result.append((rows[i - 1], olds[j - 1]))
@@ -222,10 +226,15 @@ enum StatementDeduplicator {
         return result
     }
 
-    /// Стабильные идентификаторы строк выписки. Одинаковые строки внутри одной
-    /// выписки получают порядковый номер, поэтому идентификаторы уникальны.
-    static func fingerprints(for rows: [ParsedStatementRow], calendar: Calendar = .current) -> [String] {
-        var occurrences: [String: Int] = [:]
+    /// Идентификаторы для новых строк выписки. Одинаковые строки получают порядковый
+    /// номер, и номер подбирается так, чтобы не совпасть с уже занятыми (`used`):
+    /// если в базе 1 кофе из прошлой выписки, а в новой их 2, новый получит номер 1, а не 0.
+    static func fingerprints(
+        for rows: [ParsedStatementRow],
+        avoiding used: Set<String>
+    ) -> [String] {
+        let calendar = KaspiStatementParser.calendar
+        var taken = used
 
         return rows.map { row in
             let day = calendar.dateComponents([.year, .month, .day], from: row.date)
@@ -245,12 +254,19 @@ enum StatementDeduplicator {
                 "\(amount.currency):\(amount.cents)"
             ].joined(separator: "|")
 
-            let occurrence = occurrences[base, default: 0]
-            occurrences[base] = occurrence + 1
-
-            let digest = SHA256.hash(data: Data("\(base)|\(occurrence)".utf8))
-            return digest.map { String(format: "%02x", $0) }.joined()
+            var occurrence = 0
+            var fingerprint = hash("\(base)|\(occurrence)")
+            while taken.contains(fingerprint) {
+                occurrence += 1
+                fingerprint = hash("\(base)|\(occurrence)")
+            }
+            taken.insert(fingerprint)
+            return fingerprint
         }
+    }
+
+    private static func hash(_ string: String) -> String {
+        SHA256.hash(data: Data(string.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Только буквы и цифры в верхнем регистре: «7-ELEVEN», «7 ELEVEN» и «7eleven»
@@ -291,19 +307,50 @@ enum StatementDeduplicator {
         return era * 146_097 + dayOfEra
     }
 
-    /// Чем меньше, тем лучше пара.
+    /// Ключ «день + описание + сумма» (для валютных операций — сумма в валюте):
+    /// операции с одинаковым ключом — кандидаты в одну и ту же.
+    static func matchKey(of snapshot: TransactionSnapshot, calendar: Calendar = .current) -> String {
+        let amount = amountKey(
+            amount: snapshot.amount,
+            currency: snapshot.currencyCode,
+            foreignAmount: snapshot.foreignAmount,
+            foreignCurrency: snapshot.foreignCurrencyCode
+        )
+        return "\(dayNumber(of: snapshot, calendar: calendar))|\(normalizedDetails(snapshot.details))|\(amount.currency):\(amount.cents)"
+    }
+
+    /// День транзакции для сопоставления.
     ///
-    /// Точное совпадение суммы в тенге весит больше, чем сдвиг даты на день:
-    /// у старых импортов все даты могут быть сдвинуты часовым поясом, и тогда
-    /// «тот же день, другая сумма» — это соседняя одинаковая покупка, а не та же.
-    /// Несовпадение знака почти не штрафуется — старые импорты записывали
-    /// «Курсовую разницу» и возвраты с неверным знаком.
+    /// Импортированные — по времени Kaspi. Новые импорты хранят полдень, старые —
+    /// полночь того пояса, где делался импорт: по времени Kaspi это 00:00–06:00,
+    /// если импорт был западнее (Москва), или 18:00–24:00 предыдущего дня,
+    /// если восточнее (Корея, Вьетнам). Во втором случае настоящий день — следующий.
+    /// Ручные транзакции — по местному календарю, как их ввёл пользователь.
+    static func dayNumber(of snapshot: TransactionSnapshot, calendar: Calendar = .current) -> Int {
+        guard snapshot.wasImported else {
+            return dayNumber(snapshot.date, calendar: calendar)
+        }
+
+        let kaspiCalendar = KaspiStatementParser.calendar
+        let hour = kaspiCalendar.component(.hour, from: snapshot.date)
+        return dayNumber(snapshot.date, calendar: kaspiCalendar) + (hour >= 18 ? 1 : 0)
+    }
+
+    // `ordinality(of: .day, in: .era)` для даты ровно в полночь возвращает
+    // предыдущий день, поэтому номер дня считается из компонентов.
+    private static func dayNumber(_ date: Date, calendar: Calendar) -> Int {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return daysFromCivil(year: components.year ?? 0, month: components.month ?? 1, day: components.day ?? 1)
+    }
+
+    /// Чем меньше, тем лучше пара: сначала точное совпадение суммы в тенге,
+    /// затем знак (почти не штрафуется — старые импорты записывали «Курсовую разницу»
+    /// и возвраты с неверным знаком), затем ближайшая сумма.
     private static func pairCost(_ row: Candidate, _ candidate: Candidate) -> Double {
         let amountDifference = abs(candidate.accountAmount - row.accountAmount)
-        let dayCost = Double(abs(row.day - candidate.day))
         let amountCost = amountDifference < 0.005 ? 0.0 : 2.0
         let directionCost = candidate.direction == row.direction ? 0.0 : 0.5
         let tieBreak = min(amountDifference, 1_000_000) * 1e-9
-        return dayCost + amountCost + directionCost + tieBreak
+        return amountCost + directionCost + tieBreak
     }
 }
