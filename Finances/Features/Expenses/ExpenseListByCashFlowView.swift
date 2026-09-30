@@ -10,7 +10,7 @@ struct ExpenseListByCashFlowView: View {
 
     private var filteredExpenses: [Expense] {
         expenses.filter {
-            flowType.matches($0) && scope.contains($0.date)
+            flowType.matches($0) && scope.containsDate($0.date)
         }
     }
 

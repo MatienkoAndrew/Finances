@@ -20,7 +20,7 @@ struct TransactionListByMerchantView: View {
         transactions.filter {
             $0.countsAsExpenseInAnalytics &&
             normalizedMerchantName($0.details) == merchantTitle &&
-            scope.contains($0.date)
+            scope.matches($0)
         }
     }
 

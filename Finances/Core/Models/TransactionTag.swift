@@ -10,14 +10,21 @@ final class TransactionTag {
     var icon: String? // SF Symbol или emoji
     var colorHex: String?
     var createdAt: Date
-    
+
+    /// ISO-код валюты для авто-применения метки (например, "HKD" для Гонконга).
+    /// Если задан, метка автоматически навешивается на любые транзакции, у которых
+    /// валюта мерчанта (`foreignCurrencyCode ?? currencyCode`) совпадает с этим кодом.
+    /// Optional, чтобы старые TransactionTag не сломались при миграции SwiftData.
+    var autoCurrencyCode: String?
+
     init(
         name: String,
         startDate: Date? = nil,
         endDate: Date? = nil,
         icon: String? = nil,
         colorHex: String? = nil,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        autoCurrencyCode: String? = nil
     ) {
         self.name = name
         self.startDate = startDate
@@ -25,6 +32,7 @@ final class TransactionTag {
         self.icon = icon
         self.colorHex = colorHex
         self.createdAt = createdAt
+        self.autoCurrencyCode = autoCurrencyCode
     }
 }
 

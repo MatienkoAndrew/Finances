@@ -18,7 +18,7 @@ struct TransactionListByKindView: View {
 
     private var filteredTransactions: [Transaction] {
         transactions.filter {
-            $0.kind == kind && scope.contains($0.date)
+            $0.kind == kind && scope.matches($0)
         }
     }
 

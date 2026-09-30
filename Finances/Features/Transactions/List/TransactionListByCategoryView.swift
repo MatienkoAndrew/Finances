@@ -20,7 +20,7 @@ struct TransactionListByCategoryView: View {
         transactions.filter {
             $0.countsAsExpenseInAnalytics &&
             ($0.categoryName ?? "Без категории") == categoryTitle &&
-            scope.contains($0.date)
+            scope.matches($0)
         }
     }
 
