@@ -46,17 +46,25 @@ struct TransactionsView: View {
         settingsList.first
     }
 
-    private var filteredTransactions: [Transaction] {
-        transactions.filter { transaction in
-            selectedFilter.matches(transaction) && matchesSearch(transaction)
+    /// Курсовые разницы, приписанные к своим покупкам: отдельной строкой не показываются.
+    /// Считаются по всем операциям, чтобы пары не зависели от фильтра и поиска.
+    private var foldedDifferences: FoldedExchangeRateDifferences {
+        ExchangeRateDifferenceMatcher.fold(transactions)
+    }
+
+    private func filteredTransactions(folded: FoldedExchangeRateDifferences) -> [Transaction] {
+        let hidden = folded.foldedIDs
+        return transactions.filter { transaction in
+            !hidden.contains(transaction.persistentModelID)
+                && selectedFilter.matches(transaction)
+                && matchesSearch(transaction)
         }
     }
 
-    private var groupedTransactions: [(date: Date, items: [Transaction])] {
-        TransactionSectionGrouper.groupedByDay(filteredTransactions)
-    }
-
     var body: some View {
+        let folded = foldedDifferences
+        let visible = filteredTransactions(folded: folded)
+
         NavigationStack(path: $path) {
             List {
                 Section {
@@ -66,7 +74,7 @@ struct TransactionsView: View {
                         .listRowBackground(Color.clear)
                 }
 
-                if filteredTransactions.isEmpty {
+                if visible.isEmpty {
                     Section {
                         emptyState
                             .frame(maxWidth: .infinity)
@@ -75,28 +83,31 @@ struct TransactionsView: View {
                             .listRowBackground(Color.clear)
                     }
                 } else {
-                    ForEach(groupedTransactions, id: \.date) { section in
+                    ForEach(TransactionSectionGrouper.groupedByDay(visible), id: \.date) { section in
                         Section {
                             ForEach(section.items) { transaction in
-                                TransactionRowView(transaction: transaction)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(Color(.secondarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        path.append(transaction.persistentModelID)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    TransactionRowView(transaction: transaction)
+                                    ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    path.append(transaction.persistentModelID)
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        deleteTransaction(transaction)
+                                    } label: {
+                                        Label("Удалить", systemImage: "trash")
                                     }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                        Button(role: .destructive) {
-                                            deleteTransaction(transaction)
-                                        } label: {
-                                            Label("Удалить", systemImage: "trash")
-                                        }
-                                    }
-                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                    .listRowSeparator(.hidden)
-                                    .listRowBackground(Color.clear)
+                                }
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                             }
                         } header: {
                             HStack {
@@ -107,7 +118,7 @@ struct TransactionsView: View {
                                 
                                 Spacer()
                                 
-                                if let (totalText, color) = calculateDailyTotal(section.items) {
+                                if let (totalText, color) = calculateDailyTotal(section.items, folded: folded) {
                                     Text(totalText)
                                         .font(.subheadline.weight(.semibold))
                                         .textCase(nil)
@@ -323,15 +334,18 @@ struct TransactionsView: View {
     }
     
     /// Подсчет суммы за день в рублях с учетом фильтра
-    private func calculateDailyTotal(_ transactions: [Transaction]) -> (String, Color)? {
+    private func calculateDailyTotal(_ transactions: [Transaction], folded: FoldedExchangeRateDifferences) -> (String, Color)? {
         var totalRub: Double = 0
-        
+
+        // Курсовые разницы спрятаны под своими покупками — их сумма идёт в день покупки.
+        let expenseRub: (Transaction) -> Double = { folded.finalRubAmount(for: $0) ?? $0.rubAmount ?? 0 }
+
         // Подсчитываем сумму в зависимости от выбранного фильтра
         switch selectedFilter {
         case .all:
             // Показываем чистый баланс: доходы минус расходы
             let expenses = transactions.filter { $0.kind == .expense }
-                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
+                .reduce(0.0) { sum, tx in sum + expenseRub(tx) }
             
             let income = transactions.filter { $0.kind == .income }
                 .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
@@ -341,7 +355,7 @@ struct TransactionsView: View {
         case .expenses:
             // Только расходы (делаем отрицательными)
             totalRub = -transactions.filter { $0.kind == .expense }
-                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
+                .reduce(0.0) { sum, tx in sum + expenseRub(tx) }
             
         case .income:
             // Только доходы (положительные)

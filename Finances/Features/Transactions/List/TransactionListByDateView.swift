@@ -15,21 +15,32 @@ struct TransactionListByDateView: View {
     @Query(sort: \Transaction.date, order: .reverse)
     private var transactions: [Transaction]
 
-    private var filteredTransactions: [Transaction] {
+    /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.
+    private var foldedDifferences: FoldedExchangeRateDifferences {
+        ExchangeRateDifferenceMatcher.fold(transactions)
+    }
+
+    private func filteredTransactions(hiding hidden: Set<PersistentIdentifier>) -> [Transaction] {
         let calendar = Calendar.current
         return transactions.filter {
+            !hidden.contains($0.persistentModelID) &&
             $0.countsAsExpenseInAnalytics &&
             calendar.isDate($0.date, inSameDayAs: date)
         }
     }
 
     var body: some View {
+        let folded = foldedDifferences
+
         List {
-            ForEach(filteredTransactions) { transaction in
+            ForEach(filteredTransactions(hiding: folded.foldedIDs)) { transaction in
                 NavigationLink {
                     TransactionDetailView(transaction: transaction)
                 } label: {
-                    TransactionRowView(transaction: transaction)
+                    VStack(alignment: .leading, spacing: 6) {
+                        TransactionRowView(transaction: transaction)
+                        ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
+                    }
                 }
                 .buttonStyle(.plain)
                 .listRowSeparator(.hidden)
