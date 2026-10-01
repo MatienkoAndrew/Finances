@@ -92,16 +92,23 @@ final class DataExportImportManager {
         let categories = try modelContext.fetch(FetchDescriptor<ExpenseCategoryItem>())
         let subcategories = try modelContext.fetch(FetchDescriptor<ExpenseSubcategoryItem>())
         let rules = try modelContext.fetch(FetchDescriptor<CategoryRule>())
+        let accounts = try modelContext.fetch(FetchDescriptor<Account>(sortBy: [SortDescriptor(\Account.createdAt)]))
+        let tags = try modelContext.fetch(FetchDescriptor<TransactionTag>(sortBy: [SortDescriptor(\TransactionTag.createdAt)]))
+
+        // У счёта нет своего идентификатора — выдаём временный, им операции ссылаются на счёт.
+        let accountIDs = Dictionary(uniqueKeysWithValues: accounts.map { ($0.persistentModelID, UUID().uuidString) })
 
         return ExportData(
-            version: 2,
+            version: 3,
             exportDate: Date(),
-            transactions: transactions.map { ExportableTransaction(from: $0) },
+            transactions: transactions.map { ExportableTransaction(from: $0, accountIDs: accountIDs) },
             trackedRates: trackedRates.map { ExportableTrackedRate(from: $0) },
             settings: settings.map { ExportableSettings(from: $0) },
             categories: ExpenseCategoryItem.ordered(categories).map { ExportableCategory(from: $0) },
             subcategories: subcategories.map { ExportableSubcategory(from: $0) },
-            rules: rules.map { ExportableRule(from: $0) }
+            rules: rules.map { ExportableRule(from: $0) },
+            accounts: accounts.map { ExportableAccount(from: $0, id: accountIDs[$0.persistentModelID]!) },
+            tags: tags.map { ExportableTag(from: $0) }
         )
     }
     
@@ -138,7 +145,9 @@ final class DataExportImportManager {
             }
             
             try importCategories(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
-            try importAllData(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
+            let accounts = try importAccounts(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
+            try importTags(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
+            try importAllData(exportData, accounts: accounts, modelContext: modelContext, replaceExisting: replaceExisting)
             try modelContext.save()
             SubcategoryRegistry.shared.reload(context: modelContext)
         } catch {
@@ -208,7 +217,94 @@ final class DataExportImportManager {
         }
     }
 
-    private static func importAllData(_ data: ExportData, modelContext: ModelContext, replaceExisting: Bool = false) throws {
+    /// Счета. При замене — ровно как в копии, при добавлении — недостающие (совпадение по имени и валюте).
+    /// Возвращает счёт по идентификатору из копии, чтобы привязать к нему операции.
+    private static func importAccounts(_ data: ExportData, modelContext: ModelContext, replaceExisting: Bool) throws -> [String: Account] {
+        guard let exportedAccounts = data.accounts else { return [:] }  // копия до версии 3
+
+        if replaceExisting {
+            try modelContext.delete(model: Account.self)
+        }
+
+        let existing = replaceExisting ? [] : try modelContext.fetch(FetchDescriptor<Account>())
+        func key(_ name: String, _ currency: String) -> String {
+            CategoryNameNormalizer.normalize(name) + "|" + currency.uppercased()
+        }
+        var byKey = Dictionary(existing.map { (key($0.name, $0.currencyCode), $0) }, uniquingKeysWith: { first, _ in first })
+
+        var byID: [String: Account] = [:]
+        for exported in exportedAccounts {
+            let accountKey = key(exported.name, exported.currencyCode)
+            if let account = byKey[accountKey] {
+                byID[exported.id] = account
+                continue
+            }
+            let account = Account(
+                name: exported.name,
+                currencyCode: exported.currencyCode,
+                typeRaw: exported.typeRaw,
+                note: exported.note,
+                isArchived: exported.isArchived,
+                createdAt: exported.createdAt
+            )
+            modelContext.insert(account)
+            byKey[accountKey] = account
+            byID[exported.id] = account
+        }
+        return byID
+    }
+
+    /// Метки. При замене — ровно как в копии, при добавлении — только новые по имени.
+    private static func importTags(_ data: ExportData, modelContext: ModelContext, replaceExisting: Bool) throws {
+        guard let exportedTags = data.tags else { return }  // копия до версии 3
+
+        if replaceExisting {
+            try modelContext.delete(model: TransactionTag.self)
+        }
+
+        let existing = replaceExisting ? [] : try modelContext.fetch(FetchDescriptor<TransactionTag>())
+        var names = Set(existing.map { CategoryNameNormalizer.normalize($0.name) })
+        for exported in exportedTags where names.insert(CategoryNameNormalizer.normalize(exported.name)).inserted {
+            modelContext.insert(TransactionTag(
+                name: exported.name,
+                startDate: exported.startDate,
+                endDate: exported.endDate,
+                icon: exported.icon,
+                colorHex: exported.colorHex,
+                createdAt: exported.createdAt,
+                autoCurrencyCode: exported.autoCurrencyCode
+            ))
+        }
+    }
+
+    private static func makeTransaction(_ exported: ExportableTransaction, accounts: [String: Account]) -> Transaction {
+        Transaction(
+            date: exported.date,
+            kindRaw: exported.kindRaw,
+            amount: exported.amount,
+            currencyCode: exported.currencyCode,
+            toAmount: exported.toAmount,
+            toCurrencyCode: exported.toCurrencyCode,
+            details: exported.details,
+            foreignAmount: exported.foreignAmount,
+            foreignCurrencyCode: exported.foreignCurrencyCode,
+            rubAmount: exported.rubAmount,
+            categoryName: exported.categoryName,
+            subcategoryName: exported.subcategoryName,
+            isCategoryManuallySet: exported.isCategoryManuallySet ?? false,
+            note: exported.note,
+            tagNames: exported.tagNames,
+            manuallyExcludedTagNames: exported.manuallyExcludedTagNames,
+            fingerprint: exported.fingerprint,
+            sourceFileName: exported.sourceFileName,
+            importedAt: exported.importedAt,
+            createdAt: exported.createdAt,
+            fromAccount: exported.fromAccountID.flatMap { accounts[$0] },
+            toAccount: exported.toAccountID.flatMap { accounts[$0] }
+        )
+    }
+
+    private static func importAllData(_ data: ExportData, accounts: [String: Account], modelContext: ModelContext, replaceExisting: Bool = false) throws {
         // Импортируем отслеживаемые курсы валют
         if replaceExisting {
             // При замене просто добавляем все
@@ -271,27 +367,7 @@ final class DataExportImportManager {
         if replaceExisting {
             // При замене просто добавляем все
             for exportTransaction in data.transactions {
-                let transaction = Transaction(
-                    date: exportTransaction.date,
-                    kindRaw: exportTransaction.kindRaw,
-                    amount: exportTransaction.amount,
-                    currencyCode: exportTransaction.currencyCode,
-                    toAmount: exportTransaction.toAmount,
-                    toCurrencyCode: exportTransaction.toCurrencyCode,
-                    details: exportTransaction.details,
-                    foreignAmount: exportTransaction.foreignAmount,
-                    foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
-                    rubAmount: exportTransaction.rubAmount,
-                    categoryName: exportTransaction.categoryName,
-                    subcategoryName: exportTransaction.subcategoryName,
-                    isCategoryManuallySet: exportTransaction.isCategoryManuallySet ?? false,
-                    note: exportTransaction.note,
-                    tagNames: exportTransaction.tagNames,
-                    fingerprint: exportTransaction.fingerprint,
-                    sourceFileName: exportTransaction.sourceFileName,
-                    importedAt: exportTransaction.importedAt,
-                    createdAt: exportTransaction.createdAt
-                )
+                let transaction = makeTransaction(exportTransaction, accounts: accounts)
 
                 modelContext.insert(transaction)
                 importedTransactionsForAutoTagging.append(transaction)
@@ -314,27 +390,7 @@ final class DataExportImportManager {
                     continue
                 }
                 
-                let transaction = Transaction(
-                    date: exportTransaction.date,
-                    kindRaw: exportTransaction.kindRaw,
-                    amount: exportTransaction.amount,
-                    currencyCode: exportTransaction.currencyCode,
-                    toAmount: exportTransaction.toAmount,
-                    toCurrencyCode: exportTransaction.toCurrencyCode,
-                    details: exportTransaction.details,
-                    foreignAmount: exportTransaction.foreignAmount,
-                    foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
-                    rubAmount: exportTransaction.rubAmount,
-                    categoryName: exportTransaction.categoryName,
-                    subcategoryName: exportTransaction.subcategoryName,
-                    isCategoryManuallySet: exportTransaction.isCategoryManuallySet ?? false,
-                    note: exportTransaction.note,
-                    tagNames: exportTransaction.tagNames,
-                    fingerprint: exportTransaction.fingerprint,
-                    sourceFileName: exportTransaction.sourceFileName,
-                    importedAt: exportTransaction.importedAt,
-                    createdAt: exportTransaction.createdAt
-                )
+                let transaction = makeTransaction(exportTransaction, accounts: accounts)
                 
                 modelContext.insert(transaction)
                 importedTransactionsForAutoTagging.append(transaction)
@@ -366,6 +422,50 @@ struct ExportData: Codable {
     var categories: [ExportableCategory]? = nil
     var subcategories: [ExportableSubcategory]? = nil
     var rules: [ExportableRule]? = nil
+    // С версии 3; в старых копиях их нет — тогда счета и метки при импорте не трогаем.
+    var accounts: [ExportableAccount]? = nil
+    var tags: [ExportableTag]? = nil
+}
+
+struct ExportableAccount: Codable {
+    /// Идентификатор внутри копии — по нему операции ссылаются на счёт.
+    let id: String
+    let name: String
+    let currencyCode: String
+    let typeRaw: String
+    let note: String?
+    let isArchived: Bool
+    let createdAt: Date
+
+    init(from account: Account, id: String) {
+        self.id = id
+        self.name = account.name
+        self.currencyCode = account.currencyCode
+        self.typeRaw = account.typeRaw
+        self.note = account.note
+        self.isArchived = account.isArchived
+        self.createdAt = account.createdAt
+    }
+}
+
+struct ExportableTag: Codable {
+    let name: String
+    let startDate: Date?
+    let endDate: Date?
+    let icon: String?
+    let colorHex: String?
+    let createdAt: Date
+    let autoCurrencyCode: String?
+
+    init(from tag: TransactionTag) {
+        self.name = tag.name
+        self.startDate = tag.startDate
+        self.endDate = tag.endDate
+        self.icon = tag.icon
+        self.colorHex = tag.colorHex
+        self.createdAt = tag.createdAt
+        self.autoCurrencyCode = tag.autoCurrencyCode
+    }
 }
 
 struct ExportableCategory: Codable {
@@ -439,12 +539,17 @@ struct ExportableTransaction: Codable {
     let isCategoryManuallySet: Bool?
     let note: String?
     let tagNames: [String]?
+    /// С версии 3: снятые вручную метки, чтобы авто-метки не вернули их после импорта.
+    let manuallyExcludedTagNames: [String]?
+    /// С версии 3: счета списания и зачисления (id из `ExportData.accounts`).
+    let fromAccountID: String?
+    let toAccountID: String?
     let fingerprint: String?
     let sourceFileName: String?
     let importedAt: Date?
     let createdAt: Date
     
-    init(from transaction: Transaction) {
+    init(from transaction: Transaction, accountIDs: [PersistentIdentifier: String]) {
         self.id = UUID().uuidString
         self.date = transaction.date
         self.kindRaw = transaction.kindRaw
@@ -461,6 +566,9 @@ struct ExportableTransaction: Codable {
         self.isCategoryManuallySet = transaction.isCategoryManuallySet
         self.note = transaction.note
         self.tagNames = transaction.tagNames
+        self.manuallyExcludedTagNames = transaction.manuallyExcludedTagNames
+        self.fromAccountID = transaction.fromAccount.flatMap { accountIDs[$0.persistentModelID] }
+        self.toAccountID = transaction.toAccount.flatMap { accountIDs[$0.persistentModelID] }
         self.fingerprint = transaction.fingerprint
         self.sourceFileName = transaction.sourceFileName
         self.importedAt = transaction.importedAt
