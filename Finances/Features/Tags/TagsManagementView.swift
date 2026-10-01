@@ -109,12 +109,7 @@ struct TagsManagementView: View {
                     ForEach(suggestions) { suggestion in
                         TagSuggestionCard(suggestion: suggestion) {
                             withAnimation(.snappy(duration: 0.3)) {
-                                CurrencyTagSuggestions.createTag(
-                                    from: suggestion,
-                                    transactions: transactions,
-                                    modelContext: modelContext
-                                )
-                                try? modelContext.save()
+                                CurrencyTagSuggestions.createTag(from: suggestion, modelContext: modelContext)
                             }
                         }
                     }
