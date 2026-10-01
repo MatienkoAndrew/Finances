@@ -197,6 +197,13 @@ final class DataExportImportManager {
             }
         }
         
+        // Подгружаем существующие метки один раз — будем применять авто-метки
+        // ко всему импорту разом, чтобы новые транзакции в иностранных валютах
+        // автоматически получили метки-страны (если такие auto-метки уже созданы).
+        let allTagsDescriptor = FetchDescriptor<TransactionTag>()
+        let allTags = (try? modelContext.fetch(allTagsDescriptor)) ?? []
+        var importedTransactionsForAutoTagging: [Transaction] = []
+
         // Импортируем транзакции
         if replaceExisting {
             // При замене просто добавляем все
@@ -213,6 +220,7 @@ final class DataExportImportManager {
                     foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
                     rubAmount: exportTransaction.rubAmount,
                     categoryName: exportTransaction.categoryName,
+                    isCategoryManuallySet: exportTransaction.isCategoryManuallySet ?? false,
                     note: exportTransaction.note,
                     tagNames: exportTransaction.tagNames,
                     fingerprint: exportTransaction.fingerprint,
@@ -220,8 +228,9 @@ final class DataExportImportManager {
                     importedAt: exportTransaction.importedAt,
                     createdAt: exportTransaction.createdAt
                 )
-                
+
                 modelContext.insert(transaction)
+                importedTransactionsForAutoTagging.append(transaction)
             }
         } else {
             // При добавлении - проверяем на дубликаты по fingerprint
@@ -253,6 +262,7 @@ final class DataExportImportManager {
                     foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
                     rubAmount: exportTransaction.rubAmount,
                     categoryName: exportTransaction.categoryName,
+                    isCategoryManuallySet: exportTransaction.isCategoryManuallySet ?? false,
                     note: exportTransaction.note,
                     tagNames: exportTransaction.tagNames,
                     fingerprint: exportTransaction.fingerprint,
@@ -262,11 +272,20 @@ final class DataExportImportManager {
                 )
                 
                 modelContext.insert(transaction)
+                importedTransactionsForAutoTagging.append(transaction)
                 addedCount += 1
             }
-            
+
             print("Импорт: добавлено \(addedCount), пропущено дубликатов \(skippedCount)")
         }
+
+        // Прогоняем все только что импортированные транзакции через авто-теги.
+        // Если в системе есть метка с `autoCurrencyCode` (например, «Гонконг» → HKD),
+        // подходящие импортированные транзакции автоматически получат её.
+        TransactionTagSync.applyAutoTags(
+            to: importedTransactionsForAutoTagging,
+            allTags: allTags
+        )
     }
 }
 
@@ -293,6 +312,10 @@ struct ExportableTransaction: Codable {
     let foreignCurrencyCode: String?
     let rubAmount: Double?
     let categoryName: String?
+    /// Сохраняется в бэкапе, чтобы ручные пометки категорий
+    /// переживали полный экспорт/импорт. Optional => старые бэкапы
+    /// декодируются корректно (поле станет nil).
+    let isCategoryManuallySet: Bool?
     let note: String?
     let tagNames: [String]?
     let fingerprint: String?
@@ -313,6 +336,7 @@ struct ExportableTransaction: Codable {
         self.foreignCurrencyCode = transaction.foreignCurrencyCode
         self.rubAmount = transaction.rubAmount
         self.categoryName = transaction.categoryName
+        self.isCategoryManuallySet = transaction.isCategoryManuallySet
         self.note = transaction.note
         self.tagNames = transaction.tagNames
         self.fingerprint = transaction.fingerprint

@@ -16,6 +16,13 @@ struct TransactionRowView: View {
     private var categories: [ExpenseCategoryItem]
 
     @State private var isShowingAddCategory = false
+    @State private var pendingCategoryChange: PendingCategoryChange? = nil
+
+    private struct PendingCategoryChange: Identifiable {
+        let id = UUID()
+        let categoryName: String
+        let matchingCount: Int
+    }
 
     private var settings: AppSettings? {
         settingsList.first
@@ -43,6 +50,44 @@ struct TransactionRowView: View {
             }
         }
         .padding(.vertical, 6)
+        .confirmationDialog(
+            confirmationDialogTitle,
+            isPresented: Binding(
+                get: { pendingCategoryChange != nil },
+                set: { if !$0 { pendingCategoryChange = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let pending = pendingCategoryChange {
+                Button("Применить ко всем \(pending.matchingCount) транзакциям") {
+                    applyToAll(categoryName: pending.categoryName)
+                }
+                Button("Только эта транзакция") {
+                    applySingle(categoryName: pending.categoryName)
+                }
+                Button("Отмена", role: .cancel) {
+                    pendingCategoryChange = nil
+                }
+            }
+        } message: {
+            if let pending = pendingCategoryChange {
+                Text("Найдено ещё \(pending.matchingCount - 1) \(pluralTransactions(pending.matchingCount - 1)) с названием «\(transaction.details)». Назначить категорию «\(pending.categoryName)» всем?")
+            }
+        }
+    }
+
+    private var confirmationDialogTitle: String {
+        guard let pending = pendingCategoryChange else { return "" }
+        return "Применить «\(pending.categoryName)» ко всем?"
+    }
+
+    private func pluralTransactions(_ count: Int) -> String {
+        let mod10 = count % 10
+        let mod100 = count % 100
+        if mod100 >= 11 && mod100 <= 14 { return "транзакций" }
+        if mod10 == 1 { return "транзакция" }
+        if mod10 >= 2 && mod10 <= 4 { return "транзакции" }
+        return "транзакций"
     }
 
     private var topRow: some View {
@@ -311,9 +356,71 @@ struct TransactionRowView: View {
         }
     }
 
+    /// Точка входа при выборе категории из меню.
+    /// Если у других транзакций то же название — показываем предложение применить ко всем.
     private func updateCategory(_ name: String?) {
-        transaction.categoryName = name
+        guard let name else {
+            applySingle(categoryName: nil)
+            return
+        }
+
+        let details = transaction.details
+        let descriptor = FetchDescriptor<Transaction>(
+            predicate: #Predicate { $0.details == details && $0.kindRaw == "expense" }
+        )
+        let allMatching = (try? modelContext.fetch(descriptor)) ?? []
+        let otherCount = allMatching.filter { $0.persistentModelID != transaction.persistentModelID }.count
+
+        if otherCount > 0 {
+            // Есть ещё похожие — показываем шаг подтверждения
+            pendingCategoryChange = PendingCategoryChange(
+                categoryName: name,
+                matchingCount: allMatching.count
+            )
+        } else {
+            // Единственная такая транзакция — меняем без лишних вопросов
+            applySingle(categoryName: name)
+        }
+    }
+
+    /// Применяет категорию только к текущей транзакции.
+    private func applySingle(categoryName: String?) {
+        transaction.categoryName = categoryName
+        transaction.isCategoryManuallySet = true
         try? modelContext.save()
+        pendingCategoryChange = nil
+    }
+
+    /// Применяет категорию ко всем транзакциям с тем же details + создаёт правило.
+    private func applyToAll(categoryName: String) {
+        let details = transaction.details
+
+        // 1. Обновляем все совпадающие транзакции
+        let descriptor = FetchDescriptor<Transaction>(
+            predicate: #Predicate { $0.details == details && $0.kindRaw == "expense" }
+        )
+        let allMatching = (try? modelContext.fetch(descriptor)) ?? []
+        for t in allMatching {
+            t.categoryName = categoryName
+            t.isCategoryManuallySet = true
+        }
+
+        // 2. Создаём правило, чтобы будущие импорты категоризировались автоматически
+        let pattern = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rulesDescriptor = FetchDescriptor<CategoryRule>(
+            predicate: #Predicate { $0.pattern == pattern }
+        )
+        let existingRules = (try? modelContext.fetch(rulesDescriptor)) ?? []
+        if existingRules.isEmpty {
+            let newRule = CategoryRule(pattern: pattern, categoryName: categoryName, priority: 1)
+            modelContext.insert(newRule)
+        } else {
+            // Правило уже есть — обновляем категорию
+            existingRules.first?.categoryName = categoryName
+        }
+
+        try? modelContext.save()
+        pendingCategoryChange = nil
     }
 
     private func signedFormattedAmount(

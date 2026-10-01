@@ -12,6 +12,9 @@ struct AddRuleView: View {
     @Query(sort: \Transaction.date, order: .reverse)
     private var transactions: [Transaction]
 
+    @Query(sort: \CategoryRule.priority, order: .reverse)
+    private var existingRules: [CategoryRule]
+
     @State private var pattern: String = ""
     @State private var selectedCategoryName: String = "Другое"
     @State private var selectedPriority: PriorityLevel = .medium
@@ -217,6 +220,15 @@ struct AddRuleView: View {
                             .fill(Color.blue.opacity(0.1))
                     )
             }
+            
+            // Показываем, сколько реально изменится с учетом приоритетов
+            if !matchingTransactions.isEmpty, let willChangeCount = calculateWillChangeCount() {
+                if willChangeCount != matchingTransactions.count {
+                    Text("С учетом приоритетов будет изменено: \(willChangeCount)")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
 
             if matchingTransactions.isEmpty {
                 Text("Нет совпадений")
@@ -294,6 +306,36 @@ struct AddRuleView: View {
 
     // MARK: - Logic
 
+    private func calculateWillChangeCount() -> Int? {
+        guard !trimmedPattern.isEmpty else { return nil }
+        
+        let transientRule = CategoryRule(
+            pattern: trimmedPattern,
+            categoryName: selectedCategoryName,
+            priority: selectedPriority.rawValue,
+            isEnabled: true
+        )
+        
+        var count = 0
+        let allRulesIncludingNew = existingRules + [transientRule]
+        
+        for transaction in matchingTransactions {
+            let winningCategory = CategoryRuleEngine.matchCategoryName(
+                operationType: transaction.ruleOperationType,
+                details: transaction.details,
+                rules: allRulesIncludingNew,
+                existingCategories: categories
+            )
+            
+            if winningCategory == selectedCategoryName,
+               transaction.categoryName != selectedCategoryName {
+                count += 1
+            }
+        }
+        
+        return count
+    }
+
     private func loadMore() {
         guard visibleCount < matchingTransactions.count else { return }
 
@@ -310,9 +352,38 @@ struct AddRuleView: View {
             isEnabled: true
         )
 
-        let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
+        // Подсчитаем, сколько транзакций изменит ИМЕННО наше новое правило
+        // с учетом приоритетов всех правил
+        var newRuleMatchCount = 0
+        let normalizedPattern = transientRule.pattern.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        
+        for transaction in transactions where transaction.kind == .expense {
+            guard transaction.details.uppercased().contains(normalizedPattern) else { continue }
+            
+            // Проверяем, что новое правило будет применено (учитывая приоритеты)
+            let allRulesIncludingNew = existingRules + [transientRule]
+            let winningCategory = CategoryRuleEngine.matchCategoryName(
+                operationType: transaction.ruleOperationType,
+                details: transaction.details,
+                rules: allRulesIncludingNew,
+                existingCategories: categories
+            )
+            
+            // Если побеждает наше правило И категория отличается от текущей
+            if winningCategory == selectedCategoryName,
+               transaction.categoryName != selectedCategoryName {
+                newRuleMatchCount += 1
+            }
+        }
+
+        // Применяем ВСЕ правила, включая новое
+        // Это гарантирует, что другие транзакции не потеряют свои категории
+        var allRules = existingRules
+        allRules.append(transientRule)
+        
+        let totalUpdatedCount = TransactionCategorySync.autoCategorizeTransactions(
             transactions,
-            rules: [transientRule],
+            rules: allRules,
             categories: categories,
             overwriteExisting: true
         )
@@ -321,9 +392,14 @@ struct AddRuleView: View {
 
         pendingRuleToSave = transientRule
 
-        resultMessage = updatedCount == 0
-            ? "Ничего не изменилось"
-            : "Применено к \(updatedCount)"
+        // Показываем количество изменений от нашего правила и общее количество
+        if newRuleMatchCount == 0 {
+            resultMessage = "Новое правило не изменило ни одной транзакции.\nВсего обновлено: \(totalUpdatedCount)"
+        } else if newRuleMatchCount == totalUpdatedCount {
+            resultMessage = "Применено к \(newRuleMatchCount) транзакциям"
+        } else {
+            resultMessage = "Новое правило применено к \(newRuleMatchCount) транзакциям.\nВсего обновлено (со всеми правилами): \(totalUpdatedCount)"
+        }
 
         isShowingResultAlert = true
     }

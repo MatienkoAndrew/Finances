@@ -78,6 +78,14 @@ enum TransactionCategorySync {
         for transaction in transactions {
             guard transaction.kind == .expense else { continue }
 
+            // Никогда не затираем категории, выставленные пользователем вручную.
+            // Это справедливо даже для режима overwriteExisting == true:
+            // ручной выбор — самый сильный сигнал, и массовое применение правил
+            // не имеет права его перезаписывать.
+            if transaction.isCategoryManuallySet == true {
+                continue
+            }
+
             if !overwriteExisting, transaction.categoryName != nil {
                 continue
             }

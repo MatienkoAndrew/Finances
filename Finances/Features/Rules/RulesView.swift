@@ -58,7 +58,7 @@ struct RulesView: View {
                                         : "Обновлено \(updatedCount) транзакций."
                                 }
 
-                                Button("Переприменить ко всем транзакциям", role: .destructive) {
+                                Button("Переприменить ко всем (кроме ручных)", role: .destructive) {
                                     let updatedCount = TransactionCategorySync.autoCategorizeTransactions(
                                         transactions,
                                         rules: rules,

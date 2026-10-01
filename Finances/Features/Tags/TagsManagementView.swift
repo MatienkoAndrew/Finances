@@ -15,29 +15,52 @@ struct TagsManagementView: View {
     @State private var showingCreateSheet = false
     @State private var tagToEdit: TransactionTag?
     
+    private var suggestions: [CurrencyTagSuggestion] {
+        CurrencyTagSuggestions.computeSuggestions(
+            transactions: transactions,
+            existingTags: tags
+        )
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                if tags.isEmpty {
+                if !suggestions.isEmpty {
+                    Section {
+                        ForEach(suggestions) { suggestion in
+                            SuggestionRowView(suggestion: suggestion) {
+                                applySuggestion(suggestion)
+                            }
+                        }
+                    } header: {
+                        Text("Умные метки")
+                    } footer: {
+                        Text("Подсказки на основе валют ваших транзакций. Тап создаёт метку и применяет её ко всем подходящим тратам — а в будущем она будет ставиться автоматически.")
+                    }
+                }
+
+                if tags.isEmpty && suggestions.isEmpty {
                     ContentUnavailableView(
                         "Нет меток",
                         systemImage: "tag.slash",
                         description: Text("Создайте метку для группировки транзакций по странам, проектам или событиям")
                     )
-                } else {
-                    ForEach(tags) { tag in
-                        TagRowView(tag: tag, transactionCount: transactionCount(for: tag))
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                tagToEdit = tag
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deleteTag(tag)
-                                } label: {
-                                    Label("Удалить", systemImage: "trash")
+                } else if !tags.isEmpty {
+                    Section("Ваши метки") {
+                        ForEach(tags) { tag in
+                            TagRowView(tag: tag, transactionCount: transactionCount(for: tag))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    tagToEdit = tag
                                 }
-                            }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        deleteTag(tag)
+                                    } label: {
+                                        Label("Удалить", systemImage: "trash")
+                                    }
+                                }
+                        }
                     }
                 }
             }
@@ -75,9 +98,70 @@ struct TagsManagementView: View {
         for transaction in transactions where transaction.hasTag(tag.name) {
             transaction.removeTag(tag.name)
         }
-        
+
         // Удаляем саму метку
         modelContext.delete(tag)
+    }
+
+    private func applySuggestion(_ suggestion: CurrencyTagSuggestion) {
+        CurrencyTagSuggestions.createTag(
+            from: suggestion,
+            transactions: transactions,
+            modelContext: modelContext
+        )
+    }
+}
+
+// MARK: - Suggestion Row
+
+struct SuggestionRowView: View {
+    let suggestion: CurrencyTagSuggestion
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                Text(suggestion.info.icon)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        Circle()
+                            .fill(ColorHelper.fromHex(suggestion.info.colorHex).opacity(0.15))
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(suggestion.info.countryName)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        Text(suggestion.info.code)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(.secondary.opacity(0.15))
+                            )
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("\(suggestion.transactionCount) транзакций · \(CurrencyTagSuggestions.periodDescription(from: suggestion.firstDate, to: suggestion.lastDate))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "plus.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -99,20 +183,35 @@ struct TagRowView: View {
                 )
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(tag.name)
-                    .font(.headline)
-                
+                HStack(spacing: 6) {
+                    Text(tag.name)
+                        .font(.headline)
+
+                    if let code = tag.autoCurrencyCode, !code.isEmpty {
+                        Label("Авто \(code)", systemImage: "sparkles")
+                            .font(.caption2.weight(.semibold))
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(Color.accentColor.opacity(0.15))
+                            )
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+
                 if tag.startDate != nil || tag.endDate != nil {
                     Text(tag.periodDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                
+
                 Text("\(transactionCount) транзакций")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
-            
+
             Spacer()
         }
         .padding(.vertical, 4)
@@ -233,15 +332,22 @@ struct EditTagView: View {
     private var transactions: [Transaction]
     
     let tag: TransactionTag
-    
+
     @State private var name: String = ""
     @State private var icon: String = ""
     @State private var colorHex: String = ""
     @State private var startDate: Date = .now
     @State private var endDate: Date = .now
-    
+    @State private var autoCurrencyEnabled: Bool = false
+    @State private var autoCurrencyCode: String = ""
+
     private var isValid: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Список ISO-кодов валют, известных «умным меткам».
+    private var availableAutoCurrencyCodes: [String] {
+        CurrencyTagSuggestions.countryByCurrency.keys.sorted()
     }
     
     var body: some View {
@@ -266,14 +372,41 @@ struct EditTagView: View {
                     DatePicker("Начало", selection: $startDate, displayedComponents: .date)
                     DatePicker("Конец", selection: $endDate, displayedComponents: .date)
                 }
-                
+
                 Section {
-                    HStack {
-                        Text("Транзакций с меткой")
-                        Spacer()
-                        Text("\(transactionCount)")
-                            .foregroundStyle(.secondary)
+                    Toggle("Применять автоматически по валюте", isOn: $autoCurrencyEnabled)
+
+                    if autoCurrencyEnabled {
+                        Picker("Валюта", selection: $autoCurrencyCode) {
+                            Text("Не выбрана").tag("")
+                            ForEach(availableAutoCurrencyCodes, id: \.self) { code in
+                                let info = CurrencyTagSuggestions.countryByCurrency[code]
+                                let label = info.map { "\($0.icon) \(code) — \($0.countryName)" } ?? code
+                                Text(label).tag(code)
+                            }
+                        }
                     }
+                } footer: {
+                    if autoCurrencyEnabled, !autoCurrencyCode.isEmpty {
+                        Text("Метка будет автоматически добавляться к будущим транзакциям в валюте \(autoCurrencyCode).")
+                    } else {
+                        Text("Включите, чтобы метка ставилась сама на новые транзакции в выбранной валюте (например, HKD → Гонконг).")
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        TagTransactionsView(tag: tag)
+                    } label: {
+                        HStack {
+                            Text("Транзакций с меткой")
+                            Spacer()
+                            Text("\(transactionCount)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("Откройте, чтобы посмотреть все транзакции метки и быстро убрать ненужные.")
                 }
             }
             .navigationTitle("Редактировать метку")
@@ -298,18 +431,25 @@ struct EditTagView: View {
                 colorHex = tag.colorHex ?? "#007AFF"
                 startDate = tag.startDate ?? .now
                 endDate = tag.endDate ?? .now
+                if let code = tag.autoCurrencyCode, !code.isEmpty {
+                    autoCurrencyEnabled = true
+                    autoCurrencyCode = code
+                } else {
+                    autoCurrencyEnabled = false
+                    autoCurrencyCode = ""
+                }
             }
         }
     }
-    
+
     private var transactionCount: Int {
         transactions.filter { $0.tagNames?.contains(tag.name) == true }.count
     }
-    
+
     private func saveChanges() {
         let oldName = tag.name
         let newName = name.trimmingCharacters(in: .whitespaces)
-        
+
         // Если имя изменилось, обновляем его во всех транзакциях
         if oldName != newName {
             for transaction in transactions where transaction.hasTag(oldName) {
@@ -317,13 +457,31 @@ struct EditTagView: View {
                 transaction.addTag(newName)
             }
         }
-        
+
         tag.name = newName
         tag.icon = icon
         tag.colorHex = colorHex
         tag.startDate = startDate
         tag.endDate = endDate
-        
+
+        // Сохраняем настройки авто-применения по валюте.
+        // Если пользователь включил тогл и выбрал валюту — записываем; иначе чистим поле.
+        let trimmedCode = autoCurrencyCode.trimmingCharacters(in: .whitespaces).uppercased()
+        let newAutoCode = (autoCurrencyEnabled && !trimmedCode.isEmpty) ? trimmedCode : nil
+        let oldAutoCode = tag.autoCurrencyCode
+        tag.autoCurrencyCode = newAutoCode
+
+        // Если только что включили авто-валюту — сразу применяем метку ретроспективно
+        // ко всем подходящим транзакциям, чтобы пользователь не остался с пустой меткой.
+        if let code = newAutoCode, code != oldAutoCode {
+            for tx in transactions where tx.kind != .transfer {
+                guard let txCode = CurrencyTagSuggestions.merchantCurrency(of: tx) else { continue }
+                if txCode == code, !tx.hasTag(tag.name) {
+                    tx.addTag(tag.name)
+                }
+            }
+        }
+
         dismiss()
     }
 }
