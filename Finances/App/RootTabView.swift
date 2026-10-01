@@ -48,8 +48,8 @@ struct RootTabView: View {
             // «Другое» и пустые категории — по правилам, истории выбора и словарю мерчантов.
             AutoCategorizationSync.run(context: modelContext)
             ExchangeRateDifferenceCategorySync.run(context: modelContext)
-            // Копии меток и доллары из поездок, попавшие в «США».
-            TransactionTagSync.run(context: modelContext)
+            // Копии меток с одинаковым именем (например, от двойного касания).
+            TransactionTagSync.removeDuplicates(context: modelContext)
         }
         .task {
             // Оставшееся «Другое» — нейросеть на устройстве, в фоне.

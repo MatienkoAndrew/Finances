@@ -2,15 +2,11 @@
 //  TransactionTagSync.swift
 //  Finances
 //
-//  Авто-применение меток к транзакциям на основе валюты.
-//
-//  Принцип: у `TransactionTag` есть опциональное поле `autoCurrencyCode`.
-//  Если оно задано — метка автоматически навешивается на любую транзакцию,
-//  совершённую в стране этой валюты. Обычно страна — это валюта мерчанта
-//  (`foreignCurrencyCode ?? currencyCode`), но её уточняет `TripCurrencyResolver`:
-//  доллары и юани, потраченные в даты поездки в Корею, получают «Южную Корею»,
-//  а не «США» или «Китай». Это работает и при создании транзакций вручную,
-//  и при импорте, и при редактировании.
+//  Метки по датам: метка с периодом стоит на всех операциях за эти дни.
+//  Был в Корее с 12 по 29 сентября — все операции за эти даты получают
+//  «Южную Корею», в какой бы валюте ни платил. Новые операции за эти дни
+//  (добавленные вручную или из выписки) получают метку сами.
+//  Если пользователь снял метку с операции вручную, она не возвращается.
 //
 
 import Foundation
@@ -18,116 +14,78 @@ import SwiftData
 
 enum TransactionTagSync {
 
-    /// Применяет все подходящие авто-метки к одной транзакции.
-    /// Не трогает теги, которые уже стоят, и не удаляет «ручные» теги.
-    /// Возвращает количество тегов, которые были добавлены.
-    @discardableResult
-    static func applyAutoTags(
-        to transaction: Transaction,
-        allTags: [TransactionTag],
-        context: ModelContext
-    ) -> Int {
-        let autoTags = autoTags(in: allTags)
-        guard !autoTags.isEmpty else { return 0 }
-        let resolver = TripCurrencyResolver(around: transaction, tags: allTags, context: context)
-        return applyAutoTags(to: transaction, autoTags: autoTags, resolver: resolver)
+    /// Дни периода метки: от начала первого дня до начала дня после последнего.
+    static func days(from start: Date?, to end: Date?, calendar: Calendar = .current) -> Range<Date>? {
+        guard let start, let end else { return nil }
+        let first = calendar.startOfDay(for: start)
+        guard let afterLast = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: end)),
+              first < afterLast else { return nil }
+        return first..<afterLast
     }
 
-    /// Применяет авто-метки сразу к пачке транзакций (например, после импорта).
-    /// Возвращает количество транзакций, которым была добавлена хотя бы одна метка.
-    @discardableResult
-    static func applyAutoTags(
-        to transactions: [Transaction],
-        context: ModelContext
-    ) -> Int {
-        let tags = (try? context.fetch(FetchDescriptor<TransactionTag>())) ?? []
-        let autoTags = autoTags(in: tags)
-        guard !autoTags.isEmpty else { return 0 }
+    /// Метку сохранили в редакторе: ставим её на все операции за период,
+    /// а с дней, которые выпали из старого периода, снимаем.
+    static func applyPeriod(
+        of tag: TransactionTag,
+        previousStart: Date?,
+        previousEnd: Date?,
+        transactions: [Transaction]
+    ) {
+        let current = days(from: tag.startDate, to: tag.endDate)
+        let previous = days(from: previousStart, to: previousEnd)
+        guard current != nil || previous != nil else { return }
 
-        let all = (try? context.fetch(FetchDescriptor<Transaction>())) ?? transactions
-        let resolver = TripCurrencyResolver(transactions: all, tags: tags)
-
-        var touched = 0
-        for tx in transactions {
-            if applyAutoTags(to: tx, autoTags: autoTags, resolver: resolver) > 0 {
-                touched += 1
-            }
-        }
-        return touched
-    }
-
-    /// Приводит метки в порядок: убирает копии меток с одинаковым именем
-    /// и переставляет авто-метки — доллары, потраченные в Корее, переезжают из «США»
-    /// в «Южную Корею». Запускается при старте и после правки метки.
-    static func run(context: ModelContext) {
-        let byAge = FetchDescriptor<TransactionTag>(sortBy: [SortDescriptor(\.createdAt)])
-        guard let tags = try? context.fetch(byAge),
-              let transactions = try? context.fetch(FetchDescriptor<Transaction>()) else { return }
-
-        // Операции ссылаются на метку по имени, поэтому лишняя копия
-        // (например, от двойного касания по подсказке) просто удаляется.
-        var names = Set<String>()
-        var kept: [TransactionTag] = []
-        var changed = false
-        for tag in tags {
-            if names.insert(tag.name).inserted {
-                kept.append(tag)
-            } else {
-                context.delete(tag)
-                changed = true
-            }
-        }
-
-        let autoTags = autoTags(in: kept)
-        if !autoTags.isEmpty {
-            let resolver = TripCurrencyResolver(transactions: transactions, tags: kept)
-            for tx in transactions where tx.kind != .transfer {
-                if let merchant = CurrencyTagSuggestions.merchantCurrency(of: tx),
-                   let location = resolver.locationCurrency(of: tx),
-                   location != merchant {
-                    // Платили долларами, но не в США: метка валюты здесь не к месту.
-                    for tag in autoTags where tag.autoCurrencyCode?.uppercased() == merchant && tx.hasTag(tag.name) {
-                        tx.removeTag(tag.name)
-                        changed = true
-                    }
+        for transaction in transactions {
+            if let current, current.contains(transaction.date) {
+                if !transaction.isTagManuallyExcluded(tag.name) {
+                    transaction.addTag(tag.name)
                 }
-                if applyAutoTags(to: tx, autoTags: autoTags, resolver: resolver) > 0 {
-                    changed = true
-                }
+            } else if let previous, previous.contains(transaction.date) {
+                transaction.removeTag(tag.name)
             }
         }
-
-        if changed {
-            try? context.save()
-        }
     }
 
-    // MARK: - Private
-
-    private static func autoTags(in tags: [TransactionTag]) -> [TransactionTag] {
-        tags.filter { $0.autoCurrencyCode?.isEmpty == false }
-    }
-
-    private static func applyAutoTags(
-        to transaction: Transaction,
-        autoTags: [TransactionTag],
-        resolver: TripCurrencyResolver
-    ) -> Int {
-        // Переводы не привязываются к стране автоматически:
-        // обычно это внутренние операции между своими счетами.
-        guard transaction.kind != .transfer,
-              let location = resolver.locationCurrency(of: transaction) else { return 0 }
-
+    /// Новая или изменённая операция получает метки, в период которых попала.
+    /// Возвращает количество добавленных меток.
+    @discardableResult
+    static func applyPeriodTags(to transaction: Transaction, allTags: [TransactionTag]) -> Int {
         var added = 0
-        for tag in autoTags where tag.autoCurrencyCode?.uppercased() == location {
-            if transaction.hasTag(tag.name) { continue }
-
-            // Пользователь уже снимал эту метку вручную — больше не навешиваем.
-            if transaction.isTagManuallyExcluded(tag.name) { continue }
-
+        for tag in allTags {
+            guard let period = days(from: tag.startDate, to: tag.endDate),
+                  period.contains(transaction.date),
+                  !transaction.hasTag(tag.name),
+                  !transaction.isTagManuallyExcluded(tag.name) else { continue }
             transaction.addTag(tag.name)
             added += 1
         }
         return added
+    }
+
+    /// То же для пачки операций (например, после импорта).
+    /// Возвращает количество операций, которым добавилась хотя бы одна метка.
+    @discardableResult
+    static func applyPeriodTags(to transactions: [Transaction], context: ModelContext) -> Int {
+        let tags = ((try? context.fetch(FetchDescriptor<TransactionTag>())) ?? [])
+            .filter { $0.startDate != nil && $0.endDate != nil }
+        guard !tags.isEmpty else { return 0 }
+        return transactions.filter { applyPeriodTags(to: $0, allTags: tags) > 0 }.count
+    }
+
+    /// Убирает копии меток с одинаковым именем (например, от двойного касания).
+    /// Операции ссылаются на метку по имени, поэтому лишняя копия просто удаляется.
+    static func removeDuplicates(context: ModelContext) {
+        let byAge = FetchDescriptor<TransactionTag>(sortBy: [SortDescriptor(\.createdAt)])
+        guard let tags = try? context.fetch(byAge) else { return }
+
+        var names = Set<String>()
+        var changed = false
+        for tag in tags where !names.insert(tag.name).inserted {
+            context.delete(tag)
+            changed = true
+        }
+        if changed {
+            try? context.save()
+        }
     }
 }

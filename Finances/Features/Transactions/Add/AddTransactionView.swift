@@ -403,9 +403,9 @@ struct AddTransactionView: View {
 
         modelContext.insert(transaction)
 
-        // Авто-применение меток по валюте мерчанта (например, HKD → «Гонконг»).
+        // Метки, в даты которых попала операция (например, поездка в Корею).
         // Делается ДО save, чтобы новые tagNames улетели в один коммит.
-        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags, context: modelContext)
+        TransactionTagSync.applyPeriodTags(to: transaction, allTags: allTags)
 
         do {
             try modelContext.save()

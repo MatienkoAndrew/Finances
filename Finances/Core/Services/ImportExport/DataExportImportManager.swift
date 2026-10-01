@@ -356,8 +356,7 @@ final class DataExportImportManager {
             }
         }
         
-        // Авто-метки применяем ко всему импорту разом, чтобы новые транзакции
-        // в иностранных валютах получили метки-страны (если такие auto-метки уже созданы).
+        // Метки по датам применяем ко всему импорту разом.
         var importedTransactionsForAutoTagging: [Transaction] = []
 
         // Импортируем транзакции
@@ -397,10 +396,9 @@ final class DataExportImportManager {
             print("Импорт: добавлено \(addedCount), пропущено дубликатов \(skippedCount)")
         }
 
-        // Прогоняем все только что импортированные транзакции через авто-теги.
-        // Если в системе есть метка с `autoCurrencyCode` (например, «Гонконг» → HKD),
-        // подходящие импортированные транзакции автоматически получат её.
-        TransactionTagSync.applyAutoTags(
+        // Импортированные операции получают метки, в даты которых попали
+        // (например, «Южная Корея» с 12 по 29 сентября).
+        TransactionTagSync.applyPeriodTags(
             to: importedTransactionsForAutoTagging,
             context: modelContext
         )
