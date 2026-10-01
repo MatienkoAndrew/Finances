@@ -9,6 +9,8 @@ final class ExpenseCategoryItem {
     var colorHex: String
     var isSystem: Bool
     var createdAt: Date
+    /// Порядок в сетке категорий (долгое нажатие → перетаскивание); nil — в конце, по алфавиту.
+    var sortOrder: Int?
 
     init(
         name: String,
@@ -24,5 +26,14 @@ final class ExpenseCategoryItem {
         self.colorHex = colorHex
         self.isSystem = isSystem
         self.createdAt = createdAt
+    }
+}
+
+extension ExpenseCategoryItem {
+    /// Категории в пользовательском порядке.
+    static func ordered(_ categories: [ExpenseCategoryItem]) -> [ExpenseCategoryItem] {
+        categories.sorted {
+            ($0.sortOrder ?? Int.max, $0.name.localizedLowercase) < ($1.sortOrder ?? Int.max, $1.name.localizedLowercase)
+        }
     }
 }

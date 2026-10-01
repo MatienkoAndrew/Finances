@@ -1,143 +1,207 @@
 import SwiftUI
 import SwiftData
 
+/// Категории сеткой, как в выборе категории. Тап — редактор, долгое нажатие —
+/// режим правки: категории покачиваются, их можно перетаскивать и удалять.
 struct CategoriesView: View {
     @Environment(\.modelContext) private var modelContext
 
-    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
-    private var categories: [ExpenseCategoryItem]
+    @Query private var categories: [ExpenseCategoryItem]
 
-    @Query(sort: \Transaction.date, order: .reverse)
-    private var transactions: [Transaction]
-
-    @Query
-    private var expenses: [Expense]
-
-    @Query
-    private var rules: [CategoryRule]
-
-    @State private var isShowingAddCategory = false
+    @State private var isEditing = false
+    @State private var editorTarget: EditorTarget?
 
     @State private var categoryToDelete: ExpenseCategoryItem?
     @State private var isShowingDeleteOptions = false
     @State private var isShowingReassignSheet = false
 
-    var body: some View {
-        List {
-            ForEach(categories) { category in
-                categoryRow(category)
+    private enum EditorTarget: Identifiable {
+        case new
+        case edit(ExpenseCategoryItem)
+
+        var id: String {
+            switch self {
+            case .new: return "new"
+            case .edit(let category): return "\(category.persistentModelID.hashValue)"
             }
         }
-        .listStyle(.plain)
+    }
+
+    private var ordered: [ExpenseCategoryItem] {
+        ExpenseCategoryItem.ordered(categories)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                Group {
+                    if isEditing {
+                        ReorderableCategoryGrid(categories: ordered) { category in
+                            requestDelete(category)
+                        }
+                    } else {
+                        grid
+                    }
+                }
+                .padding(.vertical, 18)
+                .padding(.horizontal, 10)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                Text(isEditing
+                     ? "Перетаскивай категории, чтобы поменять порядок, «−» — удалить."
+                     : "Нажми на категорию, чтобы изменить её и подкатегории. Удерживай — чтобы переставить.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("Категории")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingAddCategory = true
-                } label: {
-                    Image(systemName: "plus")
+                if isEditing {
+                    Button("Готово") {
+                        withAnimation(.snappy(duration: 0.25)) { isEditing = false }
+                    }
+                    .fontWeight(.semibold)
+                } else {
+                    Button {
+                        editorTarget = .new
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Новая категория")
                 }
             }
         }
-        .sheet(isPresented: $isShowingAddCategory) {
-            AddCategoryView()
+        .sensoryFeedback(.impact(weight: .medium), trigger: isEditing) { _, newValue in newValue }
+        .sheet(item: $editorTarget) { target in
+            switch target {
+            case .new:
+                CategoryEditorSheet(category: nil)
+            case .edit(let category):
+                CategoryEditorSheet(category: category, onDelete: requestDelete)
+            }
         }
         .confirmationDialog(
-            "Удалить категорию?",
+            "Удалить категорию «\(categoryToDelete?.name ?? "")»?",
             isPresented: $isShowingDeleteOptions,
             titleVisibility: .visible
         ) {
-            Button("Удалить и очистить категорию", role: .destructive) {
-                deleteCategoryAndClearReferences()
-            }
-
-            Button("Перенести в другую категорию") {
+            Button("Перенести операции в другую категорию") {
                 isShowingReassignSheet = true
             }
 
-            Button("Отмена", role: .cancel) {}
-        } message: {
-            if let categoryToDelete {
-                Text("Категория \"\(categoryToDelete.name)\" используется в транзакциях и правилах.")
+            Button("Удалить, операции оставить без категории", role: .destructive) {
+                deleteCategory(movingTo: nil)
+            }
+
+            Button("Отмена", role: .cancel) {
+                categoryToDelete = nil
             }
         }
         .sheet(isPresented: $isShowingReassignSheet) {
             if let categoryToDelete {
                 ReassignCategoryView(
                     categoryToDelete: categoryToDelete,
-                    categories: categories.filter { $0.name != categoryToDelete.name },
+                    categories: ordered.filter { $0.persistentModelID != categoryToDelete.persistentModelID },
                     onConfirm: { newCategoryName in
-                        reassignAndDeleteCategory(newCategoryName: newCategoryName)
+                        deleteCategory(movingTo: newCategoryName)
                     }
                 )
             }
         }
     }
 
-    @ViewBuilder
-    private func categoryRow(_ category: ExpenseCategoryItem) -> some View {
-        NavigationLink {
-            CategoryDetailView(category: category)
-        } label: {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(Color(hex: category.colorHex) ?? .gray)
-                    .frame(width: 28, height: 28)
-                    .overlay {
-                        CategoryIconView(category: category, size: 30)
+    private var grid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 14) {
+            ForEach(ordered) { category in
+                CategoryGridCell(category: category)
+                    .onTapGesture {
+                        editorTarget = .edit(category)
                     }
+                    .onLongPressGesture(minimumDuration: 0.35) {
+                        withAnimation(.snappy(duration: 0.25)) { isEditing = true }
+                    }
+            }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(category.name)
-                        .font(.headline)
+            Button {
+                editorTarget = .new
+            } label: {
+                VStack(spacing: 7) {
+                    Circle()
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 50, height: 50)
+                        .overlay {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(4)
 
-                    Text(category.isSystem ? "Системная" : "Пользовательская")
+                    Text("Новая")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity)
             }
-            .padding(.vertical, 4)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                categoryToDelete = category
-                isShowingDeleteOptions = true
-            } label: {
-                Label("Удалить", systemImage: "trash")
-            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func deleteCategoryAndClearReferences() {
-        guard let categoryToDelete else { return }
+    // MARK: - Delete
 
-        TransactionCategorySync.clearCategoryReferences(
-            named: categoryToDelete.name,
-            transactions: transactions,
-            legacyExpenses: expenses,
-            rules: rules
-        )
-
-        modelContext.delete(categoryToDelete)
-        try? modelContext.save()
-        self.categoryToDelete = nil
+    private func requestDelete(_ category: ExpenseCategoryItem) {
+        categoryToDelete = category
+        isShowingDeleteOptions = true
     }
 
-    private func reassignAndDeleteCategory(newCategoryName: String) {
-        guard let categoryToDelete else { return }
+    /// Удаляет категорию и её подкатегории; операции и правила переносит в `newCategoryName`
+    /// (подкатегория сбрасывается — у другой категории она своя) или оставляет без категории.
+    private func deleteCategory(movingTo newCategoryName: String?) {
+        guard let category = categoryToDelete else { return }
+        let name = category.name
 
-        TransactionCategorySync.reassignCategoryReferences(
-            from: categoryToDelete.name,
-            to: newCategoryName,
-            transactions: transactions,
-            legacyExpenses: expenses,
-            rules: rules
-        )
+        let transactions = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+        let expenses = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? []
+        let rules = (try? modelContext.fetch(FetchDescriptor<CategoryRule>())) ?? []
 
-        modelContext.delete(categoryToDelete)
+        for transaction in transactions where transaction.categoryName == name {
+            transaction.subcategoryName = nil
+        }
+        for rule in rules where rule.categoryName == name {
+            rule.subcategoryName = nil
+        }
+
+        if let newCategoryName {
+            TransactionCategorySync.reassignCategoryReferences(
+                from: name,
+                to: newCategoryName,
+                transactions: transactions,
+                legacyExpenses: expenses,
+                rules: rules
+            )
+        } else {
+            TransactionCategorySync.clearCategoryReferences(
+                named: name,
+                transactions: transactions,
+                legacyExpenses: expenses,
+                rules: rules
+            )
+        }
+
+        let subcategories = (try? modelContext.fetch(FetchDescriptor<ExpenseSubcategoryItem>())) ?? []
+        for item in subcategories where CategoryNameNormalizer.normalize(item.categoryName) == CategoryNameNormalizer.normalize(name) {
+            modelContext.delete(item)
+        }
+
+        modelContext.delete(category)
         try? modelContext.save()
-        self.categoryToDelete = nil
+        SubcategoryRegistry.shared.reload(context: modelContext)
+        categoryToDelete = nil
     }
 }

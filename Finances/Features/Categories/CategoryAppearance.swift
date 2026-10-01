@@ -33,7 +33,32 @@ enum CategoryAppearance {
         "pawprint.fill",
         "phone.fill",
         "wifi",
-        "tram.fill"
+        "tram.fill",
+        "bus.fill",
+        "bicycle",
+        "scooter",
+        "ferry.fill",
+        "fuelpump.fill",
+        "theatermasks.fill",
+        "party.popper.fill",
+        "music.note",
+        "dumbbell.fill",
+        "heart.fill",
+        "pills.fill",
+        "tshirt.fill",
+        "laptopcomputer",
+        "graduationcap.fill",
+        "briefcase.fill",
+        "heart.circle.fill",
+        "sparkles",
+        "leaf.fill",
+        "bolt.fill",
+        "globe",
+        "camera.fill",
+        "wrench.and.screwdriver.fill",
+        "person.2.fill",
+        "shield.fill",
+        "drop.fill"
     ]
 
     static let colorOptions: [String] = [
@@ -48,6 +73,8 @@ enum CategoryAppearance {
         "#FF2D55",
         "#8E8E93",
         "#A2845E",
-        "#5AC8FA"
+        "#5AC8FA",
+        "#00C7BE",
+        "#FF6F61"
     ]
 }
