@@ -30,6 +30,8 @@ struct AnalyticsView: View {
     @State private var selectedCategoryName: String?
     @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
+    /// Категории с подкатегориями раскрыты сразу, как в Alipay; здесь — свёрнутые вручную.
+    @State private var collapsedCategories: Set<String> = []
 
     @State private var pagingSessionStartAnchorDate: Date?
     @State private var didInitializeAnchor = false
@@ -774,52 +776,148 @@ struct AnalyticsView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(snapshot.categoryTotals) { item in
-                        NavigationLink {
-                            TransactionListByCategoryView(
-                                categoryTitle: item.category,
-                                scope: currentAnalyticsScope
-                            )
-                        } label: {
-                            HStack {
-                                HStack(spacing: 8) {
-                                    if let categoryItem = categoryItem(for: item.category) {
-                                        Circle()
-                                            .fill(Color(hex: categoryItem.colorHex) ?? .gray)
-                                            .frame(width: 24, height: 24)
-                                            .overlay {
-                                                Image(systemName: categoryItem.iconName)
-                                                    .font(.system(size: 10, weight: .bold))
-                                                    .foregroundStyle(.white)
-                                            }
-                                    }
-
-                                    Text(item.category)
-
-                                    Text(categoryPercentLabel(item.total))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(formattedRubAmount(item.total))
-                                        .fontWeight(.semibold)
-
-                                    Text("(\(item.count) всего)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding()
-                            .background(Color.gray.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
+                        categoryCard(item)
                     }
                 }
             }
         }
+    }
+
+    /// Карточка категории. Категория с подкатегориями показывает плитки подкатегорий
+    /// (как в Alipay) и сворачивается по тапу, остальные сразу ведут к операциям.
+    private func categoryCard(_ item: AnalyticsCategoryTotal) -> some View {
+        let isExpanded = !collapsedCategories.contains(item.category)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            if item.subcategories.isEmpty {
+                NavigationLink {
+                    TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
+                } label: {
+                    categoryHeader(item, accessory: "chevron.right")
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) {
+                        if isExpanded {
+                            collapsedCategories.insert(item.category)
+                        } else {
+                            collapsedCategories.remove(item.category)
+                        }
+                    }
+                } label: {
+                    categoryHeader(item, accessory: isExpanded ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+
+                if isExpanded {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
+                        ForEach(item.subcategories) { subcategory in
+                            NavigationLink {
+                                TransactionListByCategoryView(
+                                    categoryTitle: item.category,
+                                    subcategoryTitle: subcategory.name,
+                                    scope: currentAnalyticsScope
+                                )
+                            } label: {
+                                subcategoryTile(subcategory, in: item)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    NavigationLink {
+                        TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Все операции категории")
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func categoryHeader(_ item: AnalyticsCategoryTotal, accessory: String) -> some View {
+        HStack {
+            HStack(spacing: 8) {
+                if let categoryItem = categoryItem(for: item.category) {
+                    Circle()
+                        .fill(Color(hex: categoryItem.colorHex) ?? .gray)
+                        .frame(width: 24, height: 24)
+                        .overlay {
+                            Image(systemName: categoryItem.iconName)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                }
+
+                Text(item.category)
+
+                Text(categoryPercentLabel(item.total))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formattedRubAmount(item.total))
+                    .fontWeight(.semibold)
+
+                Text("(\(item.count) всего)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Image(systemName: accessory)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func subcategoryTile(_ subcategory: AnalyticsSubcategoryTotal, in category: AnalyticsCategoryTotal) -> some View {
+        let color = categoryItem(for: category.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
+        let share = category.total > 0 ? subcategory.total / category.total : 0
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(subcategory.emoji ?? "•")
+                .font(.title2)
+
+            HStack(spacing: 2) {
+                Text(subcategory.name)
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+
+            Text(formattedRubAmount(subcategory.total))
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text("\(formattedPercent(share)) · \(subcategory.count) шт.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
     }
 
     private var merchantSection: some View {

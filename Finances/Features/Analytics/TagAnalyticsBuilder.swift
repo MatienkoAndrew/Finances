@@ -151,8 +151,7 @@ enum TagAnalyticsBuilder {
         var totalIncomeRub = 0.0
         var expenseCount = 0
         var incomeCount = 0
-        var categoryMap: [String: Double] = [:]
-        var categoryCountMap: [String: Int] = [:]
+        var categoryTotals = CategoryTotalsAccumulator()
         var merchantMap: [String: Double] = [:]
         var merchantByCategory: [String: [String: Double]] = [:]
 
@@ -178,9 +177,8 @@ enum TagAnalyticsBuilder {
                     chartTotals[idx] += rub
                 }
 
-                let category = transaction.categoryName ?? "Без категории"
-                categoryMap[category, default: 0] += rub
-                categoryCountMap[category, default: 0] += 1
+                categoryTotals.addExpense(transaction, rub: rub)
+                let category = CategoryTotalsAccumulator.categoryName(of: transaction)
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] += rub
@@ -197,8 +195,8 @@ enum TagAnalyticsBuilder {
                     chartTotals[idx] -= rub
                 }
 
-                let category = transaction.categoryName ?? "Без категории"
-                categoryMap[category, default: 0] -= rub
+                categoryTotals.addRefund(transaction, rub: rub)
+                let category = CategoryTotalsAccumulator.categoryName(of: transaction)
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] -= rub
@@ -228,9 +226,6 @@ enum TagAnalyticsBuilder {
             AnalyticsTimeTotal(id: $0.id, date: $0.date, title: $0.title, total: $0.total)
         }
 
-        let categoryTotals = categoryMap
-            .map { AnalyticsCategoryTotal(category: $0.key, total: $0.value, count: categoryCountMap[$0.key] ?? 0) }
-            .sorted { $0.total > $1.total }
 
         let merchantTotals = Array(
             merchantMap
@@ -258,7 +253,7 @@ enum TagAnalyticsBuilder {
             totalIncomeRub: totalIncomeRub,
             expenseCount: expenseCount,
             incomeCount: incomeCount,
-            categoryTotals: categoryTotals,
+            categoryTotals: categoryTotals.result(),
             merchantTotals: merchantTotals,
             topMerchantByCategory: topMerchantByCategory,
             effectiveBinCount: max(bins.count, 1)

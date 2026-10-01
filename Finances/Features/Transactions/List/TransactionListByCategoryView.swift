@@ -11,6 +11,8 @@ import SwiftData
 
 struct TransactionListByCategoryView: View {
     let categoryTitle: String
+    /// Только эта подкатегория (плитка в аналитике); nil — вся категория.
+    var subcategoryTitle: String? = nil
     let scope: AnalyticsScope
 
     @Query(sort: \Transaction.date, order: .reverse)
@@ -25,7 +27,8 @@ struct TransactionListByCategoryView: View {
         transactions.filter {
             !hidden.contains($0.persistentModelID) &&
             $0.countsAsExpenseInAnalytics &&
-            ($0.categoryName ?? "Без категории") == categoryTitle &&
+            CategoryTotalsAccumulator.categoryName(of: $0) == categoryTitle &&
+            (subcategoryTitle == nil || CategoryTotalsAccumulator.subcategoryName(of: $0) == subcategoryTitle) &&
             scope.matches($0)
         }
     }
@@ -48,7 +51,7 @@ struct TransactionListByCategoryView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle(categoryTitle)
+        .navigationTitle(subcategoryTitle.map { "\(categoryTitle) · \($0)" } ?? categoryTitle)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

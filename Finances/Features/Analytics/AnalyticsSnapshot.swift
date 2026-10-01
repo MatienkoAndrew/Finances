@@ -42,6 +42,16 @@ struct AnalyticsCategoryTotal: Identifiable {
     let category: String
     let total: Double
     let count: Int
+    /// Разбивка по подкатегориям; пустая, если подкатегорий у категории нет или их не выбирали.
+    var subcategories: [AnalyticsSubcategoryTotal] = []
+}
+
+struct AnalyticsSubcategoryTotal: Identifiable {
+    var id: String { name }
+    let name: String
+    let emoji: String?
+    let total: Double
+    let count: Int
 }
 
 struct AnalyticsMerchantTotal: Identifiable {
@@ -115,8 +125,7 @@ enum AnalyticsSnapshotBuilder {
         var expenseCount = 0
         var incomeCount = 0
 
-        var categoryMap: [String: Double] = [:]
-        var categoryCountMap: [String: Int] = [:]
+        var categoryTotals = CategoryTotalsAccumulator()
         var merchantMap: [String: Double] = [:]
         var merchantByCategory: [String: [String: Double]] = [:]
 
@@ -140,9 +149,8 @@ enum AnalyticsSnapshotBuilder {
                     chartTotals[binIndex] += rub
                 }
 
-                let category = transaction.categoryName ?? "Без категории"
-                categoryMap[category, default: 0] += rub
-                categoryCountMap[category, default: 0] += 1
+                categoryTotals.addExpense(transaction, rub: rub)
+                let category = CategoryTotalsAccumulator.categoryName(of: transaction)
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] += rub
@@ -157,8 +165,8 @@ enum AnalyticsSnapshotBuilder {
                     chartTotals[binIndex] -= rub
                 }
 
-                let category = transaction.categoryName ?? "Без категории"
-                categoryMap[category, default: 0] -= rub
+                categoryTotals.addRefund(transaction, rub: rub)
+                let category = CategoryTotalsAccumulator.categoryName(of: transaction)
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] -= rub
@@ -238,9 +246,6 @@ enum AnalyticsSnapshotBuilder {
             }
         }
 
-        let categoryTotals = categoryMap
-            .map { AnalyticsCategoryTotal(category: $0.key, total: $0.value, count: categoryCountMap[$0.key] ?? 0) }
-            .sorted { $0.total > $1.total }
 
         let merchantTotals = merchantMap
             .map { AnalyticsMerchantTotal(merchant: $0.key, total: $0.value) }
@@ -260,7 +265,7 @@ enum AnalyticsSnapshotBuilder {
             totalIncomeRub: totalIncomeRub,
             expenseCount: expenseCount,
             incomeCount: incomeCount,
-            categoryTotals: categoryTotals,
+            categoryTotals: categoryTotals.result(),
             merchantTotals: merchantTotals,
             topMerchantByCategory: topMerchantByCategory,
             effectiveBinCount: effectiveBinCount
