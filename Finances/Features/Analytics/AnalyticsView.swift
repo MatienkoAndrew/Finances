@@ -42,6 +42,16 @@ struct AnalyticsView: View {
 
     @State private var didInitializeAnchor = false
 
+    /// Аналитика одной метки — открыта из её экрана: без ленты меток и
+    /// переключателя режимов, внутри уже существующей навигации.
+    private let focusedTag: TransactionTag?
+
+    init(focusedTag: TransactionTag? = nil) {
+        self.focusedTag = focusedTag
+        _selectedMode = State(initialValue: focusedTag == nil ? .time : .tags)
+        _selectedTag = State(initialValue: focusedTag)
+    }
+
     private var settings: AppSettings? {
         settingsList.first
     }
@@ -180,59 +190,72 @@ struct AnalyticsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    if selectedMode == .time {
-                        periodNavigation
-                        periodSummaryCards
-                        breakdownSections
-                    } else {
-                        // В режиме меток период задан самой меткой, поэтому
-                        // W/M/Y и стрелки скрыты: сверху лента меток и карточка
-                        // выбранной метки с итогами.
-                        tagSelector
-                        if let tag = selectedTag {
-                            tagHeroCard(tag)
-                            breakdownSections
-                        }
-                    }
-                }
-                .padding()
+        if focusedTag != nil {
+            content
+                .navigationTitle("Аналитика")
+        } else {
+            NavigationStack {
+                content
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    if selectedMode == .time {
-                        scaleTabs
+        }
+    }
+
+    private var content: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                if selectedMode == .time {
+                    periodNavigation
+                    periodSummaryCards
+                    breakdownSections
+                } else {
+                    // В режиме меток период задан самой меткой, поэтому
+                    // W/M/Y и стрелки скрыты: сверху лента меток и карточка
+                    // выбранной метки с итогами.
+                    if focusedTag == nil {
+                        tagSelector
+                    }
+                    if let tag = selectedTag {
+                        tagHeroCard(tag)
+                        breakdownSections
                     }
                 }
+            }
+            .padding()
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if selectedMode == .time {
+                ToolbarItem(placement: .principal) {
+                    scaleTabs
+                }
+            }
+            if focusedTag == nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     tagToggleButton
                 }
             }
-            .background {
-                NavigationLink(
-                    isActive: Binding(
-                        get: { categoryNavigationTarget != nil },
-                        set: { if !$0 { categoryNavigationTarget = nil } }
-                    )
-                ) {
-                    Group {
-                        if let categoryNavigationTarget {
-                            TransactionListByCategoryView(
-                                categoryTitle: categoryNavigationTarget,
-                                scope: currentAnalyticsScope
-                            )
-                        } else {
-                            EmptyView()
-                        }
+        }
+        .background {
+            NavigationLink(
+                isActive: Binding(
+                    get: { categoryNavigationTarget != nil },
+                    set: { if !$0 { categoryNavigationTarget = nil } }
+                )
+            ) {
+                Group {
+                    if let categoryNavigationTarget {
+                        TransactionListByCategoryView(
+                            categoryTitle: categoryNavigationTarget,
+                            scope: currentAnalyticsScope
+                        )
+                    } else {
+                        EmptyView()
                     }
-                } label: {
-                    EmptyView()
                 }
-                .hidden()
+            } label: {
+                EmptyView()
             }
+            .hidden()
         }
         .onAppear {
             guard !didInitializeAnchor else { return }

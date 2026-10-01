@@ -3,8 +3,8 @@
 //  Finances
 //
 //  Список всех транзакций, помеченных конкретной меткой.
-//  Поддерживает режим редактирования: выделить несколько транзакций
-//  и одной кнопкой убрать их из метки.
+//  Выбор как в Telegram: зажми операцию — она выделится, дальше касанием
+//  выбираешь другие и одной кнопкой убираешь их из метки.
 //
 
 import SwiftUI
@@ -18,12 +18,14 @@ struct TagTransactionsView: View {
     @Query(sort: \Transaction.date, order: .reverse)
     private var transactions: [Transaction]
 
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelecting = false
     @State private var selection: Set<PersistentIdentifier> = []
     @Query private var settings: [AppSettings]
     @Query private var trackedRates: [TrackedExchangeRate]
     @State private var isEditingTag = false
     @State private var isConfirmingDelete = false
+    @State private var isShowingAnalytics = false
+    @State private var openedTransaction: Transaction?
     @Environment(\.dismiss) private var dismiss
 
     private var taggedTransactions: [Transaction] {
@@ -31,7 +33,7 @@ struct TagTransactionsView: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
+        List {
             if taggedTransactions.isEmpty {
                 ContentUnavailableView(
                     "Нет транзакций",
@@ -39,51 +41,54 @@ struct TagTransactionsView: View {
                     description: Text("На этой метке пока нет ни одной транзакции")
                 )
             } else {
-                if !editMode.isEditing {
+                if !isSelecting {
                     summaryCard
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
 
                 ForEach(taggedTransactions) { transaction in
-                    rowContent(for: transaction)
-                        .tag(transaction.persistentModelID)
+                    row(for: transaction)
                         .listRowSeparator(.hidden)
+                        .listRowBackground(
+                            selection.contains(transaction.persistentModelID)
+                                ? Color.accentColor.opacity(0.12)
+                                : Color.clear
+                        )
                 }
             }
         }
         .listStyle(.plain)
-        .environment(\.editMode, $editMode)
-        .navigationTitle(tagTitle)
+        .navigationTitle(isSelecting ? "Выбрано: \(selection.count)" : tag.name)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isSelecting)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if !editMode.isEditing {
+            if isSelecting {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Отмена", action: endSelection)
+                }
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isEditingTag = true
                     } label: {
-                        Image(systemName: "pencil")
+                        Image(systemName: "gearshape")
                     }
-                    .accessibilityLabel("Изменить метку")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(editMode.isEditing ? "Готово" : "Выбрать") {
-                    withAnimation {
-                        if editMode.isEditing {
-                            editMode = .inactive
-                            selection.removeAll()
-                        } else {
-                            editMode = .active
-                        }
-                    }
+                    .accessibilityLabel("Настройки метки")
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if editMode.isEditing {
+            if isSelecting {
                 bottomActionBar
             }
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .navigationDestination(item: $openedTransaction) { transaction in
+            TransactionDetailView(transaction: transaction)
+        }
+        .navigationDestination(isPresented: $isShowingAnalytics) {
+            AnalyticsView(focusedTag: tag)
         }
         .sheet(isPresented: $isEditingTag) {
             TagEditorSheet(tag: tag) { _ in isConfirmingDelete = true }
@@ -100,7 +105,7 @@ struct TagTransactionsView: View {
         }
     }
 
-    /// Итог по метке: сколько операций и сколько потрачено.
+    /// Итог по метке: сколько потрачено, сколько операций, период — и вход в аналитику.
     private var summaryCard: some View {
         let stats = TagStats.make(tags: [tag], transactions: taggedTransactions, settings: settings.first, trackedRates: trackedRates)[tag.persistentModelID] ?? .empty
         let color = tag.colorHex.flatMap { Color(hex: $0) } ?? .accentColor
@@ -112,11 +117,37 @@ struct TagTransactionsView: View {
                 Text(TagFormatting.rub(stats.spentRub))
                     .font(.title2.weight(.bold))
                     .monospacedDigit()
-                Text([TagFormatting.operations(stats.count), TagFormatting.period(of: tag)].compactMap { $0 }.joined(separator: " · "))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(TagFormatting.operations(stats.count))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                if let period = TagFormatting.period(of: tag) {
+                    Text(period)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 8)
+
+            Button {
+                isShowingAnalytics = true
+            } label: {
+                Text("Аналитика")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        LinearGradient(colors: [Color.blue.opacity(0.75), Color.blue], startPoint: .leading, endPoint: .trailing),
+                        in: Capsule()
+                    )
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
         }
         .padding(16)
         .background {
@@ -134,24 +165,76 @@ struct TagTransactionsView: View {
         dismiss()
     }
 
-    // В режиме редактирования отрубаем NavigationLink, чтобы тап выделял,
-    // а не открывал детали (так работает стандартный list-edit-mode iOS).
-    @ViewBuilder
-    private func rowContent(for transaction: Transaction) -> some View {
-        if editMode.isEditing {
-            TransactionRowView(transaction: transaction)
-        } else {
-            NavigationLink {
-                TransactionDetailView(transaction: transaction)
-            } label: {
-                TransactionRowView(transaction: transaction)
+    // MARK: - Rows
+
+    /// Касание открывает операцию, а в режиме выбора — отмечает её.
+    /// Долгое нажатие включает режим выбора с этой операцией.
+    private func row(for transaction: Transaction) -> some View {
+        let id = transaction.persistentModelID
+        let isSelected = selection.contains(id)
+
+        return HStack(spacing: 12) {
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            .buttonStyle(.plain)
+
+            // В режиме выбора плашка категории не открывается — касание отмечает операцию.
+            TransactionRowView(transaction: transaction)
+                .allowsHitTesting(!isSelecting)
+
+            if !isSelecting {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isSelecting {
+                toggle(id)
+            } else {
+                openedTransaction = transaction
+            }
+        }
+        .onLongPressGesture(minimumDuration: 0.35) {
+            guard !isSelecting else { return toggle(id) }
+            withAnimation(.snappy(duration: 0.25)) {
+                isSelecting = true
+                selection = [id]
+            }
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: isSelecting ? (isSelected ? "Снять выбор" : "Выбрать") : "Выбрать несколько") {
+            if isSelecting {
+                toggle(id)
+            } else {
+                withAnimation { isSelecting = true; selection = [id] }
+            }
         }
     }
 
-    private var tagTitle: String {
-        tag.name
+    /// Сняли выбор с последней операции — режим выбора закрывается, как в Telegram.
+    private func toggle(_ id: PersistentIdentifier) {
+        withAnimation(.snappy(duration: 0.2)) {
+            if selection.contains(id) {
+                selection.remove(id)
+            } else {
+                selection.insert(id)
+            }
+            if selection.isEmpty {
+                isSelecting = false
+            }
+        }
+    }
+
+    private func endSelection() {
+        withAnimation(.snappy(duration: 0.25)) {
+            isSelecting = false
+            selection.removeAll()
+        }
     }
 
     private var bottomActionBar: some View {
@@ -182,22 +265,11 @@ struct TagTransactionsView: View {
 
         let selectedIDs = selection
         for tx in taggedTransactions where selectedIDs.contains(tx.persistentModelID) {
-            // manual: true — это явное действие пользователя.
-            // Авто-теггер по валюте больше не вернёт эту метку на эти транзакции.
+            // manual: true — это явное действие пользователя:
+            // метка по датам больше не вернётся на эти операции.
             tx.removeTag(tag.name, manual: true)
         }
         try? modelContext.save()
-
-        withAnimation {
-            selection.removeAll()
-            // После удаления полезнее остаться в режиме редактирования,
-            // чтобы можно было сразу отметить ещё несколько транзакций.
-        }
-    }
-}
-
-private extension EditMode {
-    var isEditing: Bool {
-        self == .active || self == .transient
+        endSelection()
     }
 }
