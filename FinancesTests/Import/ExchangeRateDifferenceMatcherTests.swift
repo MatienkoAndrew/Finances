@@ -38,7 +38,7 @@ struct ExchangeRateDifferenceMatcherTests {
     @Test("Не подходят: покупка после разницы, старше 30 дней, разница больше 3% суммы, другой мерчант")
     func rejectsImplausible() {
         let items = [
-            purchase(20, 1000),          // позже разницы
+            purchase(41, 1000),          // позже разницы
             purchase(1, 1000),           // 39 дней назад
             purchase(38, 100),           // разница 5 > 3% от 100
             purchase(38, 1000, "CU"),    // другой мерчант
