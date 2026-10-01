@@ -38,6 +38,14 @@ enum TagBinGranularity: CaseIterable {
         }
     }
 
+    var averageTitle: String {
+        switch self {
+        case .daily: return "СРЕДНЕЕ В ДЕНЬ"
+        case .weekly: return "СРЕДНЕЕ В НЕДЕЛЮ"
+        case .monthly: return "СРЕДНЕЕ В МЕСЯЦ"
+        }
+    }
+
     var selectedPointTitle: String {
         switch self {
         case .daily: return "ДЕНЬ"

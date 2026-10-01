@@ -28,10 +28,11 @@ struct AnalyticsView: View {
     /// Интервал графика, выбранный вручную; nil — автоматический по длине метки.
     @State private var tagGranularityOverride: TagBinGranularity?
 
-    @State private var selectedChartPointID: String?
     @State private var selectedCategoryName: String?
     @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
+    /// Свёрнут ли раздел «По дням / неделям / месяцам» (запоминается).
+    @AppStorage("analytics.dailySectionCollapsed") private var isDailySectionCollapsed = false
     /// Вид графика по категориям (выбор запоминается между запусками).
     @AppStorage("analytics.categoryChartStyle") private var categoryChartStyle: CategoryChartStyle = .bars
     /// Значение под пальцем на кольце категорий (накопленная сумма).
@@ -39,7 +40,6 @@ struct AnalyticsView: View {
     /// Категории с подкатегориями раскрыты сразу, как в Alipay; здесь — свёрнутые вручную.
     @State private var collapsedCategories: Set<String> = []
 
-    @State private var pagingSessionStartAnchorDate: Date?
     @State private var didInitializeAnchor = false
 
     private var settings: AppSettings? {
@@ -172,10 +172,6 @@ struct AnalyticsView: View {
         }
     }
 
-    private var selectedChartPoint: AnalyticsChartPoint? {
-        snapshot.chartPoints.first { $0.id == selectedChartPointID }
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -183,7 +179,6 @@ struct AnalyticsView: View {
                     if selectedMode == .time {
                         periodNavigation
                         periodSummaryCards
-                        topSummarySection
                         breakdownSections
                     } else {
                         // В режиме меток период задан самой меткой, поэтому
@@ -238,8 +233,6 @@ struct AnalyticsView: View {
             pageAnchorDate = latestAllowedAnchorDate
         }
         .onChange(of: selectedScale) { _, _ in
-            pagingSessionStartAnchorDate = nil
-            selectedChartPointID = nil
             selectedCategoryName = nil
             pageAnchorDate = snappedAnchorDate(
                 min(pageAnchorDate, latestAllowedAnchorDate),
@@ -247,7 +240,6 @@ struct AnalyticsView: View {
             )
         }
         .onChange(of: selectedMode) { _, newMode in
-            selectedChartPointID = nil
             selectedCategoryName = nil
             
             // При переключении в режим Tags, автоматически выбираем первую метку
@@ -262,7 +254,6 @@ struct AnalyticsView: View {
             }
         }
         .onChange(of: selectedTag) { _, newTag in
-            selectedChartPointID = nil
             selectedCategoryName = nil
             tagGranularityOverride = nil
             
@@ -398,10 +389,8 @@ struct AnalyticsView: View {
     }
 
     /// Карточка выбранной метки: иконка, период, сумма и ключевые цифры.
-    /// При выборе бара на графике сумма переключается на этот бар.
     private func tagHeroCard(_ tag: TransactionTag) -> some View {
         let color = tagColor(tag)
-        let selected = selectedChartPoint
         let days = tagPeriodDays
         let perDay = days > 0 ? snapshot.totalExpensesRub / Double(days) : 0
 
@@ -434,13 +423,11 @@ struct AnalyticsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(selected.map { "\(tagBinGranularity?.selectedPointTitle ?? "ПЕРИОД") · \($0.title)" } ?? "ПОТРАЧЕНО ВСЕГО")
+                Text("ПОТРАЧЕНО ВСЕГО")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .contentTransition(.opacity)
 
-                Text(formattedRubAmount(selected?.total ?? snapshot.totalExpensesRub))
+                Text(formattedRubAmount(snapshot.totalExpensesRub))
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -489,7 +476,6 @@ struct AnalyticsView: View {
                         ))
                 }
         }
-        .animation(.snappy(duration: 0.25), value: selectedChartPointID)
     }
 
     /// Переключатель интервала графика метки: Дни / Недели / Месяцы.
@@ -503,7 +489,6 @@ struct AnalyticsView: View {
                     get: { current },
                     set: { newValue in
                         withAnimation(.snappy(duration: 0.25)) {
-                            selectedChartPointID = nil
                             tagGranularityOverride = newValue
                         }
                     }
@@ -621,51 +606,6 @@ struct AnalyticsView: View {
         .frame(height: 44)
     }
 
-    private var topSummarySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(topSummaryTitle)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Text(
-                formattedRubAmount(topSummaryAmount)
-            )
-            .font(.system(size: 24, weight: .bold))
-            .minimumScaleFactor(0.7)
-            .lineLimit(1)
-            .contentTransition(.numericText())
-
-            Text(topSummarySubtitle)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.secondary)
-                .contentTransition(.opacity)
-        }
-    }
-    
-    // Верхняя сводка — только для режима времени; у меток её роль играет карточка метки.
-    private var topSummaryAmount: Double {
-        // Если бар выбран — показываем его сумму.
-        if let selected = selectedChartPoint {
-            return selected.total
-        }
-        return snapshot.averageExpensePerBin
-    }
-
-    private var topSummaryTitle: String {
-        if selectedChartPoint != nil {
-            return selectedScale.selectedPointTitle
-        }
-        return selectedScale.averageTitle
-    }
-
-    private var topSummarySubtitle: String {
-        if let selected = selectedChartPoint {
-            // При выделенном баре показываем его название (день/неделю/месяц).
-            return selected.title
-        }
-        return snapshot.page.displayTitle
-    }
-
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("График расходов")
@@ -675,27 +615,53 @@ struct AnalyticsView: View {
                 tagGranularityPicker
             }
 
-            if snapshot.chartPoints.isEmpty {
+            if selectedMode == .time {
+                // Вся история одной лентой: листается пальцем, как в «Здоровье»,
+                // и доводится до границы недели / месяца / года.
+                let timeline = ExpenseTimelineData.build(
+                    transactions: transactions,
+                    scale: selectedScale,
+                    settings: settings,
+                    trackedRates: trackedRates
+                )
+                ExpenseBarChart(
+                    bars: timeline.bars,
+                    domain: timeline.domain,
+                    averageTitle: selectedScale.averageTitle,
+                    timeline: ExpenseChartTimeline(
+                        scale: selectedScale,
+                        pageStart: snapshot.page.startDate,
+                        onPageSettled: settlePage(at:)
+                    )
+                )
+                .id(selectedScale)
+                .padding()
+                .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+            } else if let first = snapshot.chartPoints.first {
+                let points = snapshot.chartPoints
+                let pageEnd = snapshot.page.endDateExclusive
+                let bars = points.enumerated().map { index, point in
+                    ExpenseBar(
+                        start: point.date,
+                        end: index + 1 < points.count ? points[index + 1].date : pageEnd,
+                        total: point.total,
+                        title: point.title
+                    )
+                }
+                ExpenseBarChart(
+                    bars: bars,
+                    domain: first.date..<pageEnd,
+                    averageTitle: tagBinGranularity?.averageTitle ?? "СРЕДНЕЕ",
+                    rangeTitle: snapshot.page.displayTitle,
+                    axisLabels: points.map(\.axisLabel),
+                    tint: selectedTag.map(tagColor) ?? .red
+                )
+                .id("\(selectedTag?.name ?? "")-\(tagBinGranularity.map { "\($0)" } ?? "")")
+                .padding()
+                .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+            } else {
                 Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
-            } else {
-                InteractiveBarChartView(
-                    points: snapshot.chartPoints,
-                    selectedPointID: $selectedChartPointID
-                ) { point in
-                    if point != nil {
-                        selectedCategoryName = nil
-                    }
-                } onPeriodDragBegan: {
-                    beginInteractivePaging()
-                } onPeriodDragChanged: { translation in
-                    updateInteractivePaging(with: translation)
-                } onPeriodSwipeEnded: { swipeInfo in
-                    finishInteractivePaging(with: swipeInfo)
-                }
-                .padding()
-                .background(Color.gray.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
             }
         }
     }
@@ -725,10 +691,39 @@ struct AnalyticsView: View {
 
     private var dailySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(dailySectionTitle)
-                .font(.title3.bold())
+            Button {
+                withAnimation(.snappy(duration: 0.25)) {
+                    isDailySectionCollapsed.toggle()
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(dailySectionTitle)
+                        .font(.title3.bold())
+                        .foregroundStyle(.primary)
 
-            if snapshot.chartPoints.isEmpty {
+                    Spacer()
+
+                    // В свёрнутом виде — самый дорогой день/неделя/месяц.
+                    if isDailySectionCollapsed, let peak = snapshot.peakChartPoint, peak.total > 0 {
+                        Text("макс. \(TagFormatting.rub(peak.total))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isDailySectionCollapsed ? -90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isDailySectionCollapsed ? "Развернуть" : "Свернуть")
+
+            if isDailySectionCollapsed {
+                EmptyView()
+            } else if snapshot.chartPoints.isEmpty {
                 Text("Нет расходов для выбранного периода")
                     .foregroundStyle(.secondary)
             } else if selectedMode == .time && selectedScale == .week {
@@ -1459,161 +1454,18 @@ struct AnalyticsView: View {
         }
     }
 
-    // MARK: - Interactive paging
-
-    private struct PagingConfiguration {
-        let livePixelsPerUnit: CGFloat
-        let endPixelsPerUnit: CGFloat
-        let unitSeconds: TimeInterval
-        let minimumEndUnits: Double
-        let maximumEndUnits: Double
-        let fullPeriodUnits: Double
-    }
-
-    private var pagingConfiguration: PagingConfiguration {
-        switch selectedScale {
-        case .week:
-            return PagingConfiguration(
-                livePixelsPerUnit: 82,
-                endPixelsPerUnit: 72,
-                unitSeconds: 24 * 60 * 60,
-                minimumEndUnits: 1,
-                maximumEndUnits: 7,
-                fullPeriodUnits: 7
-            )
-
-        case .month:
-            return PagingConfiguration(
-                livePixelsPerUnit: 40,
-                endPixelsPerUnit: 34,
-                unitSeconds: 24 * 60 * 60,
-                minimumEndUnits: 2,
-                maximumEndUnits: 31,
-                fullPeriodUnits: 30
-            )
-
-        case .year:
-            return PagingConfiguration(
-                livePixelsPerUnit: 115,
-                endPixelsPerUnit: 100,
-                unitSeconds: 30 * 24 * 60 * 60,
-                minimumEndUnits: 1,
-                maximumEndUnits: 12,
-                fullPeriodUnits: 12
-            )
-        }
-    }
+    // MARK: - Chart paging
 
     private var latestAllowedAnchorDate: Date {
         AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now).startDate
     }
 
-    private func beginInteractivePaging() {
-        guard pagingSessionStartAnchorDate == nil else { return }
-
-        pagingSessionStartAnchorDate = pageAnchorDate
-        selectedChartPointID = nil
+    /// График долистали до другой страницы — переключаем на неё весь экран.
+    private func settlePage(at pageStart: Date) {
+        let target = snappedAnchorDate(clampAnchorDate(pageStart), scale: selectedScale)
+        guard !snapshot.page.contains(target) else { return }
         selectedCategoryName = nil
-    }
-
-    private func updateInteractivePaging(with translation: CGFloat) {
-        guard let startAnchor = pagingSessionStartAnchorDate else { return }
-
-        let config = pagingConfiguration
-        let rawUnits = -Double(translation / config.livePixelsPerUnit)
-        let limitedUnits = min(max(rawUnits, -config.maximumEndUnits), config.maximumEndUnits)
-
-        let candidate = startAnchor.addingTimeInterval(limitedUnits * config.unitSeconds)
-        pageAnchorDate = clampAnchorDate(candidate)
-    }
-
-    private func finishInteractivePaging(with swipeInfo: ProportionalSwipeInfo) -> PeriodSwipeResult {
-        guard let startAnchor = pagingSessionStartAnchorDate else {
-            return .cancelled
-        }
-
-        defer {
-            pagingSessionStartAnchorDate = nil
-        }
-
-        let target = projectedAnchorDate(from: startAnchor, swipeInfo: swipeInfo)
-        let clampedTarget = clampAnchorDate(target)
-        let hitFutureBoundary = target > latestAllowedAnchorDate
-        let finalAnchor = snappedAnchorDate(clampedTarget, scale: selectedScale)
-
-        let animation = animation(for: swipeInfo)
-        withAnimation(animation) {
-            pageAnchorDate = finalAnchor
-            selectedChartPointID = nil
-            selectedCategoryName = nil
-        }
-
-        return hitFutureBoundary ? .blockedAtFuture : .applied
-    }
-
-    private func projectedAnchorDate(from startAnchor: Date, swipeInfo: ProportionalSwipeInfo) -> Date {
-        let config = pagingConfiguration
-        let absDistance = abs(swipeInfo.distance)
-        let absVelocity = abs(swipeInfo.velocity)
-
-        let baseUnits = Double(absDistance / config.endPixelsPerUnit)
-        let velocityMultiplier = velocityMultiplier(for: absVelocity)
-
-        let computedUnits = baseUnits * velocityMultiplier
-
-        let finalUnits: Double
-        switch swipeInfo.intensity {
-        case .minimal:
-            finalUnits = max(computedUnits, config.minimumEndUnits)
-
-        case .light:
-            finalUnits = min(
-                max(computedUnits, config.minimumEndUnits),
-                config.maximumEndUnits
-            )
-
-        case .medium:
-            finalUnits = min(
-                max(computedUnits * 1.12, config.minimumEndUnits),
-                config.maximumEndUnits
-            )
-
-        case .strong:
-            finalUnits = config.fullPeriodUnits
-        }
-
-        let signedUnits = swipeInfo.direction == .forward ? finalUnits : -finalUnits
-        return startAnchor.addingTimeInterval(signedUnits * config.unitSeconds)
-    }
-
-    private func velocityMultiplier(for velocity: CGFloat) -> Double {
-        switch velocity {
-        case ..<500:
-            return 1.0
-        case 500..<900:
-            return 1.22
-        case 900..<1500:
-            return 1.55
-        case 1500..<2200:
-            return 2.05
-        default:
-            return 2.65
-        }
-    }
-
-    private func animation(for swipeInfo: ProportionalSwipeInfo) -> Animation {
-        let absVelocity = abs(swipeInfo.velocity)
-
-        let response: Double
-        if absVelocity > 1500 {
-            response = 0.24
-        } else if absVelocity > 700 {
-            response = 0.32
-        } else {
-            response = 0.44
-        }
-
-        return .spring(response: response, dampingFraction: 0.82)
+        pageAnchorDate = target
     }
 
     private func clampAnchorDate(_ date: Date) -> Date {
@@ -1663,7 +1515,6 @@ struct AnalyticsView: View {
                 pageAnchorDate = calendar.date(byAdding: .year, value: -1, to: pageAnchorDate) ?? pageAnchorDate
             }
             
-            selectedChartPointID = nil
             selectedCategoryName = nil
         }
     }
@@ -1684,7 +1535,6 @@ struct AnalyticsView: View {
             }
             
             pageAnchorDate = clampAnchorDate(pageAnchorDate)
-            selectedChartPointID = nil
             selectedCategoryName = nil
         }
     }
