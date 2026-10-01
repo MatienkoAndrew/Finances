@@ -115,14 +115,6 @@ struct TagTransactionsView: View {
                 Text([TagFormatting.operations(stats.count), TagFormatting.period(of: tag)].compactMap { $0 }.joined(separator: " · "))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                if let code = tag.autoCurrencyCode, !code.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                        Text("Ставится сама на траты в \(code)")
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(color)
-                }
             }
             Spacer(minLength: 0)
         }

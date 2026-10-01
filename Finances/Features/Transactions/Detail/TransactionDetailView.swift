@@ -210,9 +210,9 @@ struct TransactionDetailView: View {
             trackedRates: trackedRates
         )
 
-        // Если пользователь сменил валюту — могут измениться авто-метки по стране.
+        // Если пользователь сменил дату — операция могла попасть в период другой метки.
         // Не удаляем уже стоящие теги, только добавляем новые подходящие.
-        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags, context: modelContext)
+        TransactionTagSync.applyPeriodTags(to: transaction, allTags: allTags)
 
         try? modelContext.save()
         isEditing = false

@@ -1,8 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// Метки карточками: эмодзи, период, сколько потрачено. Сверху — предложения
-/// по валютам операций: одно касание создаёт метку страны.
+/// Метки карточками: эмодзи, период, сколько потрачено.
 struct TagsManagementView: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -31,29 +30,18 @@ struct TagsManagementView: View {
         }
     }
 
-    private var suggestions: [CurrencyTagSuggestion] {
-        CurrencyTagSuggestions.computeSuggestions(transactions: transactions, existingTags: tags)
-    }
-
     var body: some View {
-        let suggestions = suggestions
         let stats = TagStats.make(tags: tags, transactions: transactions, settings: settings.first, trackedRates: trackedRates)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                if !suggestions.isEmpty {
-                    suggestionsSection(suggestions)
-                }
-
                 if tags.isEmpty {
-                    if suggestions.isEmpty {
-                        ContentUnavailableView(
-                            "Пока нет меток",
-                            systemImage: "tag",
-                            description: Text("Метки собирают операции поездки, проекта или события — и показывают, сколько на них ушло.")
-                        )
-                        .padding(.top, 60)
-                    }
+                    ContentUnavailableView(
+                        "Пока нет меток",
+                        systemImage: "tag",
+                        description: Text("Метки собирают операции поездки, проекта или события — и показывают, сколько на них ушло.")
+                    )
+                    .padding(.top, 60)
                 } else {
                     tagsSection(stats: stats)
                 }
@@ -99,26 +87,6 @@ struct TagsManagementView: View {
     }
 
     // MARK: - Sections
-
-    private func suggestionsSection(_ suggestions: [CurrencyTagSuggestion]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Предложения", subtitle: "По валютам операций. Метка будет ставиться сама и на новые траты.")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(suggestions) { suggestion in
-                        TagSuggestionCard(suggestion: suggestion) {
-                            withAnimation(.snappy(duration: 0.3)) {
-                                CurrencyTagSuggestions.createTag(from: suggestion, modelContext: modelContext)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-            }
-            .scrollClipDisabled()
-        }
-    }
 
     private func tagsSection(stats: [PersistentIdentifier: TagStats]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -240,7 +208,41 @@ enum TagFormatting {
 
     static func period(of tag: TransactionTag) -> String? {
         guard let start = tag.startDate, let end = tag.endDate else { return nil }
-        return CurrencyTagSuggestions.periodDescription(from: start, to: end)
+        return periodDescription(from: start, to: end)
+    }
+
+    /// Краткое описание периода: например "5–8 ноя 2025" или "окт 2024 – мар 2025".
+    static func periodDescription(from start: Date, to end: Date) -> String {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+
+        if calendar.isDate(start, inSameDayAs: end) {
+            formatter.dateFormat = "d MMM yyyy"
+            return formatter.string(from: start)
+        }
+
+        let startYear = calendar.component(.year, from: start)
+        let endYear = calendar.component(.year, from: end)
+        let startMonth = calendar.component(.month, from: start)
+        let endMonth = calendar.component(.month, from: end)
+
+        if startYear == endYear && startMonth == endMonth {
+            formatter.dateFormat = "d"
+            let s = formatter.string(from: start)
+            formatter.dateFormat = "d MMM yyyy"
+            return "\(s)–\(formatter.string(from: end))"
+        }
+
+        if startYear == endYear {
+            formatter.dateFormat = "d MMM"
+            let s = formatter.string(from: start)
+            formatter.dateFormat = "d MMM yyyy"
+            return "\(s)–\(formatter.string(from: end))"
+        }
+
+        formatter.dateFormat = "d MMM yyyy"
+        return "\(formatter.string(from: start))–\(formatter.string(from: end))"
     }
 }
 
@@ -284,20 +286,7 @@ private struct TagTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                TagIconView(icon: tag.icon, colorHex: tag.colorHex, size: 44)
-                Spacer(minLength: 4)
-                if let code = tag.autoCurrencyCode, !code.isEmpty {
-                    Label(code, systemImage: "sparkles")
-                        .font(.caption2.weight(.bold))
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(color)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(color.opacity(0.14), in: Capsule())
-                        .accessibilityLabel("Ставится автоматически по валюте \(code)")
-                }
-            }
+            TagIconView(icon: tag.icon, colorHex: tag.colorHex, size: 44)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(tag.name)
@@ -336,49 +325,6 @@ private struct TagTile: View {
                 }
         }
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-}
-
-private struct TagSuggestionCard: View {
-    let suggestion: CurrencyTagSuggestion
-    let onCreate: () -> Void
-
-    private var color: Color { Color(hex: suggestion.info.colorHex) ?? .accentColor }
-
-    var body: some View {
-        Button(action: onCreate) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(suggestion.info.icon)
-                        .font(.system(size: 30))
-                    Spacer()
-                    Text(suggestion.info.code)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(suggestion.info.countryName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(TagFormatting.operations(suggestion.transactionCount))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Label("Создать", systemImage: "plus")
-                    .font(.caption.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(color.opacity(0.14), in: Capsule())
-                    .foregroundStyle(color)
-            }
-            .padding(12)
-            .frame(width: 140)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(TileButtonStyle())
     }
 }
 

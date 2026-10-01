@@ -471,8 +471,8 @@ struct TransactionsView: View {
                 modelContext.insert(transaction)
             }
 
-            // Метки стран по валюте — как и у операций, добавленных вручную.
-            TransactionTagSync.applyAutoTags(to: importResult.transactions, context: modelContext)
+            // Метки, в даты которых попали операции, — как и у добавленных вручную.
+            TransactionTagSync.applyPeriodTags(to: importResult.transactions, context: modelContext)
 
             try modelContext.save()
 
