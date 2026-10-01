@@ -88,13 +88,20 @@ final class DataExportImportManager {
         
         let settingsDescriptor = FetchDescriptor<AppSettings>()
         let settings = try modelContext.fetch(settingsDescriptor).first
-        
+
+        let categories = try modelContext.fetch(FetchDescriptor<ExpenseCategoryItem>())
+        let subcategories = try modelContext.fetch(FetchDescriptor<ExpenseSubcategoryItem>())
+        let rules = try modelContext.fetch(FetchDescriptor<CategoryRule>())
+
         return ExportData(
-            version: 1,
+            version: 2,
             exportDate: Date(),
             transactions: transactions.map { ExportableTransaction(from: $0) },
             trackedRates: trackedRates.map { ExportableTrackedRate(from: $0) },
-            settings: settings.map { ExportableSettings(from: $0) }
+            settings: settings.map { ExportableSettings(from: $0) },
+            categories: ExpenseCategoryItem.ordered(categories).map { ExportableCategory(from: $0) },
+            subcategories: subcategories.map { ExportableSubcategory(from: $0) },
+            rules: rules.map { ExportableRule(from: $0) }
         )
     }
     
@@ -130,8 +137,10 @@ final class DataExportImportManager {
                 try clearAllData(modelContext: modelContext)
             }
             
+            try importCategories(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
             try importAllData(exportData, modelContext: modelContext, replaceExisting: replaceExisting)
             try modelContext.save()
+            SubcategoryRegistry.shared.reload(context: modelContext)
         } catch {
             print("Import error: \(error)")
             throw ImportError.importFailed
@@ -145,6 +154,60 @@ final class DataExportImportManager {
         try modelContext.delete(model: AppSettings.self)
     }
     
+    /// Категории, подкатегории и правила. При замене берём их из копии целиком (если они в ней есть),
+    /// при добавлении — только недостающие, свои настройки не трогаем.
+    private static func importCategories(_ data: ExportData, modelContext: ModelContext, replaceExisting: Bool) throws {
+        guard let categories = data.categories else { return }  // копия до версии 2
+
+        if replaceExisting {
+            try modelContext.delete(model: ExpenseCategoryItem.self)
+            try modelContext.delete(model: ExpenseSubcategoryItem.self)
+            try modelContext.delete(model: CategoryRule.self)
+        }
+
+        let existingCategories = replaceExisting ? [] : try modelContext.fetch(FetchDescriptor<ExpenseCategoryItem>())
+        var categoryNames = Set(existingCategories.map { CategoryNameNormalizer.normalize($0.name) })
+        var nextOrder = (existingCategories.compactMap(\.sortOrder).max() ?? -1) + 1
+
+        for exported in categories where categoryNames.insert(CategoryNameNormalizer.normalize(exported.name)).inserted {
+            let category = ExpenseCategoryItem(
+                name: exported.name,
+                iconName: exported.iconName,
+                emoji: exported.emoji,
+                colorHex: exported.colorHex,
+                isSystem: exported.isSystem
+            )
+            category.sortOrder = replaceExisting ? exported.sortOrder : nextOrder
+            nextOrder += 1
+            modelContext.insert(category)
+        }
+
+        let existingSubcategories = replaceExisting ? [] : try modelContext.fetch(FetchDescriptor<ExpenseSubcategoryItem>())
+        var subcategoryKeys = Set(existingSubcategories.map { CategoryNameNormalizer.normalize($0.categoryName) + "|" + $0.name })
+        for exported in data.subcategories ?? []
+        where subcategoryKeys.insert(CategoryNameNormalizer.normalize(exported.categoryName) + "|" + exported.name).inserted {
+            modelContext.insert(ExpenseSubcategoryItem(
+                name: exported.name,
+                emoji: exported.emoji,
+                categoryName: exported.categoryName,
+                sortOrder: exported.sortOrder
+            ))
+        }
+
+        let existingRules = replaceExisting ? [] : try modelContext.fetch(FetchDescriptor<CategoryRule>())
+        var patterns = Set(existingRules.map { $0.pattern.uppercased() })
+        for exported in data.rules ?? [] where patterns.insert(exported.pattern.uppercased()).inserted {
+            modelContext.insert(CategoryRule(
+                pattern: exported.pattern,
+                categoryName: exported.categoryName,
+                subcategoryName: exported.subcategoryName,
+                priority: exported.priority,
+                isEnabled: exported.isEnabled,
+                createdAt: exported.createdAt
+            ))
+        }
+    }
+
     private static func importAllData(_ data: ExportData, modelContext: ModelContext, replaceExisting: Bool = false) throws {
         // Импортируем отслеживаемые курсы валют
         if replaceExisting {
@@ -220,6 +283,7 @@ final class DataExportImportManager {
                     foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
                     rubAmount: exportTransaction.rubAmount,
                     categoryName: exportTransaction.categoryName,
+                    subcategoryName: exportTransaction.subcategoryName,
                     isCategoryManuallySet: exportTransaction.isCategoryManuallySet ?? false,
                     note: exportTransaction.note,
                     tagNames: exportTransaction.tagNames,
@@ -262,6 +326,7 @@ final class DataExportImportManager {
                     foreignCurrencyCode: exportTransaction.foreignCurrencyCode,
                     rubAmount: exportTransaction.rubAmount,
                     categoryName: exportTransaction.categoryName,
+                    subcategoryName: exportTransaction.subcategoryName,
                     isCategoryManuallySet: exportTransaction.isCategoryManuallySet ?? false,
                     note: exportTransaction.note,
                     tagNames: exportTransaction.tagNames,
@@ -297,6 +362,60 @@ struct ExportData: Codable {
     let transactions: [ExportableTransaction]
     let trackedRates: [ExportableTrackedRate]
     let settings: ExportableSettings?
+    // С версии 2; в старых копиях их нет — тогда категории при импорте не трогаем.
+    var categories: [ExportableCategory]? = nil
+    var subcategories: [ExportableSubcategory]? = nil
+    var rules: [ExportableRule]? = nil
+}
+
+struct ExportableCategory: Codable {
+    let name: String
+    let iconName: String
+    let emoji: String?
+    let colorHex: String
+    let isSystem: Bool
+    let sortOrder: Int?
+
+    init(from category: ExpenseCategoryItem) {
+        self.name = category.name
+        self.iconName = category.iconName
+        self.emoji = category.emoji
+        self.colorHex = category.colorHex
+        self.isSystem = category.isSystem
+        self.sortOrder = category.sortOrder
+    }
+}
+
+struct ExportableSubcategory: Codable {
+    let name: String
+    let emoji: String
+    let categoryName: String
+    let sortOrder: Int
+
+    init(from subcategory: ExpenseSubcategoryItem) {
+        self.name = subcategory.name
+        self.emoji = subcategory.emoji
+        self.categoryName = subcategory.categoryName
+        self.sortOrder = subcategory.sortOrder
+    }
+}
+
+struct ExportableRule: Codable {
+    let pattern: String
+    let categoryName: String
+    let subcategoryName: String?
+    let priority: Int
+    let isEnabled: Bool
+    let createdAt: Date
+
+    init(from rule: CategoryRule) {
+        self.pattern = rule.pattern
+        self.categoryName = rule.categoryName
+        self.subcategoryName = rule.subcategoryName
+        self.priority = rule.priority
+        self.isEnabled = rule.isEnabled
+        self.createdAt = rule.createdAt
+    }
 }
 
 struct ExportableTransaction: Codable {
@@ -312,6 +431,8 @@ struct ExportableTransaction: Codable {
     let foreignCurrencyCode: String?
     let rubAmount: Double?
     let categoryName: String?
+    /// С версии 2; Optional — старые копии декодируются.
+    let subcategoryName: String?
     /// Сохраняется в бэкапе, чтобы ручные пометки категорий
     /// переживали полный экспорт/импорт. Optional => старые бэкапы
     /// декодируются корректно (поле станет nil).
@@ -336,6 +457,7 @@ struct ExportableTransaction: Codable {
         self.foreignCurrencyCode = transaction.foreignCurrencyCode
         self.rubAmount = transaction.rubAmount
         self.categoryName = transaction.categoryName
+        self.subcategoryName = transaction.subcategoryName
         self.isCategoryManuallySet = transaction.isCategoryManuallySet
         self.note = transaction.note
         self.tagNames = transaction.tagNames
