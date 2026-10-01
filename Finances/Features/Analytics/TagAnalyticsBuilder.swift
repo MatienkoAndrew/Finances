@@ -17,16 +17,32 @@
 
 import Foundation
 
-enum TagBinGranularity {
+enum TagBinGranularity: CaseIterable {
     case daily
     case weekly
     case monthly
+
+    var shortTitle: String {
+        switch self {
+        case .daily: return "Дни"
+        case .weekly: return "Недели"
+        case .monthly: return "Месяцы"
+        }
+    }
 
     var sectionTitle: String {
         switch self {
         case .daily: return "По дням"
         case .weekly: return "По неделям"
         case .monthly: return "По месяцам"
+        }
+    }
+
+    var averageTitle: String {
+        switch self {
+        case .daily: return "СРЕДНЕЕ В ДЕНЬ"
+        case .weekly: return "СРЕДНЕЕ В НЕДЕЛЮ"
+        case .monthly: return "СРЕДНЕЕ В МЕСЯЦ"
         }
     }
 
@@ -114,12 +130,37 @@ enum TagAnalyticsBuilder {
         return granularity(durationInDays: max(days, 1))
     }
 
+    /// Bin granularities that make a readable chart for the tag: 2…62 bars.
+    /// The automatic choice is always included.
+    static func availableGranularities(
+        for tag: TransactionTag,
+        taggedTransactions: [Transaction]
+    ) -> [TagBinGranularity] {
+        guard let period = effectivePeriod(for: tag, taggedTransactions: taggedTransactions),
+              let automatic = granularity(for: tag, taggedTransactions: taggedTransactions) else {
+            return []
+        }
+        let calendar = Calendar.current
+        return TagBinGranularity.allCases.filter { candidate in
+            if candidate == automatic { return true }
+            let count = makeBins(
+                start: period.start,
+                endExclusive: period.endExclusive,
+                granularity: candidate,
+                calendar: calendar
+            ).count
+            return (2...62).contains(count)
+        }
+    }
+
     /// Builds a full `AnalyticsSnapshot` for the given tag.
+    /// `granularity` overrides the automatic choice when set.
     static func buildSnapshot(
         tag: TransactionTag,
         transactions: [Transaction],
         settings: AppSettings?,
-        trackedRates: [TrackedExchangeRate]
+        trackedRates: [TrackedExchangeRate],
+        granularity requestedGranularity: TagBinGranularity? = nil
     ) -> AnalyticsSnapshot {
         let calendar = Calendar.current
         let tagged = transactions.filter { $0.hasTag(tag.name) }
@@ -138,7 +179,7 @@ enum TagAnalyticsBuilder {
             calendar.dateComponents([.day], from: period.start, to: period.endExclusive).day ?? 1,
             1
         )
-        let chosenGranularity = granularity(durationInDays: durationDays)
+        let chosenGranularity = requestedGranularity ?? granularity(durationInDays: durationDays)
         let bins = makeBins(
             start: period.start,
             endExclusive: period.endExclusive,
@@ -218,7 +259,8 @@ enum TagAnalyticsBuilder {
                 date: bin.start,
                 axisLabel: bin.axisLabel,
                 title: bin.title,
-                total: chartTotals[index]
+                total: chartTotals[index],
+                showsGridline: bin.showsGridline
             )
         }
 
@@ -265,8 +307,9 @@ enum TagAnalyticsBuilder {
     private struct TagBin {
         let start: Date
         let endExclusive: Date
-        let axisLabel: String
+        var axisLabel: String
         let title: String
+        var showsGridline = true
     }
 
     private static func makeBins(
@@ -324,6 +367,15 @@ enum TagAnalyticsBuilder {
 
                 bins.append(TagBin(start: current, endExclusive: next, axisLabel: axis, title: title))
                 current = next
+            }
+        }
+
+        // Много баров — подписываем ось через равный шаг, иначе подписи слипаются.
+        if bins.count > 12 {
+            let step = Int((Double(bins.count) / 7).rounded(.up))
+            for index in bins.indices where index % step != 0 {
+                bins[index].axisLabel = ""
+                bins[index].showsGridline = false
             }
         }
 
