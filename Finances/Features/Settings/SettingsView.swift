@@ -108,7 +108,7 @@ struct SettingsView: View {
                 }
 
                 Section("Данные") {
-                    NavigationLink("Управление категориями") {
+                    NavigationLink("Категории") {
                         CategoriesView()
                     }
 

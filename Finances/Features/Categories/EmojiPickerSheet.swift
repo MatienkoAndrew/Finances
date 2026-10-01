@@ -12,7 +12,6 @@ struct EmojiPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @Binding var selectedEmoji: String
-    @State private var searchText: String = ""
 
     private let sections: [EmojiSection] = [
         .init(
@@ -41,23 +40,13 @@ struct EmojiPickerSheet: View {
         )
     ]
 
-    private var filteredSections: [EmojiSection] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return sections }
-
-        return sections.compactMap { section in
-            let filtered = section.emojis.filter { emoji in
-                emoji.localizedCaseInsensitiveContains(query)
-            }
-            return filtered.isEmpty ? nil : EmojiSection(title: section.title, emojis: filtered)
-        }
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
-                    ForEach(filteredSections) { section in
+                    keyboardCard
+
+                    ForEach(sections) { section in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(section.title)
                                 .font(.headline)
@@ -92,7 +81,6 @@ struct EmojiPickerSheet: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Выбрать эмодзи")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Поиск")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Закрыть") {
@@ -110,6 +98,86 @@ struct EmojiPickerSheet: View {
                 }
             }
         }
+    }
+}
+
+extension EmojiPickerSheet {
+    /// Поле с системной клавиатурой эмодзи iPhone: все эмодзи и поиск по ним.
+    private var keyboardCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                SystemEmojiField { emoji in
+                    selectedEmoji = emoji
+                    dismiss()
+                }
+                .frame(height: 24)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text("Любой эмодзи с клавиатуры iPhone — со всеми категориями и поиском. Ниже — популярные.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+/// Текстовое поле, которое открывает сразу клавиатуру эмодзи (если она включена в iOS)
+/// и отдаёт первый введённый эмодзи.
+struct SystemEmojiField: UIViewRepresentable {
+    let onPick: (String) -> Void
+
+    final class EmojiTextField: UITextField {
+        override var textInputMode: UITextInputMode? {
+            UITextInputMode.activeInputModes.first { $0.primaryLanguage == "emoji" } ?? super.textInputMode
+        }
+    }
+
+    func makeUIView(context: Context) -> EmojiTextField {
+        let field = EmojiTextField()
+        field.delegate = context.coordinator
+        field.placeholder = "Открыть клавиатуру эмодзи"
+        field.font = .preferredFont(forTextStyle: .body)
+        field.returnKeyType = .done
+        DispatchQueue.main.async { field.becomeFirstResponder() }
+        return field
+    }
+
+    func updateUIView(_ uiView: EmojiTextField, context: Context) {
+        context.coordinator.onPick = onPick
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var onPick: (String) -> Void
+
+        init(onPick: @escaping (String) -> Void) {
+            self.onPick = onPick
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            if let emoji = string.first(where: \.isEmojiCharacter) {
+                onPick(String(emoji))
+            }
+            return false
+        }
+    }
+}
+
+private extension Character {
+    var isEmojiCharacter: Bool {
+        guard let first = unicodeScalars.first else { return false }
+        return first.properties.isEmojiPresentation || (unicodeScalars.count > 1 && first.properties.isEmoji)
     }
 }
 

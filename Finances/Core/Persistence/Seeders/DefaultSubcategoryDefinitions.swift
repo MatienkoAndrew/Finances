@@ -2,7 +2,9 @@
 //  DefaultSubcategoryDefinitions.swift
 //  Finances
 //
-//  Подкатегории внутри основных категорий.
+//  Подкатегории внутри категорий. Здесь — стартовый набор; дальше подкатегории
+//  живут в базе (`ExpenseSubcategoryItem`) и редактируются пользователем,
+//  а читаются через `SubcategoryRegistry`.
 //
 
 import Foundation
@@ -18,7 +20,7 @@ enum DefaultSubcategoryDefinitions {
     /// Имя подкатегории, выбираемой по умолчанию при выборе категории с подкатегориями.
     static let defaultName = "Другое"
 
-    static let byCategory: [String: [DefaultSubcategoryDefinition]] = [
+    static let seed: [String: [DefaultSubcategoryDefinition]] = [
         "Еда": [
             .init(name: "Продукты", emoji: "🛒"),
             .init(name: "Кафе и кофейни", emoji: "☕️"),
@@ -64,6 +66,7 @@ enum DefaultSubcategoryDefinitions {
             .init(name: "Косметика", emoji: "💄"),
             .init(name: "Подарки и цветы", emoji: "🎁"),
             .init(name: "Маркетплейсы", emoji: "📦"),
+            .init(name: "Благотворительность", emoji: "💝"),
             .init(name: "Другое", emoji: "🛍️")
         ],
         "Подписки и связь": [
@@ -91,7 +94,7 @@ enum DefaultSubcategoryDefinitions {
     /// Список подкатегорий для категории (или nil, если их нет).
     static func subcategories(for category: String?) -> [DefaultSubcategoryDefinition]? {
         guard let category else { return nil }
-        return byCategory[category]
+        return SubcategoryRegistry.shared.subcategories(for: category)
     }
 
     static func hasSubcategories(_ category: String?) -> Bool {

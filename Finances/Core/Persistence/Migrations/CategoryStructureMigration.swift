@@ -7,11 +7,13 @@ import SwiftData
 /// - «Здоровье» → «Здоровье и красота», «Подписки» → «Подписки и связь»;
 /// - подкатегории переименованы и укрупнены, авиабилеты и поезда переехали в «Транспорт»;
 /// - добавлена категория «Развлечения».
+/// Версия 3: «Самолет», «Техника», «Тусовка», «Экскурсии/гиды/музеи», «Одежда и обувь»,
+/// «Благотворительность» тоже становятся подкатегориями.
 /// Затрагивает операции, правила, старые расходы и кэш нейросети; ручной выбор
 /// остаётся ручным. Выполняется один раз.
 enum CategoryStructureMigration {
     private static let versionKey = "categoryStructureVersion"
-    private static let currentVersion = 2
+    private static let currentVersion = 3
 
     /// Бывшие категории → куда они переезжают.
     private static let categoryMoves: [String: CategoryMatch] = [
@@ -22,7 +24,15 @@ enum CategoryStructureMigration {
         "спорт": CategoryMatch(category: "Здоровье и красота", subcategory: "Спорт и фитнес"),
         "красота": CategoryMatch(category: "Здоровье и красота", subcategory: "Красота"),
         "vpn": CategoryMatch(category: "Подписки и связь", subcategory: "VPN"),
-        "наличка": CategoryMatch(category: "Снятие наличных", subcategory: nil)
+        "наличка": CategoryMatch(category: "Снятие наличных", subcategory: nil),
+        // Версия 3: старые пользовательские категории, которые дублируют подкатегории.
+        "самолет": CategoryMatch(category: "Транспорт", subcategory: "Самолёт"),
+        "самолёт": CategoryMatch(category: "Транспорт", subcategory: "Самолёт"),
+        "техника": CategoryMatch(category: "Покупки", subcategory: "Электроника"),
+        "тусовка": CategoryMatch(category: "Развлечения", subcategory: "Клубы и вечеринки"),
+        "экскурсии/гиды/музеи": CategoryMatch(category: "Путешествия", subcategory: "Экскурсии"),
+        "одежда и обувь": CategoryMatch(category: "Покупки", subcategory: "Одежда и обувь"),
+        "благотворительность": CategoryMatch(category: "Покупки", subcategory: "Благотворительность")
     ]
 
     /// Переименованные категории (подкатегории сохраняются и переименовываются ниже).

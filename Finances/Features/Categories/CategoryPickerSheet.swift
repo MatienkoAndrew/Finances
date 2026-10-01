@@ -4,7 +4,8 @@
 //
 //  Выбор категории в стиле Alipay: сетка цветных категорий, у категорий с
 //  подкатегориями по тапу раскрывается панель подкатегорий. Выбор — в одно касание:
-//  категория без подкатегорий или подкатегория сразу применяются.
+//  категория без подкатегорий или подкатегория сразу применяются. Долгое нажатие —
+//  режим правки порядка, как на домашнем экране.
 //
 
 import SwiftUI
@@ -21,6 +22,7 @@ struct CategoryPickerSheet: View {
 
     @State private var expandedCategory: String?
     @State private var isShowingAddCategory = false
+    @State private var isReordering = false
     @State private var selectionFeedback = 0
 
     private let columnsPerRow = 4
@@ -43,15 +45,30 @@ struct CategoryPickerSheet: View {
         )
     }
 
+    private var ordered: [ExpenseCategoryItem] {
+        ExpenseCategoryItem.ordered(categories)
+    }
+
     private var rows: [[ExpenseCategoryItem]] {
-        stride(from: 0, to: categories.count, by: columnsPerRow).map { start in
-            Array(categories[start..<min(start + columnsPerRow, categories.count)])
+        let ordered = ordered
+        return stride(from: 0, to: ordered.count, by: columnsPerRow).map { start in
+            Array(ordered[start..<min(start + columnsPerRow, ordered.count)])
         }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
+                if isReordering {
+                    VStack(spacing: 12) {
+                        ReorderableCategoryGrid(categories: ordered, columns: columnsPerRow)
+                        Text("Перетаскивай категории, чтобы поменять порядок")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                } else {
                 VStack(spacing: 14) {
                     ForEach(rows.indices, id: \.self) { rowIndex in
                         let row = rows[rowIndex]
@@ -95,6 +112,7 @@ struct CategoryPickerSheet: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -111,6 +129,12 @@ struct CategoryPickerSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if isReordering {
+                        Button("Готово") {
+                            withAnimation(.snappy(duration: 0.25)) { isReordering = false }
+                        }
+                        .fontWeight(.semibold)
+                    } else {
                     Button {
                         dismiss()
                     } label: {
@@ -122,10 +146,11 @@ struct CategoryPickerSheet: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Закрыть")
+                    }
                 }
             }
             .sheet(isPresented: $isShowingAddCategory) {
-                AddCategorySheet { newCategoryName in
+                CategoryEditorSheet(category: nil) { newCategoryName in
                     if DefaultSubcategoryDefinitions.hasSubcategories(newCategoryName) {
                         expandedCategory = newCategoryName
                     } else {
@@ -138,55 +163,30 @@ struct CategoryPickerSheet: View {
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
         .sensoryFeedback(.selection, trigger: selectionFeedback)
+        .sensoryFeedback(.impact(weight: .medium), trigger: isReordering) { _, newValue in newValue }
     }
 
     // MARK: - Cells
 
     private func categoryCell(_ category: ExpenseCategoryItem) -> some View {
         let isCurrent = CategoryNameNormalizer.normalize(initialCategory ?? "") == CategoryNameNormalizer.normalize(category.name)
-        let isExpanded = expandedCategory == category.name
-        let hasSubs = DefaultSubcategoryDefinitions.hasSubcategories(category.name)
-        let color = Color(hex: category.colorHex) ?? .gray
 
-        return Button {
+        return CategoryGridCell(
+            category: category,
+            isHighlighted: isCurrent,
+            isExpanded: expandedCategory == category.name,
+            showsCheckmark: isCurrent
+        )
+        .onTapGesture {
             handleCategoryTap(category)
-        } label: {
-            VStack(spacing: 7) {
-                ZStack(alignment: .bottomTrailing) {
-                    CategoryIconView(category: category, size: 50)
-                        .padding(4)
-                        .overlay {
-                            Circle()
-                                .strokeBorder(color, lineWidth: isCurrent || isExpanded ? 2 : 0)
-                        }
-
-                    if hasSubs {
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 8, weight: .heavy))
-                            .foregroundStyle(color)
-                            .frame(width: 18, height: 18)
-                            .background(Color(.systemBackground), in: Circle())
-                            .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
-                    } else if isCurrent {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .heavy))
-                            .foregroundStyle(.white)
-                            .frame(width: 18, height: 18)
-                            .background(color, in: Circle())
-                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
-                    }
-                }
-
-                Text(category.name)
-                    .font(.caption.weight(isCurrent ? .semibold : .regular))
-                    .foregroundStyle(isCurrent ? color : .primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .onLongPressGesture(minimumDuration: 0.35) {
+            withAnimation(.snappy(duration: 0.25)) {
+                expandedCategory = nil
+                isReordering = true
+            }
+        }
+        .accessibilityAddTraits(.isButton)
     }
 
     private func subcategoryPanel(_ subs: [DefaultSubcategoryDefinition], in category: ExpenseCategoryItem) -> some View {

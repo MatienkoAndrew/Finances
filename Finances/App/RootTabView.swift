@@ -41,6 +41,7 @@ struct RootTabView: View {
         .onAppear {
             CategorySeeder.seedIfNeeded(existing: categories, modelContext: modelContext)
             CategoryStructureMigration.runIfNeeded(context: modelContext)
+            SubcategoryRegistry.shared.load(context: modelContext)
             DefaultAccountsSeeder.seedIfNeeded(existingAccounts: accounts, modelContext: modelContext)
             // Убирает дубли, накопившиеся до автоочистки (например, от старого импорта).
             DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
