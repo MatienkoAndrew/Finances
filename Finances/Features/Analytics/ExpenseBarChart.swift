@@ -6,8 +6,8 @@
 //   • режим времени — вся история в одной ленте, плавная прокрутка пальцем
 //     с доводкой до границы недели / месяца / года;
 //   • шкала значений подстраивается под видимые столбики;
-//   • касание с удержанием (или тап в статичном графике) показывает выноску
-//     с суммой столбика поверх заголовка.
+//   • касание с удержанием (или тап в статичном графике) выделяет столбик,
+//     и заголовок показывает его сумму и дату.
 //
 
 import SwiftUI
@@ -151,8 +151,7 @@ struct ExpenseBarChart: View {
         let summary = stats(in: window)
 
         VStack(alignment: .leading, spacing: 10) {
-            header(average: summary.average, window: window)
-                .opacity(selected == nil ? 1 : 0)
+            header(average: summary.average, window: window, selected: selected)
 
             chart(selected: selected, yMax: summary.yMax)
                 .animation(.easeOut(duration: 0.2), value: summary.yMax)
@@ -160,46 +159,30 @@ struct ExpenseBarChart: View {
         .sensoryFeedback(.selection, trigger: selected?.start)
     }
 
-    // MARK: - Header & callout
+    // MARK: - Header
 
-    private func header(average: Double, window: Range<Date>) -> some View {
+    /// Заголовок над графиком: среднее за видимый период, а пока выделен
+    /// столбик — его сумма и дата (как в «Здоровье»).
+    private func header(average: Double, window: Range<Date>, selected: ExpenseBar?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(averageTitle)
+            Text(selected == nil ? averageTitle : "ПОТРАЧЕНО")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(selected == nil ? Color.secondary : tint)
 
-            Text(ExpenseChartFormat.rub(average))
+            Text(ExpenseChartFormat.rub(selected?.total ?? average))
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
 
-            Text(rangeText(for: window))
+            Text(selected?.title ?? rangeText(for: window))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func callout(for bar: ExpenseBar) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("ПОТРАЧЕНО")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Text(ExpenseChartFormat.rub(bar.total))
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .monospacedDigit()
-
-            Text(bar.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .fixedSize()
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .animation(.snappy(duration: 0.2), value: selected?.start)
     }
 
     private func rangeText(for window: Range<Date>) -> String {
@@ -234,13 +217,6 @@ struct ExpenseBarChart: View {
                     .foregroundStyle(Color.secondary.opacity(0.35))
                     .lineStyle(StrokeStyle(lineWidth: 1))
                     .zIndex(-1)
-                    .annotation(
-                        position: .top,
-                        spacing: 0,
-                        overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
-                    ) {
-                        callout(for: selected)
-                    }
             }
         }
         .chartXScale(domain: domain.lowerBound...domain.upperBound)
