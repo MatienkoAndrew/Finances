@@ -43,6 +43,8 @@ struct RootTabView: View {
             DefaultAccountsSeeder.seedIfNeeded(existingAccounts: accounts, modelContext: modelContext)
             // Убирает дубли, накопившиеся до автоочистки (например, от старого импорта).
             DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
+            // «Другое» и пустые категории — по правилам, истории выбора и словарю мерчантов.
+            AutoCategorizationSync.run(context: modelContext)
             ExchangeRateDifferenceCategorySync.run(context: modelContext)
         }
     }

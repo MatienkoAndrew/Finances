@@ -74,6 +74,7 @@ enum TransactionCategorySync {
         overwriteExisting: Bool = false
     ) -> Int {
         var updatedCount = 0
+        let memory = MerchantCategoryMemory(transactions: transactions)
 
         for transaction in transactions {
             guard transaction.kind == .expense else { continue }
@@ -90,17 +91,19 @@ enum TransactionCategorySync {
                 continue
             }
 
-            let guessed = CategoryRuleEngine.matchCategoryName(
+            guard let guessed = CategoryRuleEngine.match(
                 operationType: transaction.ruleOperationType,
                 details: transaction.details,
                 rules: rules,
-                existingCategories: categories
-            )
+                existingCategories: categories,
+                memory: memory
+            ) else { continue }
 
-            guard let guessed else { continue }
-            guard transaction.categoryName != guessed else { continue }
+            guard transaction.categoryName != guessed.category
+                    || transaction.subcategoryName != guessed.subcategory else { continue }
 
-            transaction.categoryName = guessed
+            transaction.categoryName = guessed.category
+            transaction.subcategoryName = guessed.subcategory
             updatedCount += 1
         }
 
