@@ -132,7 +132,7 @@ struct QuickTagView: View {
                 }
             }
             .sheet(isPresented: $showingCreateTag) {
-                CreateTagView()
+                TagEditorSheet(tag: nil)
             }
             .onChange(of: selectedTag) { _, newTag in
                 // Автоматически подставляем период метки, если он задан
