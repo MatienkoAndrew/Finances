@@ -25,11 +25,17 @@ struct AnalyticsView: View {
     
     // Для режима Tags
     @State private var selectedTag: TransactionTag?
+    /// Интервал графика, выбранный вручную; nil — автоматический по длине метки.
+    @State private var tagGranularityOverride: TagBinGranularity?
 
     @State private var selectedChartPointID: String?
     @State private var selectedCategoryName: String?
     @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
+    /// Вид графика по категориям (выбор запоминается между запусками).
+    @AppStorage("analytics.categoryChartStyle") private var categoryChartStyle: CategoryChartStyle = .bars
+    /// Значение под пальцем на кольце категорий (накопленная сумма).
+    @State private var donutSelectedValue: Double?
     /// Категории с подкатегориями раскрыты сразу, как в Alipay; здесь — свёрнутые вручную.
     @State private var collapsedCategories: Set<String> = []
 
@@ -69,7 +75,8 @@ struct AnalyticsView: View {
                 tag: tag,
                 transactions: transactions,
                 settings: settings,
-                trackedRates: trackedRates
+                trackedRates: trackedRates,
+                granularity: tagBinGranularity
             )
         } else {
             // В режиме Time используем стандартную логику
@@ -83,12 +90,24 @@ struct AnalyticsView: View {
         }
     }
 
-    /// Гранулярность бинов для текущей выбранной метки.
+    /// Гранулярность бинов для текущей выбранной метки: ручной выбор,
+    /// если он допустим для её периода, иначе автоматическая.
     /// Используется для подзаголовков и форматирования "ДЕНЬ/НЕДЕЛЯ/МЕСЯЦ".
     private var tagBinGranularity: TagBinGranularity? {
         guard selectedMode == .tags, let tag = selectedTag else { return nil }
         let tagged = transactions.filter { $0.hasTag(tag.name) }
+        if let tagGranularityOverride,
+           TagAnalyticsBuilder.availableGranularities(for: tag, taggedTransactions: tagged).contains(tagGranularityOverride) {
+            return tagGranularityOverride
+        }
         return TagAnalyticsBuilder.granularity(for: tag, taggedTransactions: tagged)
+    }
+
+    /// Интервалы, между которыми можно переключать график метки.
+    private var availableTagGranularities: [TagBinGranularity] {
+        guard selectedMode == .tags, let tag = selectedTag else { return [] }
+        let tagged = transactions.filter { $0.hasTag(tag.name) }
+        return TagAnalyticsBuilder.availableGranularities(for: tag, taggedTransactions: tagged)
     }
 
     private var previousSnapshot: AnalyticsSnapshot {
@@ -245,6 +264,7 @@ struct AnalyticsView: View {
         .onChange(of: selectedTag) { _, newTag in
             selectedChartPointID = nil
             selectedCategoryName = nil
+            tagGranularityOverride = nil
             
             // При смене метки обновляем anchor date
             if selectedMode == .tags, let tag = newTag, let start = tag.startDate {
@@ -472,6 +492,31 @@ struct AnalyticsView: View {
         .animation(.snappy(duration: 0.25), value: selectedChartPointID)
     }
 
+    /// Переключатель интервала графика метки: Дни / Недели / Месяцы.
+    @ViewBuilder
+    private var tagGranularityPicker: some View {
+        let options = availableTagGranularities
+        if options.count > 1, let current = tagBinGranularity {
+            Picker(
+                "Интервал",
+                selection: Binding(
+                    get: { current },
+                    set: { newValue in
+                        withAnimation(.snappy(duration: 0.25)) {
+                            selectedChartPointID = nil
+                            tagGranularityOverride = newValue
+                        }
+                    }
+                )
+            ) {
+                ForEach(options, id: \.self) { option in
+                    Text(option.shortTitle).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
     private func tagMetric(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
@@ -625,6 +670,10 @@ struct AnalyticsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("График расходов")
                 .font(.title3.bold())
+
+            if selectedMode == .tags {
+                tagGranularityPicker
+            }
 
             if snapshot.chartPoints.isEmpty {
                 Text("Нет расходов для выбранного периода")
@@ -1148,95 +1197,264 @@ struct AnalyticsView: View {
 
     private var categoryChartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("График по категориям")
-                .font(.title3.bold())
+            HStack {
+                Text("График по категориям")
+                    .font(.title3.bold())
+
+                Spacer()
+
+                // Вид графика: полосы, кольцо или лента — запоминается.
+                Picker("Вид графика", selection: $categoryChartStyle.animation(.snappy(duration: 0.25))) {
+                    ForEach(CategoryChartStyle.allCases) { style in
+                        Image(systemName: style.iconName)
+                            .accessibilityLabel(style.title)
+                            .tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
 
             if snapshot.categoryTotals.isEmpty {
                 Text("Нет данных для выбранного периода")
                     .foregroundStyle(.secondary)
             } else {
-                Chart {
-                    ForEach(snapshot.categoryTotals) { item in
-                        let isSelected = selectedCategoryName == item.category
-                        let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
+                switch categoryChartStyle {
+                case .bars:
+                    categoryBarsChart
+                case .donut:
+                    categoryDonutChart
+                case .strip:
+                    categoryStripChart
+                }
+            }
+        }
+    }
 
-                        BarMark(
-                            x: .value("Сумма", item.total),
-                            y: .value("Категория", item.category),
-                            height: .fixed(isSelected ? 26 : 18)
-                        )
-                        .foregroundStyle(isSelected ? color : color.opacity(0.72))
-                        .cornerRadius(isSelected ? 8 : 5)
-                        .annotation(position: .trailing) {
-                            Text(formattedPercent(categoryShare(for: item.category)))
-                                .font(isSelected ? .caption.bold() : .caption2)
-                                .foregroundStyle(.secondary)
-                        }
+    // Горизонтальные полосы с выбором пальцем (исходный вариант).
+    private var categoryBarsChart: some View {
+        Chart {
+            ForEach(snapshot.categoryTotals) { item in
+                let isSelected = selectedCategoryName == item.category
+                let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
+
+                BarMark(
+                    x: .value("Сумма", item.total),
+                    y: .value("Категория", item.category),
+                    height: .fixed(isSelected ? 26 : 18)
+                )
+                .foregroundStyle(isSelected ? color : color.opacity(0.72))
+                .cornerRadius(isSelected ? 8 : 5)
+                .annotation(position: .trailing) {
+                    Text(formattedPercent(categoryShare(for: item.category)))
+                        .font(isSelected ? .caption.bold() : .caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(height: chartHeightForCategories)
+        .chartXAxis {
+            AxisMarks(position: .bottom)
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisValueLabel {
+                    if let name = value.as(String.self) {
+                        let isSelected = selectedCategoryName == name
+                        Text(name)
+                            .font(isSelected ? .caption.bold() : .caption)
+                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     }
                 }
-                .frame(height: chartHeightForCategories)
-                .chartXAxis {
-                    AxisMarks(position: .bottom)
-                }
-                .chartYAxis {
-                    AxisMarks(position: .leading) { value in
-                        AxisValueLabel {
-                            if let name = value.as(String.self) {
-                                let isSelected = selectedCategoryName == name
-                                Text(name)
-                                    .font(isSelected ? .caption.bold() : .caption)
-                                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let plotFrame = geometry[proxy.plotAreaFrame]
+                                let yInPlot = value.location.y - plotFrame.origin.y
+
+                                guard yInPlot >= 0, yInPlot <= proxy.plotAreaSize.height else {
+                                    return
+                                }
+
+                                if let nearestCategoryName = nearestCategory(
+                                    at: yInPlot,
+                                    plotHeight: proxy.plotAreaSize.height
+                                ) {
+                                    if selectedCategoryName != nearestCategoryName {
+                                        selectedCategoryName = nearestCategoryName
+
+                                        if lastHapticCategoryName != nearestCategoryName {
+                                            let generator = UIImpactFeedbackGenerator(style: .light)
+                                            generator.impactOccurred(intensity: 0.7)
+                                            lastHapticCategoryName = nearestCategoryName
+                                        }
+                                    }
+                                }
+                            }
+                            .onEnded { value in
+                                let totalTranslation = abs(value.translation.width) + abs(value.translation.height)
+
+                                if totalTranslation < 10, let selectedCategoryName {
+                                    categoryNavigationTarget = selectedCategoryName
+                                }
+
+                                selectedCategoryName = nil
+                                lastHapticCategoryName = nil
+                            }
+                    )
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .animation(.smooth(duration: 0.25), value: selectedCategoryName)
+    }
+
+    /// Категории с положительной суммой — для кольца и ленты (доли не бывают отрицательными).
+    private var positiveCategoryTotals: [AnalyticsCategoryTotal] {
+        snapshot.categoryTotals.filter { $0.total > 0 }
+    }
+
+    private func categoryColor(_ name: String) -> Color {
+        categoryItem(for: name).flatMap { Color(hex: $0.colorHex) } ?? .gray
+    }
+
+    // Кольцо: доли категорий, в центре — итог или выбранная категория.
+    private var categoryDonutChart: some View {
+        let items = positiveCategoryTotals
+        let total = items.reduce(0) { $0 + $1.total }
+        let selected = donutSelectedValue.flatMap { donutCategory(atCumulative: $0, in: items) }
+
+        return VStack(spacing: 16) {
+            Chart(items) { item in
+                let isSelected = selected?.category == item.category
+
+                SectorMark(
+                    angle: .value("Сумма", item.total),
+                    innerRadius: .ratio(0.62),
+                    outerRadius: .ratio(isSelected ? 1 : 0.93),
+                    angularInset: 1.5
+                )
+                .cornerRadius(4)
+                .foregroundStyle(categoryColor(item.category))
+                .opacity(selected == nil || isSelected ? 1 : 0.35)
+            }
+            .chartAngleSelection(value: $donutSelectedValue)
+            .chartBackground { proxy in
+                GeometryReader { geometry in
+                    if let plotFrame = proxy.plotFrame {
+                        let frame = geometry[plotFrame]
+                        VStack(spacing: 2) {
+                            Text(selected?.category ?? "Всего")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+
+                            Text(TagFormatting.rub(selected?.total ?? total))
+                                .font(.title3.weight(.bold))
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+
+                            if let selected {
+                                Text(formattedPercent(total > 0 ? selected.total / total : 0))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                             }
                         }
+                        .frame(width: frame.width * 0.55)
+                        .position(x: frame.midX, y: frame.midY)
                     }
                 }
-                .chartOverlay { proxy in
-                    GeometryReader { geometry in
+            }
+            .frame(height: 240)
+            .sensoryFeedback(.selection, trigger: selected?.category)
+
+            categoryLegend(items, total: total)
+        }
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .animation(.smooth(duration: 0.25), value: selected?.category)
+    }
+
+    private func donutCategory(atCumulative value: Double, in items: [AnalyticsCategoryTotal]) -> AnalyticsCategoryTotal? {
+        var accumulated = 0.0
+        for item in items {
+            accumulated += item.total
+            if value <= accumulated {
+                return item
+            }
+        }
+        return items.last
+    }
+
+    // Лента: одна полоса 100%, поделённая на категории, и легенда под ней.
+    private var categoryStripChart: some View {
+        let items = positiveCategoryTotals
+        let total = items.reduce(0) { $0 + $1.total }
+        let gap: CGFloat = 2
+
+        return VStack(alignment: .leading, spacing: 16) {
+            GeometryReader { geometry in
+                let available = max(geometry.size.width - gap * CGFloat(max(items.count - 1, 0)), 0)
+
+                HStack(spacing: gap) {
+                    ForEach(items) { item in
                         Rectangle()
-                            .fill(.clear)
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let plotFrame = geometry[proxy.plotAreaFrame]
-                                        let yInPlot = value.location.y - plotFrame.origin.y
-
-                                        guard yInPlot >= 0, yInPlot <= proxy.plotAreaSize.height else {
-                                            return
-                                        }
-
-                                        if let nearestCategoryName = nearestCategory(
-                                            at: yInPlot,
-                                            plotHeight: proxy.plotAreaSize.height
-                                        ) {
-                                            if selectedCategoryName != nearestCategoryName {
-                                                selectedCategoryName = nearestCategoryName
-
-                                                if lastHapticCategoryName != nearestCategoryName {
-                                                    let generator = UIImpactFeedbackGenerator(style: .light)
-                                                    generator.impactOccurred(intensity: 0.7)
-                                                    lastHapticCategoryName = nearestCategoryName
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .onEnded { value in
-                                        let totalTranslation = abs(value.translation.width) + abs(value.translation.height)
-
-                                        if totalTranslation < 10, let selectedCategoryName {
-                                            categoryNavigationTarget = selectedCategoryName
-                                        }
-
-                                        selectedCategoryName = nil
-                                        lastHapticCategoryName = nil
-                                    }
-                            )
+                            .fill(categoryColor(item.category))
+                            .frame(width: total > 0 ? max(available * CGFloat(item.total / total), 2) : 0)
                     }
                 }
-                .padding()
-                .background(Color.gray.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .animation(.smooth(duration: 0.25), value: selectedCategoryName)
+            }
+            .frame(height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            categoryLegend(items, total: total)
+        }
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// Легенда в две колонки: цвет, категория, доля. Тап — операции категории.
+    private func categoryLegend(_ items: [AnalyticsCategoryTotal], total: Double) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+            alignment: .leading,
+            spacing: 10
+        ) {
+            ForEach(items) { item in
+                Button {
+                    categoryNavigationTarget = item.category
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(categoryColor(item.category))
+                            .frame(width: 8, height: 8)
+
+                        Text(item.category)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 4)
+
+                        Text(formattedPercent(total > 0 ? item.total / total : 0))
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -1563,6 +1781,31 @@ struct AnalyticsView: View {
             return String(format: "%.0fK ₽", value / 1_000)
         } else {
             return String(format: "%.0f ₽", value)
+        }
+    }
+}
+
+/// Варианты отображения графика по категориям.
+enum CategoryChartStyle: String, CaseIterable, Identifiable {
+    case bars
+    case donut
+    case strip
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bars: return "Полосы"
+        case .donut: return "Кольцо"
+        case .strip: return "Лента"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .bars: return "chart.bar.xaxis"
+        case .donut: return "chart.pie.fill"
+        case .strip: return "rectangle.split.3x1.fill"
         }
     }
 }
