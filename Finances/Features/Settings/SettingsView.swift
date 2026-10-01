@@ -14,7 +14,12 @@ struct SettingsView: View {
     @Query
     private var transactions: [Transaction]
 
-    @State private var isShowingAddCurrency = false
+    @Query
+    private var categories: [ExpenseCategoryItem]
+
+    @Query
+    private var tags: [TransactionTag]
+
     @State private var isExporting = false
     @State private var exportFileURL: URL?
     @State private var isShowingImportPicker = false
@@ -23,141 +28,26 @@ struct SettingsView: View {
     @State private var exportErrorMessage: String?
     @State private var importErrorMessage: String?
     @State private var importSuccessMessage: String?
+    @State private var importCount = 0
 
     private var rateSync: ExchangeRateSync { .shared }
 
-    /// Сколько операций в каждой валюте.
-    private var operationCounts: [String: Int] {
-        var counts: [String: Int] = [:]
-        for transaction in transactions {
-            counts[CurrencyDisplay.normalizedCode(from: transaction.currencyCode), default: 0] += 1
-        }
-        return counts
-    }
-
-    /// Сначала валюты, в которых больше всего операций, потом остальные по коду.
-    private func displayedTrackedRates(_ counts: [String: Int]) -> [TrackedExchangeRate] {
-        trackedRates.sorted { lhs, rhs in
-            let left = counts[CurrencyDisplay.normalizedCode(from: lhs.code)] ?? 0
-            let right = counts[CurrencyDisplay.normalizedCode(from: rhs.code)] ?? 0
-            if left != right { return left > right }
-            return lhs.code < rhs.code
-        }
-    }
-
-    /// Откуда курсы, как считаются рубли и когда обновлялись.
-    private var ratesFooter: String {
-        if let error = rateSync.lastError { return error }
-        var text = "Курсы ЦБ РФ, для валют, которых у ЦБ нет, — открытый currency-api. Рубли у каждой операции считаются по курсу на её дату."
-        if let updated = rateSync.lastUpdated {
-            text += " Обновлено \(Self.relative(updated))."
-        }
-        return text
-    }
-
-    private static func relative(_ date: Date) -> String {
-        let calendar = Calendar.current
-        let time = date.formatted(.dateTime.hour().minute().locale(Locale(identifier: "ru_RU")))
-        if calendar.isDateInToday(date) { return "сегодня в \(time)" }
-        if calendar.isDateInYesterday(date) { return "вчера в \(time)" }
-        return "\(date.formatted(.dateTime.day().month(.wide).locale(Locale(identifier: "ru_RU")))) в \(time)"
-    }
-
     var body: some View {
-        let counts = operationCounts
-        let rateTable = RubRateTable(rates: dailyRates)
-        let displayedRates = displayedTrackedRates(counts)
-
         NavigationStack {
-            Form {
-                Section {
-                    ForEach(displayedRates) { rate in
-                        let code = CurrencyDisplay.normalizedCode(from: rate.code)
-                        CurrencyRateRow(rate: rate, latest: rateTable.latest(code))
-                        // Валюты из операций всё равно вернутся в список.
-                        .deleteDisabled((counts[code] ?? 0) > 0)
-                    }
-                    .onDelete { offsets in
-                        deleteTrackedRates(offsets.map { displayedRates[$0] })
-                    }
-
-                    Button {
-                        isShowingAddCurrency = true
-                    } label: {
-                        Label("Добавить валюту", systemImage: "plus")
-                    }
-
-                    Button {
-                        Task { await rateSync.run(context: modelContext) }
-                    } label: {
-                        HStack {
-                            Label(rateSync.isRunning ? "Обновляем курсы…" : "Обновить курсы", systemImage: "arrow.clockwise")
-                            Spacer()
-                            if rateSync.isRunning {
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(rateSync.isRunning)
-                } header: {
-                    Text("Валюты и курсы")
-                } footer: {
-                    Text(ratesFooter)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    ratesSection
+                    accountingSection
+                    checksSection
+                    backupSection
+                    appFooter
                 }
-
-                Section("Данные") {
-                    NavigationLink("Категории") {
-                        CategoriesView()
-                    }
-
-                    NavigationLink("Запомненные мерчанты") {
-                        LearnedMerchantsView()
-                    }
-
-                    AICategorizationRow()
-                    
-                    NavigationLink("Метки") {
-                        TagsManagementView()
-                    }
-
-                    NavigationLink("Поиск дублей") {
-                        DuplicatesView()
-                    }
-
-                    NavigationLink("История импортов") {
-                        ImportHistoryView()
-                    }
-                }
-                
-                Section("Резервное копирование") {
-                    Button {
-                        exportData()
-                    } label: {
-                        HStack {
-                            Label("Экспортировать данные", systemImage: "square.and.arrow.up")
-                            Spacer()
-                            if isExporting {
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(isExporting)
-                    
-                    Button {
-                        isShowingImportPicker = true
-                    } label: {
-                        Label("Импортировать данные", systemImage: "square.and.arrow.down")
-                    }
-                    
-                    Text("Экспорт создает JSON-файл со всеми данными. При импорте можно добавить данные к существующим (дубликаты автоматически пропускаются) или полностью заменить все данные.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Настройки")
-            .sheet(isPresented: $isShowingAddCurrency) {
-                AddTrackedCurrencyView()
-            }
             .fileExporter(
                 isPresented: Binding(
                     get: { exportFileURL != nil },
@@ -193,6 +83,9 @@ struct SettingsView: View {
             } message: { _ in
                 Text("Выберите способ импорта данных")
             }
+            .onAppear {
+                importCount = ImportHistory.loadRecords().count
+            }
             .task {
                 // Приложение могло долго висеть в фоне — тихо освежаем курсы.
                 let isStale = rateSync.lastUpdated.map { Date.now.timeIntervalSince($0) > 6 * 60 * 60 } ?? true
@@ -227,11 +120,219 @@ struct SettingsView: View {
         }
     }
 
-    private func deleteTrackedRates(_ rates: [TrackedExchangeRate]) {
-        for rate in rates {
-            modelContext.delete(rate)
+    // MARK: - Sections
+
+    /// Лента курсов: самые используемые валюты, «Все» — полный список.
+    private var ratesSection: some View {
+        let counts = CurrencyRatesSummary.operationCounts(transactions)
+        let table = RubRateTable(rates: dailyRates)
+        let rates = CurrencyRatesSummary.sorted(trackedRates, by: counts)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader("Курсы валют") {
+                NavigationLink {
+                    CurrencyRatesView()
+                } label: {
+                    Text("Все")
+                        .font(.subheadline.weight(.semibold))
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(rates.prefix(8)) { rate in
+                        NavigationLink {
+                            CurrencyRatesView()
+                        } label: {
+                            CurrencyRateTile(rate: rate, latest: table.latest(rate.code))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+            .padding(.horizontal, -16)
+
+            HStack(spacing: 8) {
+                Text(ratesStatus)
+                    .font(.caption)
+                    .foregroundStyle(rateSync.lastError == nil ? Color.secondary : Color.orange)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Button {
+                    Task { await rateSync.run(context: modelContext) }
+                } label: {
+                    Group {
+                        if rateSync.isRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.footnote.weight(.semibold))
+                        }
+                    }
+                    .frame(width: 30, height: 30)
+                    .background(Color(.tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(rateSync.isRunning)
+                .accessibilityLabel("Обновить курсы")
+            }
+            .padding(.horizontal, 4)
         }
-        try? modelContext.save()
+    }
+
+    private var ratesStatus: String {
+        if rateSync.isRunning { return "Обновляем курсы…" }
+        if rateSync.lastError != nil { return "Нет связи — считаем по последним известным курсам." }
+        guard let updated = rateSync.lastUpdated else { return "Курсы ЦБ РФ на дату каждой операции." }
+        return "ЦБ РФ · обновлено \(CurrencyRatesSummary.updatedText(updated))"
+    }
+
+    private var accountingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader("Учёт")
+
+            SettingsCard {
+                NavigationLink {
+                    CategoriesView()
+                } label: {
+                    SettingsRow(title: "Категории", systemImage: "square.grid.2x2.fill", color: .orange, value: categories.isEmpty ? nil : "\(categories.count)")
+                }
+                .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                NavigationLink {
+                    TagsManagementView()
+                } label: {
+                    SettingsRow(title: "Метки", systemImage: "tag.fill", color: .blue, value: tags.isEmpty ? nil : "\(tags.count)")
+                }
+                .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                NavigationLink {
+                    LearnedMerchantsView()
+                } label: {
+                    SettingsRow(title: "Запомненные мерчанты", systemImage: "storefront.fill", color: .green)
+                }
+                .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                AICategorizationRow()
+            }
+        }
+    }
+
+    private var checksSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader("Импорт и проверка")
+
+            SettingsCard {
+                NavigationLink {
+                    ImportHistoryView()
+                } label: {
+                    SettingsRow(title: "История импортов", systemImage: "clock.arrow.circlepath", color: .indigo, value: importCount > 0 ? "\(importCount)" : nil)
+                }
+                .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                NavigationLink {
+                    DuplicatesView()
+                } label: {
+                    SettingsRow(title: "Поиск дублей", systemImage: "doc.on.doc.fill", color: .red)
+                }
+                .buttonStyle(SettingsPressStyle())
+            }
+        }
+    }
+
+    private var backupSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader("Резервная копия")
+
+            HStack(spacing: 12) {
+                backupTile(
+                    title: "Экспорт",
+                    subtitle: "Все данные в JSON-файл",
+                    systemImage: "square.and.arrow.up",
+                    color: .blue,
+                    isBusy: isExporting,
+                    action: exportData
+                )
+                backupTile(
+                    title: "Импорт",
+                    subtitle: "Добавить или заменить",
+                    systemImage: "square.and.arrow.down",
+                    color: .teal,
+                    isBusy: false
+                ) {
+                    isShowingImportPicker = true
+                }
+            }
+
+            Text("При импорте можно добавить данные к существующим — дубли пропускаются — или полностью заменить всё.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private func backupTile(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        color: Color,
+        isBusy: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SettingsIcon(systemImage: systemImage, color: color, size: 40)
+                    Spacer()
+                    if isBusy {
+                        ProgressView()
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground))
+        }
+        .buttonStyle(SettingsPressStyle())
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .disabled(isBusy)
+    }
+
+    private var appFooter: some View {
+        let info = Bundle.main.infoDictionary
+        let name = info?["CFBundleDisplayName"] as? String ?? info?["CFBundleName"] as? String ?? "Finances"
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String ?? "1"
+
+        return VStack(spacing: 2) {
+            Text(name)
+                .font(.footnote.weight(.semibold))
+            Text("Версия \(version) (\(build))")
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Export/Import Methods

@@ -259,8 +259,9 @@ struct AICategorizationRow: View {
         let unavailableReason = AICategorizer.unavailableReason
 
         VStack(alignment: .leading, spacing: 6) {
-            Toggle(isOn: $isEnabled) {
-                Label("Угадывать категории нейросетью", systemImage: "sparkles")
+            HStack(spacing: 14) {
+                SettingsIcon(systemImage: "sparkles", color: .purple)
+                Toggle("Угадывать категории нейросетью", isOn: $isEnabled)
             }
             .onChange(of: isEnabled) { _, newValue in
                 AICategorizer.isEnabled = newValue
@@ -280,8 +281,11 @@ struct AICategorizationRow: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            // Подпись — под названием, а не под иконкой.
+            .padding(.leading, 46)
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
     }
 
     private func runNow() {
