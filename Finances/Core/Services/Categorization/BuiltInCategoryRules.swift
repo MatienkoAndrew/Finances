@@ -18,7 +18,6 @@ struct BuiltInCategoryRule: Identifiable {
     let subcategoryName: String?
     let matchMode: MatchMode
     let description: String
-    var isEnabled: Bool
     /// Паттерн, подготовленный под `matchMode`, — чтобы не разбирать его на каждой операции.
     private let needle: String
 
@@ -28,8 +27,7 @@ struct BuiltInCategoryRule: Identifiable {
         categoryName: String,
         subcategoryName: String? = nil,
         matchMode: MatchMode? = nil,
-        description: String,
-        isEnabled: Bool = true
+        description: String
     ) {
         self.id = id
         self.pattern = pattern
@@ -40,7 +38,6 @@ struct BuiltInCategoryRule: Identifiable {
         let mode = matchMode ?? (squashed.count <= 4 ? .word : .substring)
         self.matchMode = mode
         self.description = description
-        self.isEnabled = isEnabled
 
         let words = MerchantName.words(pattern)
         switch mode {
@@ -72,7 +69,6 @@ struct MerchantText {
 
 /// Менеджер встроенных правил категоризации
 enum BuiltInCategoryRulesManager {
-    private static let storageKey = "builtInCategoryRulesStates"
 
     /// Все доступные встроенные правила. Порядок важен: срабатывает первое подходящее,
     /// поэтому конкретные бренды идут раньше общих слов («GRABFOOD» раньше «GRAB»,
@@ -298,45 +294,9 @@ enum BuiltInCategoryRulesManager {
         "SMALL": .word, "ACTIV": .word, "METRO": .word, "SHELL": .word, "LOTUS": .word
     ]
 
-    /// Загрузить состояния правил из UserDefaults
-    static func loadStates() -> [String: Bool] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let states = try? JSONDecoder().decode([String: Bool].self, from: data) else {
-            return [:]
-        }
-        return states
-    }
-
-    /// Сохранить состояния правил в UserDefaults
-    static func saveStates(_ states: [String: Bool]) {
-        if let data = try? JSONEncoder().encode(states) {
-            UserDefaults.standard.set(data, forKey: storageKey)
-        }
-        cachedActiveRules = nil
-    }
-
-    private static var cachedActiveRules: [BuiltInCategoryRule]?
-
-    /// Получить активные правила с учётом настроек пользователя
+    /// Правила словаря. Раньше их можно было выключать по одному; теперь неверную
+    /// категорию мерчанта поправляют выбором у операции — он важнее словаря.
     static func getActiveRules() -> [BuiltInCategoryRule] {
-        if let cachedActiveRules { return cachedActiveRules }
-
-        let states = loadStates()
-        let active = allRules.map { rule in
-            var mutableRule = rule
-            if let savedState = states[rule.id] {
-                mutableRule.isEnabled = savedState
-            }
-            return mutableRule
-        }.filter { $0.isEnabled }
-        cachedActiveRules = active
-        return active
-    }
-
-    /// Обновить состояние конкретного правила
-    static func updateRuleState(id: String, isEnabled: Bool) {
-        var states = loadStates()
-        states[id] = isEnabled
-        saveStates(states)
+        allRules
     }
 }

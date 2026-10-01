@@ -32,6 +32,19 @@ enum AIMerchantCategoryCache {
         }
     }
 
+    /// Все сохранённые ответы: ключ мерчанта → категория.
+    static var all: [String: CategoryMatch] {
+        entries.mapValues { CategoryMatch(category: $0.category, subcategory: $0.subcategory) }
+    }
+
+    /// Забыть ответ по мерчанту (пользователь выбрал категорию сам или попросил забыть).
+    static func remove(_ merchantKey: String) {
+        guard entries.removeValue(forKey: merchantKey) != nil else { return }
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+
     /// Переносит сохранённые ответы на новую структуру категорий.
     static func remap(_ transform: (CategoryMatch) -> CategoryMatch) {
         entries = entries.mapValues { entry in
