@@ -152,8 +152,7 @@ final class ImportTestEnvironment {
             accounts: accounts,
             rules: [],
             categories: [],
-            rates: [],
-            fallbackKztPerRub: 5
+            rubRates: RubRateTable(fallback: ["KZT": 1.0 / 5])
         )
         result.accountsToCreate.forEach { context.insert($0) }
         result.transactions.forEach { context.insert($0) }

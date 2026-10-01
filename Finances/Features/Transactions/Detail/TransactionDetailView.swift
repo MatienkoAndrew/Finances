@@ -163,6 +163,12 @@ struct TransactionDetailView: View {
     private func saveChanges() {
         guard let parsedAmount = parseNumber(editedAmountText) else { return }
 
+        let editedCode = CurrencyDisplay.normalizedCode(from: editedCurrencyCode)
+        // ₽-эквивалент меняется, только если поменялось то, от чего он зависит.
+        let needsRubAmount = parsedAmount != transaction.amount
+            || editedCode != CurrencyDisplay.normalizedCode(from: transaction.currencyCode)
+            || !Calendar.current.isDate(editedDate, inSameDayAs: transaction.date)
+
         transaction.date = editedDate
         transaction.amount = parsedAmount
         transaction.currencyCode = CurrencyDisplay.normalizedCode(from: editedCurrencyCode)
@@ -203,18 +209,19 @@ struct TransactionDetailView: View {
             }
         }
 
-        transaction.rubAmount = TransactionRubConverter.rubAmount(
-            amount: transaction.amount,
-            currencyCode: transaction.currencyCode,
-            settings: settings,
-            trackedRates: trackedRates
-        )
+        if needsRubAmount {
+            transaction.rubAmount = RubRateTable.load(context: modelContext)
+                .rubAmount(amount: transaction.amount, currencyCode: transaction.currencyCode, on: transaction.date)
+        }
 
         // Если пользователь сменил дату — операция могла попасть в период другой метки.
         // Не удаляем уже стоящие теги, только добавляем новые подходящие.
         TransactionTagSync.applyPeriodTags(to: transaction, allTags: allTags)
 
         try? modelContext.save()
+        if needsRubAmount {
+            Task { await ExchangeRateSync.shared.run(context: modelContext) }
+        }
         isEditing = false
     }
 

@@ -34,7 +34,8 @@ struct SupportedCurrency: Identifiable, Hashable {
             .map { code in
                 SupportedCurrency(
                     code: code,
-                    name: locale.localizedString(forCurrencyCode: code)?.capitalized ?? code,
+                    // Заглавная только первая буква: «Доллар США», а не «Доллар Сша».
+                    name: locale.localizedString(forCurrencyCode: code).map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? code,
                     symbol: symbol(for: code)
                 )
             }

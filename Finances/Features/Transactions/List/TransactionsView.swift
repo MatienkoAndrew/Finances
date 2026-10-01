@@ -18,9 +18,6 @@ struct TransactionsView: View {
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
-    @Query(sort: \ExchangeRateEntry.date, order: .reverse)
-    private var rates: [ExchangeRateEntry]
-
     @Query
     private var settingsList: [AppSettings]
 
@@ -459,8 +456,7 @@ struct TransactionsView: View {
                 accounts: accounts,
                 rules: categoryRules,
                 categories: categories,
-                rates: rates,
-                fallbackKztPerRub: settings?.kztPerRub
+                rubRates: RubRateTable.load(context: modelContext)
             )
 
             for account in importResult.accountsToCreate {
@@ -475,6 +471,9 @@ struct TransactionsView: View {
             TransactionTagSync.applyPeriodTags(to: importResult.transactions, context: modelContext)
 
             try modelContext.save()
+
+            // Курсы на даты из выписки, которых ещё нет, — догрузятся и пересчитают рубли.
+            Task { await ExchangeRateSync.shared.run(context: modelContext) }
 
             let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
 

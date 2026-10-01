@@ -243,8 +243,7 @@ struct ContentView: View {
                     accounts: accounts,
                     rules: categoryRules,
                     categories: categories,
-                    rates: rates,
-                    fallbackKztPerRub: settings?.kztPerRub
+                    rubRates: RubRateTable.load(context: modelContext)
                 )
 
                 for account in result.accountsToCreate {
