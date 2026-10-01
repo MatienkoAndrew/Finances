@@ -30,7 +30,8 @@ struct AnalyticsView: View {
     @State private var selectedCategoryName: String?
     @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
-    @State private var expandedCategories: Set<String> = []
+    /// Категории с подкатегориями раскрыты сразу, как в Alipay; здесь — свёрнутые вручную.
+    @State private var collapsedCategories: Set<String> = []
 
     @State private var pagingSessionStartAnchorDate: Date?
     @State private var didInitializeAnchor = false
@@ -782,10 +783,10 @@ struct AnalyticsView: View {
         }
     }
 
-    /// Карточка категории. Категория с подкатегориями раскрывается по тапу
-    /// в плитки подкатегорий (как в Alipay), остальные сразу ведут к операциям.
+    /// Карточка категории. Категория с подкатегориями показывает плитки подкатегорий
+    /// (как в Alipay) и сворачивается по тапу, остальные сразу ведут к операциям.
     private func categoryCard(_ item: AnalyticsCategoryTotal) -> some View {
-        let isExpanded = expandedCategories.contains(item.category)
+        let isExpanded = !collapsedCategories.contains(item.category)
 
         return VStack(alignment: .leading, spacing: 12) {
             if item.subcategories.isEmpty {
@@ -799,9 +800,9 @@ struct AnalyticsView: View {
                 Button {
                     withAnimation(.snappy(duration: 0.25)) {
                         if isExpanded {
-                            expandedCategories.remove(item.category)
+                            collapsedCategories.insert(item.category)
                         } else {
-                            expandedCategories.insert(item.category)
+                            collapsedCategories.remove(item.category)
                         }
                     }
                 } label: {
