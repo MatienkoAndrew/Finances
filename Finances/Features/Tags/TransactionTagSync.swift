@@ -7,10 +7,10 @@
 //  Принцип: у `TransactionTag` есть опциональное поле `autoCurrencyCode`.
 //  Если оно задано — метка автоматически навешивается на любую транзакцию,
 //  совершённую в стране этой валюты. Обычно страна — это валюта мерчанта
-//  (`foreignCurrencyCode ?? currencyCode`), а для USD и EUR её определяет
-//  `TripCurrencyResolver` по соседним дням: доллары, потраченные в Корее,
-//  получают «Южную Корею», а не «США». Это работает и при создании транзакций
-//  вручную, и при импорте, и при редактировании.
+//  (`foreignCurrencyCode ?? currencyCode`), но её уточняет `TripCurrencyResolver`:
+//  доллары и юани, потраченные в даты поездки в Корею, получают «Южную Корею»,
+//  а не «США» или «Китай». Это работает и при создании транзакций вручную,
+//  и при импорте, и при редактировании.
 //
 
 import Foundation
@@ -29,7 +29,7 @@ enum TransactionTagSync {
     ) -> Int {
         let autoTags = autoTags(in: allTags)
         guard !autoTags.isEmpty else { return 0 }
-        let resolver = TripCurrencyResolver(around: transaction, context: context)
+        let resolver = TripCurrencyResolver(around: transaction, tags: allTags, context: context)
         return applyAutoTags(to: transaction, autoTags: autoTags, resolver: resolver)
     }
 
@@ -40,11 +40,12 @@ enum TransactionTagSync {
         to transactions: [Transaction],
         context: ModelContext
     ) -> Int {
-        let autoTags = autoTags(in: (try? context.fetch(FetchDescriptor<TransactionTag>())) ?? [])
+        let tags = (try? context.fetch(FetchDescriptor<TransactionTag>())) ?? []
+        let autoTags = autoTags(in: tags)
         guard !autoTags.isEmpty else { return 0 }
 
         let all = (try? context.fetch(FetchDescriptor<Transaction>())) ?? transactions
-        let resolver = TripCurrencyResolver(transactions: all)
+        let resolver = TripCurrencyResolver(transactions: all, tags: tags)
 
         var touched = 0
         for tx in transactions {
@@ -55,9 +56,9 @@ enum TransactionTagSync {
         return touched
     }
 
-    /// Приводит метки в порядок при старте: убирает копии меток с одинаковым именем
+    /// Приводит метки в порядок: убирает копии меток с одинаковым именем
     /// и переставляет авто-метки — доллары, потраченные в Корее, переезжают из «США»
-    /// в «Южную Корею». Безопасно запускать при каждом старте.
+    /// в «Южную Корею». Запускается при старте и после правки метки.
     static func run(context: ModelContext) {
         let byAge = FetchDescriptor<TransactionTag>(sortBy: [SortDescriptor(\.createdAt)])
         guard let tags = try? context.fetch(byAge),
@@ -79,7 +80,7 @@ enum TransactionTagSync {
 
         let autoTags = autoTags(in: kept)
         if !autoTags.isEmpty {
-            let resolver = TripCurrencyResolver(transactions: transactions)
+            let resolver = TripCurrencyResolver(transactions: transactions, tags: kept)
             for tx in transactions where tx.kind != .transfer {
                 if let merchant = CurrencyTagSuggestions.merchantCurrency(of: tx),
                    let location = resolver.locationCurrency(of: tx),

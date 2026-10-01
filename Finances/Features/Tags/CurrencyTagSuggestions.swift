@@ -30,7 +30,7 @@ enum CurrencyTagSuggestions {
 
     /// Валюта приложения по умолчанию. Транзакции в ней не считаются «иностранными»
     /// и не порождают подсказку метки-страны.
-    private static let baseCurrencyCode = "RUB"
+    static let baseCurrencyCode = "RUB"
 
     /// Карта поддерживаемых валют → страна / иконка / цвет.
     /// Список умышленно не исчерпывающий: то, что не покрыто, просто
@@ -127,7 +127,7 @@ enum CurrencyTagSuggestions {
     ) -> [CurrencyTagSuggestion] {
         let existingNames = Set(existingTags.map { $0.name.lowercased() })
         let existingCodes = Set(existingTags.compactMap { $0.autoCurrencyCode?.uppercased() })
-        let resolver = TripCurrencyResolver(transactions: transactions)
+        let resolver = TripCurrencyResolver(transactions: transactions, tags: existingTags)
 
         var counts: [String: Int] = [:]
         var firstDates: [String: Date] = [:]
@@ -166,20 +166,17 @@ enum CurrencyTagSuggestions {
     }
 
     /// Создаёт метку из подсказки и применяет её ко всем подходящим транзакциям.
-    /// Возвращает количество затронутых транзакций.
-    @discardableResult
     static func createTag(
         from suggestion: CurrencyTagSuggestion,
-        transactions: [Transaction],
         modelContext: ModelContext
-    ) -> Int {
+    ) {
         // Второе касание по карточке, пока она исчезает, не должно создать копию.
         let existingTags = (try? modelContext.fetch(FetchDescriptor<TransactionTag>())) ?? []
         let isTaken = existingTags.contains {
             $0.name.caseInsensitiveCompare(suggestion.info.countryName) == .orderedSame
                 || $0.autoCurrencyCode?.uppercased() == suggestion.info.code
         }
-        guard !isTaken else { return 0 }
+        guard !isTaken else { return }
 
         let calendar = Calendar.current
         let startDate = calendar.startOfDay(for: suggestion.firstDate)
@@ -195,15 +192,8 @@ enum CurrencyTagSuggestions {
         )
         modelContext.insert(tag)
 
-        let code = suggestion.info.code
-        let resolver = TripCurrencyResolver(transactions: transactions)
-        var applied = 0
-        for tx in transactions where tx.kind != .transfer {
-            guard resolver.locationCurrency(of: tx) == code else { continue }
-            tx.addTag(tag.name)
-            applied += 1
-        }
-        return applied
+        // Заодно доллары и юани из этой поездки переедут из чужих меток.
+        TransactionTagSync.run(context: modelContext)
     }
 
     /// Краткое описание периода: например "5–8 ноя 2025" или "окт 2024 – мар 2025".
