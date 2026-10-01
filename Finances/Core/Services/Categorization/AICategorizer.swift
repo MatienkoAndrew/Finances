@@ -32,6 +32,17 @@ enum AIMerchantCategoryCache {
         }
     }
 
+    /// Переносит сохранённые ответы на новую структуру категорий.
+    static func remap(_ transform: (CategoryMatch) -> CategoryMatch) {
+        entries = entries.mapValues { entry in
+            let match = transform(CategoryMatch(category: entry.category, subcategory: entry.subcategory))
+            return Entry(category: match.category, subcategory: match.subcategory)
+        }
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+
     private static func load() -> [String: Entry] {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
