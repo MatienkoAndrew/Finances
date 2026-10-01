@@ -61,7 +61,7 @@ struct BuiltInRulesView: View {
                                         .font(.body)
                                         .foregroundStyle(rule.isEnabled ? .primary : .secondary)
                                     
-                                    Text("Паттерн: \(rule.pattern)")
+                                    Text("Паттерн: \(rule.pattern)" + (rule.subcategoryName.map { " → \($0)" } ?? ""))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 8)

@@ -97,7 +97,8 @@ enum PDFImporter {
             fallbackKztPerRub: fallbackKztPerRub,
             fileName: fileName,
             importedAt: importedAt,
-            settledBefore: settledBoundary(for: statement)
+            settledBefore: settledBoundary(for: statement),
+            memory: MerchantCategoryMemory(transactions: existingTransactions)
         )
 
         let candidates = matchCandidates(
@@ -180,6 +181,8 @@ enum PDFImporter {
         let importedAt: Date
         /// Операции до этой даты (не включительно) уже проведены окончательно.
         let settledBefore: Date
+        /// Категории, которые пользователь сам выбирал для мерчантов.
+        let memory: MerchantCategoryMemory
 
         func isSettled(_ row: ParsedStatementRow) -> Bool {
             row.date < settledBefore
@@ -281,7 +284,9 @@ enum PDFImporter {
                 transaction.fromAccount = transaction.toAccount ?? context.kaspiAccount
                 transaction.toAccount = nil
                 if transaction.categoryName == nil {
-                    transaction.categoryName = matchCategory(for: row, context: context)
+                    let match = matchCategory(for: row, context: context)
+                    transaction.categoryName = match?.category
+                    transaction.subcategoryName = match?.subcategory
                 }
                 outcome.repaired = true
             }
@@ -334,7 +339,7 @@ enum PDFImporter {
         var toAccount: Account?
         var toAmount: Double?
         var toCurrencyCode: String?
-        var categoryName: String?
+        var category: CategoryMatch?
 
         switch (row.operationType, isCredit) {
         case (.withdrawal, false):
@@ -359,13 +364,13 @@ enum PDFImporter {
             toAccount = kaspiAccount
             // Курсовая разница «в плюс» уменьшает расходы своей категории — нужна категория покупки.
             if row.isExchangeRateDifference {
-                categoryName = matchCategory(for: row, context: context)
+                category = matchCategory(for: row, context: context)
             }
 
         case (_, false):
             kind = .expense
             fromAccount = kaspiAccount
-            categoryName = matchCategory(for: row, context: context)
+            category = matchCategory(for: row, context: context)
         }
 
         return Transaction(
@@ -384,7 +389,8 @@ enum PDFImporter {
                 date: row.date,
                 context: context
             ),
-            categoryName: categoryName,
+            categoryName: category?.category,
+            subcategoryName: category?.subcategory,
             note: row.isExchangeRateDifference ? Transaction.exchangeRateDifferenceNote : nil,
             fingerprint: fingerprint,
             sourceFileName: context.fileName,
@@ -395,12 +401,13 @@ enum PDFImporter {
         )
     }
 
-    private static func matchCategory(for row: ParsedStatementRow, context: ImportContext) -> String? {
-        CategoryRuleEngine.matchCategoryName(
+    private static func matchCategory(for row: ParsedStatementRow, context: ImportContext) -> CategoryMatch? {
+        CategoryRuleEngine.match(
             operationType: row.operationType.rawValue,
             details: row.details,
             rules: context.rules,
-            existingCategories: context.categories
+            existingCategories: context.categories,
+            memory: context.memory
         )
     }
 

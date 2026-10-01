@@ -15,13 +15,19 @@ struct TransactionRowView: View {
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
-    @State private var isShowingAddCategory = false
+    @State private var isShowingCategoryPicker = false
+    @State private var pickedCategory: CategoryMatch?
     @State private var pendingCategoryChange: PendingCategoryChange? = nil
 
     private struct PendingCategoryChange: Identifiable {
         let id = UUID()
         let categoryName: String
+        let subcategoryName: String?
         let matchingCount: Int
+
+        var title: String {
+            subcategoryName.map { "\(categoryName) · \($0)" } ?? categoryName
+        }
     }
 
     private var settings: AppSettings? {
@@ -60,10 +66,10 @@ struct TransactionRowView: View {
         ) {
             if let pending = pendingCategoryChange {
                 Button("Применить ко всем \(pending.matchingCount) транзакциям") {
-                    applyToAll(categoryName: pending.categoryName)
+                    applyToAll(categoryName: pending.categoryName, subcategoryName: pending.subcategoryName)
                 }
                 Button("Только эта транзакция") {
-                    applySingle(categoryName: pending.categoryName)
+                    applySingle(categoryName: pending.categoryName, subcategoryName: pending.subcategoryName)
                 }
                 Button("Отмена", role: .cancel) {
                     pendingCategoryChange = nil
@@ -71,14 +77,14 @@ struct TransactionRowView: View {
             }
         } message: {
             if let pending = pendingCategoryChange {
-                Text("Найдено ещё \(pending.matchingCount - 1) \(pluralTransactions(pending.matchingCount - 1)) с названием «\(transaction.details)». Назначить категорию «\(pending.categoryName)» всем?")
+                Text("Найдено ещё \(pending.matchingCount - 1) \(pluralTransactions(pending.matchingCount - 1)) от «\(MerchantName.key(transaction.details))». Назначить «\(pending.title)» всем? Новые операции этого места тоже получат эту категорию.")
             }
         }
     }
 
     private var confirmationDialogTitle: String {
         guard let pending = pendingCategoryChange else { return "" }
-        return "Применить «\(pending.categoryName)» ко всем?"
+        return "Применить «\(pending.title)» ко всем?"
     }
 
     private func pluralTransactions(_ count: Int) -> String {
@@ -148,76 +154,34 @@ struct TransactionRowView: View {
     @ViewBuilder
     private var categoryMenu: some View {
         if transaction.kind == .expense {
-            Menu {
-                ForEach(categories) { category in
-                    Button {
-                        updateCategory(category.name)
-                    } label: {
-                        HStack {
-                            Text(category.name)
-
-                            if transaction.categoryName == category.name {
-                                Spacer()
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-
-                Divider()
-
-                Button {
-                    isShowingAddCategory = true
-                } label: {
-                    Label("Новая категория", systemImage: "plus.circle.fill")
-                }
+            Button {
+                isShowingCategoryPicker = true
             } label: {
-                categoryChipLabel
+                CategoryChip(
+                    category: categoryItem,
+                    categoryName: transaction.categoryName ?? "Другое",
+                    subcategoryName: transaction.subcategoryName
+                )
             }
-            .menuStyle(.borderlessButton)
-            .sheet(isPresented: $isShowingAddCategory) {
-                AddCategorySheet { newCategoryName in
-                    updateCategory(newCategoryName)
+            .buttonStyle(.borderless)
+            .sheet(isPresented: $isShowingCategoryPicker, onDismiss: applyPickedCategory) {
+                CategoryPickerSheet(
+                    categories: categories,
+                    initialCategory: transaction.categoryName,
+                    initialSubcategory: transaction.subcategoryName,
+                    subtitle: transaction.details
+                ) { category, subcategory in
+                    pickedCategory = category.map { CategoryMatch(category: $0, subcategory: subcategory) }
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private var categoryChipLabel: some View {
-        let name = transaction.categoryName ?? "Другое"
-
-        if let categoryItem {
-            HStack(spacing: 6) {
-                CategoryIconView(category: categoryItem, size: 16)
-
-                Text(name)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.10))
-            .clipShape(Capsule())
-        } else {
-            HStack(spacing: 5) {
-                Text(name)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.10))
-            .clipShape(Capsule())
-        }
+    /// Выбор применяем после закрытия шторки: иначе вопрос «применить ко всем?» не успевает показаться.
+    private func applyPickedCategory() {
+        guard let picked = pickedCategory else { return }
+        pickedCategory = nil
+        updateCategory(picked.category, subcategory: picked.subcategory)
     }
 
     private var resolvedRubAmount: Double? {
@@ -356,67 +320,73 @@ struct TransactionRowView: View {
         }
     }
 
-    /// Точка входа при выборе категории из меню.
-    /// Если у других транзакций то же название — показываем предложение применить ко всем.
-    private func updateCategory(_ name: String?) {
-        guard let name else {
-            applySingle(categoryName: nil)
-            return
-        }
-
-        let details = transaction.details
-        let descriptor = FetchDescriptor<Transaction>(
-            predicate: #Predicate { $0.details == details && $0.kindRaw == "expense" }
-        )
-        let allMatching = (try? modelContext.fetch(descriptor)) ?? []
+    /// Точка входа при выборе категории.
+    /// Если есть другие операции того же места — предлагаем применить ко всем.
+    private func updateCategory(_ name: String, subcategory: String?) {
+        let allMatching = sameMerchantTransactions()
         let otherCount = allMatching.filter { $0.persistentModelID != transaction.persistentModelID }.count
 
         if otherCount > 0 {
             // Есть ещё похожие — показываем шаг подтверждения
             pendingCategoryChange = PendingCategoryChange(
                 categoryName: name,
+                subcategoryName: subcategory,
                 matchingCount: allMatching.count
             )
         } else {
             // Единственная такая транзакция — меняем без лишних вопросов
-            applySingle(categoryName: name)
+            applySingle(categoryName: name, subcategoryName: subcategory)
         }
     }
 
+    /// Расходы того же мерчанта: номер точки и префикс агрегатора не важны
+    /// («PAYOO MCDONALDS 0053A» и «PAYOO MCDONALDS 0017B»).
+    private func sameMerchantTransactions() -> [Transaction] {
+        let key = MerchantName.key(transaction.details)
+        let descriptor = FetchDescriptor<Transaction>(
+            predicate: #Predicate { $0.kindRaw == "expense" }
+        )
+        return ((try? modelContext.fetch(descriptor)) ?? []).filter { MerchantName.key($0.details) == key }
+    }
+
     /// Применяет категорию только к текущей транзакции.
-    private func applySingle(categoryName: String?) {
+    private func applySingle(categoryName: String, subcategoryName: String?) {
         transaction.categoryName = categoryName
+        transaction.subcategoryName = subcategoryName
         transaction.isCategoryManuallySet = true
         try? modelContext.save()
         pendingCategoryChange = nil
     }
 
-    /// Применяет категорию ко всем транзакциям с тем же details + создаёт правило.
-    private func applyToAll(categoryName: String) {
-        let details = transaction.details
-
+    /// Применяет категорию ко всем операциям того же места и создаёт правило для будущих импортов.
+    private func applyToAll(categoryName: String, subcategoryName: String?) {
         // 1. Обновляем все совпадающие транзакции
-        let descriptor = FetchDescriptor<Transaction>(
-            predicate: #Predicate { $0.details == details && $0.kindRaw == "expense" }
-        )
-        let allMatching = (try? modelContext.fetch(descriptor)) ?? []
-        for t in allMatching {
+        for t in sameMerchantTransactions() {
             t.categoryName = categoryName
+            t.subcategoryName = subcategoryName
             t.isCategoryManuallySet = true
         }
 
-        // 2. Создаём правило, чтобы будущие импорты категоризировались автоматически
-        let pattern = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 2. Создаём правило, чтобы будущие импорты категоризировались автоматически.
+        // Паттерн — название без номера точки, если оно входит в исходную строку.
+        let details = transaction.details.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = MerchantName.key(details)
+        let pattern = key.count >= 3 && details.uppercased().contains(key) ? key : details
         let rulesDescriptor = FetchDescriptor<CategoryRule>(
             predicate: #Predicate { $0.pattern == pattern }
         )
         let existingRules = (try? modelContext.fetch(rulesDescriptor)) ?? []
-        if existingRules.isEmpty {
-            let newRule = CategoryRule(pattern: pattern, categoryName: categoryName, priority: 1)
-            modelContext.insert(newRule)
-        } else {
+        if let rule = existingRules.first {
             // Правило уже есть — обновляем категорию
-            existingRules.first?.categoryName = categoryName
+            rule.categoryName = categoryName
+            rule.subcategoryName = subcategoryName
+        } else {
+            modelContext.insert(CategoryRule(
+                pattern: pattern,
+                categoryName: categoryName,
+                subcategoryName: subcategoryName,
+                priority: 1
+            ))
         }
 
         try? modelContext.save()
