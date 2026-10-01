@@ -148,16 +148,18 @@ struct TagEditorSheet: View {
                     .tint(color)
 
                 if hasPeriod {
-                    HStack(spacing: 10) {
-                        datePill("С", selection: $startDate)
-                        Image(systemName: "arrow.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                        datePill("По", selection: $endDate)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(TagFormatting.periodDescription(from: startDate, to: endDate))
+                            .font(.subheadline.weight(.semibold))
+                            .contentTransition(.numericText())
+                        Spacer(minLength: 8)
+                        Text(TagFormatting.operations(periodTransactionCount))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                     }
 
-                    Text("Операций за эти дни: \(periodTransactionCount)")
-                        .font(.subheadline)
+                    DateRangeCalendar(start: $startDate, end: $endDate, tint: color)
                 }
 
                 Text(periodHint)
@@ -174,21 +176,11 @@ struct TagEditorSheet: View {
     }
 
     private var periodHint: String {
+        // Текст не меняется между касаниями: иначе карточка меняет высоту
+        // и календарь съезжает под пальцем.
         hasPeriod
-            ? "Метка встанет на все операции за эти дни — и на новые, добавленные потом."
+            ? "Нажми на первый день, потом на последний. Метка встанет на все операции за эти дни — и на новые, добавленные потом."
             : "Без дат метку ставишь на операции сам, а период в аналитике берётся по ним."
-    }
-
-    private func datePill(_ title: String, selection: Binding<Date>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            DatePicker(title, selection: selection, displayedComponents: .date)
-                .labelsHidden()
-                .datePickerStyle(.compact)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func card<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
