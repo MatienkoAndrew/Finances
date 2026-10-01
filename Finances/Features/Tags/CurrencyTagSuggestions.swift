@@ -119,19 +119,22 @@ enum CurrencyTagSuggestions {
     }
 
     /// Считает предложенные метки-страны.
-    /// Скрывает те страны, для которых уже есть метка с таким же именем.
+    /// Скрывает те страны, для которых уже есть метка с таким же именем или валютой.
+    /// Доллары и евро, потраченные в поездке, считаются за страну поездки.
     static func computeSuggestions(
         transactions: [Transaction],
         existingTags: [TransactionTag]
     ) -> [CurrencyTagSuggestion] {
         let existingNames = Set(existingTags.map { $0.name.lowercased() })
+        let existingCodes = Set(existingTags.compactMap { $0.autoCurrencyCode?.uppercased() })
+        let resolver = TripCurrencyResolver(transactions: transactions)
 
         var counts: [String: Int] = [:]
         var firstDates: [String: Date] = [:]
         var lastDates: [String: Date] = [:]
 
         for tx in transactions where tx.kind != .transfer {
-            guard let code = merchantCurrency(of: tx) else { continue }
+            guard let code = resolver.locationCurrency(of: tx) else { continue }
             if code == baseCurrencyCode { continue }
 
             counts[code, default: 0] += 1
@@ -150,7 +153,7 @@ enum CurrencyTagSuggestions {
 
         return counts.compactMap { (code, count) -> CurrencyTagSuggestion? in
             guard let info = countryByCurrency[code] else { return nil }
-            if existingNames.contains(info.countryName.lowercased()) { return nil }
+            if existingNames.contains(info.countryName.lowercased()) || existingCodes.contains(code) { return nil }
             guard let first = firstDates[code], let last = lastDates[code] else { return nil }
             return CurrencyTagSuggestion(
                 info: info,
@@ -170,6 +173,14 @@ enum CurrencyTagSuggestions {
         transactions: [Transaction],
         modelContext: ModelContext
     ) -> Int {
+        // Второе касание по карточке, пока она исчезает, не должно создать копию.
+        let existingTags = (try? modelContext.fetch(FetchDescriptor<TransactionTag>())) ?? []
+        let isTaken = existingTags.contains {
+            $0.name.caseInsensitiveCompare(suggestion.info.countryName) == .orderedSame
+                || $0.autoCurrencyCode?.uppercased() == suggestion.info.code
+        }
+        guard !isTaken else { return 0 }
+
         let calendar = Calendar.current
         let startDate = calendar.startOfDay(for: suggestion.firstDate)
         let endDate = calendar.startOfDay(for: suggestion.lastDate)
@@ -185,10 +196,10 @@ enum CurrencyTagSuggestions {
         modelContext.insert(tag)
 
         let code = suggestion.info.code
+        let resolver = TripCurrencyResolver(transactions: transactions)
         var applied = 0
         for tx in transactions where tx.kind != .transfer {
-            guard let txCode = merchantCurrency(of: tx) else { continue }
-            if txCode != code { continue }
+            guard resolver.locationCurrency(of: tx) == code else { continue }
             tx.addTag(tag.name)
             applied += 1
         }

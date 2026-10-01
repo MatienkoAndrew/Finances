@@ -405,7 +405,7 @@ struct AddTransactionView: View {
 
         // Авто-применение меток по валюте мерчанта (например, HKD → «Гонконг»).
         // Делается ДО save, чтобы новые tagNames улетели в один коммит.
-        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags)
+        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags, context: modelContext)
 
         do {
             try modelContext.save()

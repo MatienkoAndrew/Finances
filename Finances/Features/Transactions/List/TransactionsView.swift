@@ -471,6 +471,9 @@ struct TransactionsView: View {
                 modelContext.insert(transaction)
             }
 
+            // Метки стран по валюте — как и у операций, добавленных вручную.
+            TransactionTagSync.applyAutoTags(to: importResult.transactions, context: modelContext)
+
             try modelContext.save()
 
             let removedDuplicates = DuplicateCleaner.autoCleanupIfEnabled(context: modelContext)
