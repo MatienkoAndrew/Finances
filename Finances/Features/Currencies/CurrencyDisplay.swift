@@ -43,4 +43,17 @@ enum CurrencyDisplay {
     static func symbol(for storedValue: String) -> String {
         SupportedCurrency.byCode(storedValue).symbol
     }
+
+    /// Флаг страны валюты: первые две буквы кода — это страна (KZT → KZ).
+    static func flag(for storedValue: String) -> String {
+        let code = normalizedCode(from: storedValue)
+        if code == "EUR" { return "🇪🇺" }
+        let region = String(code.prefix(2))
+        guard code.count == 3,
+              Locale.Region.isoRegions.contains(where: { $0.identifier == region }) else { return "🏳️" }
+        return region.unicodeScalars
+            .compactMap { Unicode.Scalar(0x1F1E6 - 0x41 + $0.value) }
+            .map(String.init)
+            .joined()
+    }
 }

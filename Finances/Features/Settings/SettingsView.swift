@@ -5,15 +5,14 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
 
-    @Query
-    private var settingsList: [AppSettings]
-
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
 
-    @State private var isUpdatingRate = false
-    @State private var rateMessage: String?
-    @State private var rateErrorMessage: String?
+    @Query(sort: \DailyExchangeRate.day, order: .forward)
+    private var dailyRates: [DailyExchangeRate]
+
+    @Query
+    private var transactions: [Transaction]
 
     @State private var isShowingAddCurrency = false
     @State private var isExporting = false
@@ -25,86 +24,85 @@ struct SettingsView: View {
     @State private var importErrorMessage: String?
     @State private var importSuccessMessage: String?
 
-    @AppStorage("rates_last_refresh_at") private var lastRatesRefreshAt: Double = 0
+    private var rateSync: ExchangeRateSync { .shared }
 
-    private var settings: AppSettings {
-        if let existing = settingsList.first {
-            return existing
-        } else {
-            let newSettings = AppSettings()
-            modelContext.insert(newSettings)
-            return newSettings
+    /// Сколько операций в каждой валюте.
+    private var operationCounts: [String: Int] {
+        var counts: [String: Int] = [:]
+        for transaction in transactions {
+            counts[CurrencyDisplay.normalizedCode(from: transaction.currencyCode), default: 0] += 1
         }
+        return counts
     }
 
-    private var displayedTrackedRates: [TrackedExchangeRate] {
-        let preferredOrder = ["USD", "EUR", "CNY", "VND", "SGD"]
-
-        return trackedRates.sorted { lhs, rhs in
-            let li = preferredOrder.firstIndex(of: lhs.code.uppercased()) ?? Int.max
-            let ri = preferredOrder.firstIndex(of: rhs.code.uppercased()) ?? Int.max
-
-            if li != ri { return li < ri }
+    /// Сначала валюты, в которых больше всего операций, потом остальные по коду.
+    private func displayedTrackedRates(_ counts: [String: Int]) -> [TrackedExchangeRate] {
+        trackedRates.sorted { lhs, rhs in
+            let left = counts[CurrencyDisplay.normalizedCode(from: lhs.code)] ?? 0
+            let right = counts[CurrencyDisplay.normalizedCode(from: rhs.code)] ?? 0
+            if left != right { return left > right }
             return lhs.code < rhs.code
         }
     }
 
-    private var shouldRefreshRates: Bool {
-        let now = Date().timeIntervalSince1970
-        return now - lastRatesRefreshAt > 60 * 60 * 24
+    /// Откуда курсы, как считаются рубли и когда обновлялись.
+    private var ratesFooter: String {
+        if let error = rateSync.lastError { return error }
+        var text = "Курсы ЦБ РФ, для валют, которых у ЦБ нет, — открытый currency-api. Рубли у каждой операции считаются по курсу на её дату."
+        if let updated = rateSync.lastUpdated {
+            text += " Обновлено \(Self.relative(updated))."
+        }
+        return text
+    }
+
+    private static func relative(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let time = date.formatted(.dateTime.hour().minute().locale(Locale(identifier: "ru_RU")))
+        if calendar.isDateInToday(date) { return "сегодня в \(time)" }
+        if calendar.isDateInYesterday(date) { return "вчера в \(time)" }
+        return "\(date.formatted(.dateTime.day().month(.wide).locale(Locale(identifier: "ru_RU")))) в \(time)"
     }
 
     var body: some View {
+        let counts = operationCounts
+        let rateTable = RubRateTable(rates: dailyRates)
+        let displayedRates = displayedTrackedRates(counts)
+
         NavigationStack {
             Form {
-                Section("Валюты и курсы") {
-//                    currencyRow(
-//                        flag: "🇷🇺",
-//                        code: "RUB",
-//                        name: "Российский рубль",
-//                        subtitle: "Базовая валюта аналитики"
-//                    )
-
-                    currencyRow(
-                        flag: "🇰🇿",
-                        code: "KZT",
-                        name: "Казахстанский тенге",
-                        subtitle: "1 KZT = \(rubPerKztString()) RUB"
-                    )
-
-                    ForEach(displayedTrackedRates) { rate in
-                        currencyRow(
-                            flag: rate.flag,
-                            code: rate.code,
-                            name: rate.displayName,
-                            subtitle: "1 \(rate.code) = \(stringFromDouble(rate.rubPerUnit)) RUB"
-                        )
+                Section {
+                    ForEach(displayedRates) { rate in
+                        let code = CurrencyDisplay.normalizedCode(from: rate.code)
+                        CurrencyRateRow(rate: rate, latest: rateTable.latest(code))
+                        // Валюты из операций всё равно вернутся в список.
+                        .deleteDisabled((counts[code] ?? 0) > 0)
                     }
-                    .onDelete(perform: deleteTrackedRates)
+                    .onDelete { offsets in
+                        deleteTrackedRates(offsets.map { displayedRates[$0] })
+                    }
 
                     Button {
                         isShowingAddCurrency = true
                     } label: {
-                        Text("Добавить валюту")
+                        Label("Добавить валюту", systemImage: "plus")
                     }
 
                     Button {
-                        Task {
-                            await refreshRatesNow()
-                        }
+                        Task { await rateSync.run(context: modelContext) }
                     } label: {
                         HStack {
-                            if isUpdatingRate {
+                            Label(rateSync.isRunning ? "Обновляем курсы…" : "Обновить курсы", systemImage: "arrow.clockwise")
+                            Spacer()
+                            if rateSync.isRunning {
                                 ProgressView()
                             }
-                            Text(isUpdatingRate ? "Обновляем..." : "Обновить курсы")
                         }
                     }
-                    .disabled(isUpdatingRate)
-
-//                    Text("Новые транзакции используют свежий курс. Старые транзакции сохраняют исторический ₽-эквивалент и не пересчитываются задним числом.")
-//                        .font(.caption)
-//                        .foregroundStyle(.secondary)
+                    .disabled(rateSync.isRunning)
+                } header: {
+                    Text("Валюты и курсы")
+                } footer: {
+                    Text(ratesFooter)
                 }
 
                 Section("Данные") {
@@ -196,30 +194,11 @@ struct SettingsView: View {
                 Text("Выберите способ импорта данных")
             }
             .task {
-                let inserted = DefaultTrackedCurrenciesSeeder.seedMissing(
-                    existingRates: trackedRates,
-                    modelContext: modelContext
-                )
-
-                if shouldRefreshRates {
-                    await refreshRatesNow(extraRates: inserted)
+                // Приложение могло долго висеть в фоне — тихо освежаем курсы.
+                let isStale = rateSync.lastUpdated.map { Date.now.timeIntervalSince($0) > 6 * 60 * 60 } ?? true
+                if isStale {
+                    await rateSync.run(context: modelContext)
                 }
-            }
-            .alert("Курсы обновлены", isPresented: Binding(
-                get: { rateMessage != nil },
-                set: { if !$0 { rateMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) { rateMessage = nil }
-            } message: {
-                Text(rateMessage ?? "")
-            }
-            .alert("Ошибка обновления курсов", isPresented: Binding(
-                get: { rateErrorMessage != nil },
-                set: { if !$0 { rateErrorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) { rateErrorMessage = nil }
-            } message: {
-                Text(rateErrorMessage ?? "")
             }
             .alert("Ошибка экспорта", isPresented: Binding(
                 get: { exportErrorMessage != nil },
@@ -248,91 +227,13 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func currencyRow(
-        flag: String,
-        code: String,
-        name: String,
-        subtitle: String
-    ) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(flag)
-                .font(.title3)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(code)
-                        .font(.headline)
-
-                    Text("— \(name)")
-                        .font(.headline)
-                }
-
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
+    private func deleteTrackedRates(_ rates: [TrackedExchangeRate]) {
+        for rate in rates {
+            modelContext.delete(rate)
         }
-        .padding(.vertical, 2)
-    }
-
-    private func rubPerKztString() -> String {
-        guard settings.kztPerRub > 0 else { return "0" }
-        return stringFromDouble(1 / settings.kztPerRub)
-    }
-
-    @MainActor
-    private func refreshRatesNow(extraRates: [TrackedExchangeRate] = []) async {
-        isUpdatingRate = true
-        defer { isUpdatingRate = false }
-
-        do {
-            let kztPerRub = try await ExchangeRateService.fetchCurrentKztPerUnit(for: "RUB")
-            settings.kztPerRub = kztPerRub
-
-            let allTracked = trackedRates + extraRates
-            let codes = Array(Set(allTracked.map { $0.code.uppercased() }))
-
-            if !codes.isEmpty {
-                let fetched = try await ExchangeRateService.fetchCurrentRates(for: codes)
-
-                for rate in allTracked {
-                    if let value = fetched[rate.code.uppercased()] {
-                        rate.rubPerUnit = value
-                    }
-                }
-            }
-
-            try? modelContext.save()
-            lastRatesRefreshAt = Date().timeIntervalSince1970
-            rateMessage = "Курсы успешно обновлены"
-        } catch {
-            rateErrorMessage = error.localizedDescription
-        }
-    }
-
-    private func deleteTrackedRates(offsets: IndexSet) {
-        for index in offsets {
-            modelContext.delete(displayedTrackedRates[index])
-        }
-
         try? modelContext.save()
     }
 
-    private func stringFromDouble(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 4
-        formatter.groupingSeparator = " "
-        formatter.decimalSeparator = ","
-
-        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    }
-    
     // MARK: - Export/Import Methods
     
     private func exportData() {
@@ -388,6 +289,8 @@ struct SettingsView: View {
                     ? "\(message). Удалено дублей: \(removedDuplicates)."
                     : message
                 selectedImportURL = nil
+                // Рубли у импортированных операций — по курсу на их даты.
+                await rateSync.run(context: modelContext)
             } catch {
                 importErrorMessage = error.localizedDescription
                 selectedImportURL = nil

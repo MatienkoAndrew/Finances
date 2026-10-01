@@ -52,8 +52,7 @@ enum PDFImporter {
         accounts: [Account],
         rules: [CategoryRule],
         categories: [ExpenseCategoryItem],
-        rates: [ExchangeRateEntry],
-        fallbackKztPerRub: Double?
+        rubRates: RubRateTable
     ) throws -> PDFImportResult {
         try importStatement(
             readStatement(from: url),
@@ -62,8 +61,7 @@ enum PDFImporter {
             accounts: accounts,
             rules: rules,
             categories: categories,
-            rates: rates,
-            fallbackKztPerRub: fallbackKztPerRub
+            rubRates: rubRates
         )
     }
 
@@ -79,8 +77,7 @@ enum PDFImporter {
         accounts: [Account],
         rules: [CategoryRule],
         categories: [ExpenseCategoryItem],
-        rates: [ExchangeRateEntry],
-        fallbackKztPerRub: Double?,
+        rubRates: RubRateTable,
         importedAt: Date = Date()
     ) throws -> PDFImportResult {
         let rows = statement.rows
@@ -93,8 +90,7 @@ enum PDFImporter {
             kaspiAccount: AccountLookup.kaspi(in: accounts),
             rules: rules,
             categories: categories,
-            rates: rates,
-            fallbackKztPerRub: fallbackKztPerRub,
+            rubRates: rubRates,
             fileName: fileName,
             importedAt: importedAt,
             settledBefore: settledBoundary(for: statement),
@@ -175,8 +171,8 @@ enum PDFImporter {
         let kaspiAccount: Account?
         let rules: [CategoryRule]
         let categories: [ExpenseCategoryItem]
-        let rates: [ExchangeRateEntry]
-        let fallbackKztPerRub: Double?
+        /// Курсы к рублю по дням — ₽-эквивалент считается по курсу на дату операции.
+        let rubRates: RubRateTable
         let fileName: String
         let importedAt: Date
         /// Операции до этой даты (не включительно) уже проведены окончательно.
@@ -417,21 +413,7 @@ enum PDFImporter {
         date: Date,
         context: ImportContext
     ) -> Double? {
-        switch CurrencyDisplay.normalizedCode(from: currencyCode) {
-        case "RUB":
-            return amount
-
-        case "KZT":
-            return HistoricalCurrencyConverter.rubAmount(
-                for: amount,
-                on: date,
-                rates: context.rates,
-                fallbackKztPerRub: context.fallbackKztPerRub
-            )
-
-        default:
-            return nil
-        }
+        context.rubRates.rubAmount(amount: amount, currencyCode: currencyCode, on: date)
     }
 
     private static func resolveOrCreateCashAccount(

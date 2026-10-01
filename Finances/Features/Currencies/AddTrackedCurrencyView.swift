@@ -101,42 +101,17 @@ struct AddTrackedCurrencyView: View {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let rate = try await ExchangeRateService.fetchCurrentRates(for: [code])[code]
+        let newRate = TrackedExchangeRate(
+            code: code,
+            displayName: selectedCurrency.name,
+            flag: CurrencyDisplay.flag(for: code),
+            rubPerUnit: 0
+        )
+        modelContext.insert(newRate)
+        try? modelContext.save()
 
-            guard let rate else {
-                errorMessage = "Не удалось получить курс для \(code)."
-                return
-            }
-
-            let newRate = TrackedExchangeRate(
-                code: code,
-                displayName: selectedCurrency.name,
-                flag: defaultFlag(for: code),
-                rubPerUnit: rate
-            )
-
-            modelContext.insert(newRate)
-            try? modelContext.save()
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func defaultFlag(for code: String) -> String {
-        switch code {
-        case "USD": return "🇺🇸"
-        case "EUR": return "🇪🇺"
-        case "CNY": return "🇨🇳"
-        case "VND": return "🇻🇳"
-        case "SGD": return "🇸🇬"
-        case "THB": return "🇹🇭"
-        case "LKR": return "🇱🇰"
-        case "JPY": return "🇯🇵"
-        case "KZT": return "🇰🇿"
-        case "RUB": return "🇷🇺"
-        default: return "🏳️"
-        }
+        // Курс новой валюты загрузит синхронизация курсов.
+        await ExchangeRateSync.shared.run(context: modelContext)
+        dismiss()
     }
 }

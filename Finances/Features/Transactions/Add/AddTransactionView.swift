@@ -343,12 +343,10 @@ struct AddTransactionView: View {
 
         let normalizedCurrencyCode = CurrencyDisplay.normalizedCode(from: currencyCode)
 
-        let rubAmount = TransactionRubConverter.rubAmount(
-            amount: parsedAmount,
-            currencyCode: normalizedCurrencyCode,
-            settings: settings,
-            trackedRates: trackedRates
-        )
+        // По курсу на дату операции; если такого курса ещё нет — по последнему
+        // известному, точный подтянет синхронизация курсов.
+        let rubAmount = RubRateTable.load(context: modelContext)
+            .rubAmount(amount: parsedAmount, currencyCode: normalizedCurrencyCode, on: date)
 
         let transaction: Transaction
 
@@ -409,6 +407,7 @@ struct AddTransactionView: View {
 
         do {
             try modelContext.save()
+            Task { await ExchangeRateSync.shared.run(context: modelContext) }
             dismiss()
         } catch {
             print("Failed to save transaction: \(error)")

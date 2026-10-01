@@ -52,6 +52,10 @@ struct RootTabView: View {
             TransactionTagSync.removeDuplicates(context: modelContext)
         }
         .task {
+            // Курсы ЦБ по дням и ₽-эквивалент операций по курсу на их дату.
+            await ExchangeRateSync.shared.run(context: modelContext)
+        }
+        .task {
             // Оставшееся «Другое» — нейросеть на устройстве, в фоне.
             await AICategorizer.runIfEnabled(context: modelContext)
         }
