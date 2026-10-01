@@ -47,5 +47,9 @@ struct RootTabView: View {
             AutoCategorizationSync.run(context: modelContext)
             ExchangeRateDifferenceCategorySync.run(context: modelContext)
         }
+        .task {
+            // Оставшееся «Другое» — нейросеть на устройстве, в фоне.
+            await AICategorizer.runIfEnabled(context: modelContext)
+        }
     }
 }

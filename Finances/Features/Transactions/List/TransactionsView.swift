@@ -494,6 +494,11 @@ struct TransactionsView: View {
                 message += "\n\n" + lastBalanceCheck.message
             }
             importResultMessage = message
+
+            // Что не распознали правила и словарь — угадает нейросеть, в фоне.
+            Task {
+                await AICategorizer.runIfEnabled(context: modelContext)
+            }
         } catch {
             importErrorMessage = error.localizedDescription
         }

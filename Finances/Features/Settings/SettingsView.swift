@@ -119,6 +119,8 @@ struct SettingsView: View {
                     NavigationLink("Встроенные правила") {
                         BuiltInRulesView()
                     }
+
+                    AICategorizationRow()
                     
                     NavigationLink("Метки") {
                         TagsManagementView()

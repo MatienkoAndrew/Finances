@@ -16,7 +16,8 @@ enum CategoryRuleEngine {
     }
 
     /// Категория и подкатегория для операции. Порядок: правила пользователя →
-    /// что пользователь сам выбирал для этого мерчанта → встроенный словарь → «Другое».
+    /// что пользователь сам выбирал для этого мерчанта → встроенный словарь →
+    /// прошлая догадка нейросети → «Другое».
     static func match(
         operationType: String,
         details: String,
@@ -59,6 +60,11 @@ enum CategoryRuleEngine {
             if let match = resolved(guess.category, guess.subcategory, in: existingCategories) {
                 return match
             }
+        }
+
+        if let guessed = AIMerchantCategoryCache.match(for: details),
+           let match = resolved(guessed.category, guessed.subcategory, in: existingCategories) {
+            return match
         }
 
         // Fallback на "Другое" если категория не найдена
