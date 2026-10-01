@@ -77,7 +77,7 @@ enum BuiltInCategoryRulesManager {
     /// Все доступные встроенные правила. Порядок важен: срабатывает первое подходящее,
     /// поэтому конкретные бренды идут раньше общих слов («GRABFOOD» раньше «GRAB»,
     /// «SPA» раньше «PHO»). Правило с категорией, которой у пользователя нет
-    /// («Красота», «Комиссия», «Vpn»), пропускается — дальше идёт запасное.
+    /// («Комиссия»), пропускается — дальше идёт запасное.
     static let allRules: [BuiltInCategoryRule] = [
         // Комиссии банка
         group("Комиссия", nil, "Комиссии банка", ["КОМИССИЯ"]),
@@ -90,7 +90,7 @@ enum BuiltInCategoryRulesManager {
         ]),
 
         // Продукты: супермаркеты и магазины у дома
-        group("Продукты", nil, "Супермаркеты и магазины у дома", [
+        group("Еда", "Продукты", "Супермаркеты и магазины у дома", [
             "METRO CASH", "ARBUZ", "AIRBA FRESH", "MAGNUM", "SMALL", "GALMART", "ANVAR", "SPAR", "CARREFOUR",
             "LOTUS", "TOPS", "BIG C", "BIGC", "MAKRO", "WINMART", "COOPMART", "BACH HOA XANH", "LOTTE MART",
             "EMART", "HOMEPLUS", "AEON", "TESCO", "FOODLAND", "GOURMET MARKET", "WALMART", "COSTCO", "LIDL",
@@ -98,7 +98,7 @@ enum BuiltInCategoryRulesManager {
             "7ELEVEN", "SEVEN ELEVEN", "CIRCLE K", "CIRCLEK", "FAMILYMART", "LAWSON", "MINISTOP", "GS25",
             "CU", "EMART24", "MINIMART", "SUPERMARKET", "GROCERY", "MART", "MARKET", "ПРОДУКТЫ", "МАГАЗИН"
         ]),
-        [rule("Продукты", nil, "7-Eleven (Таиланд)", "7 11", mode: .wordPrefix)],
+        [rule("Еда", "Продукты", "7-Eleven (Таиланд)", "7 11", mode: .wordPrefix)],
 
         // Фастфуд
         group("Еда", "Фастфуд", "Фастфуд", [
@@ -109,7 +109,7 @@ enum BuiltInCategoryRulesManager {
         [rule("Еда", "Фастфуд", "KFC", "KFC", mode: .substring)],
 
         // Кофейни, кафе, десерты
-        group("Еда", "Кафе", "Кофейни и кафе", [
+        group("Еда", "Кафе и кофейни", "Кофейни и кафе", [
             "COFFEE", "KOFFEE", "KHOFFEE", "KEOPI", "KOPI", "CAFE", "CAFFE", "КАФЕ", "KAFE", "ESPRESSO",
             "ROASTER", "ROSTER", "STARBUCKS", "HIGHLANDS", "ARABICA", "TRUNG NGUYEN", "PHUC LONG", "CA PHE",
             "PHE LA", "GONG CHA", "CHATIME", "KOI THE", "MIXUE", "BUBBLE", "BOBA", "TEA", "DESSERT",
@@ -117,17 +117,18 @@ enum BuiltInCategoryRulesManager {
         ]),
 
         // Бары
-        group("Еда", "Бар", "Бары и пабы", [
+        group("Еда", "Бары", "Бары и пабы", [
             "BAR", "PUB", "TAPROOM", "BREW", "BEER", "HIGHBALL", "WINE", "COCKTAIL", "ROOFTOP", "IZAKAYA"
         ]),
 
         // Красота и уход — раньше ресторанов («SPA PHO CO»)
-        group("Красота", nil, "Салоны красоты", ["SALON", "BARBER", "HAIR", "NAIL", "BEAUTY", "LASH", "BROW"]),
-        group("Здоровье", "Косметолог", "Салоны красоты", ["SALON", "BARBER", "HAIR", "NAIL", "BEAUTY", "COSMETOLOG"]),
-        group("Здоровье", "Массаж", "Массаж и спа", ["MASSAGE", "SPA", "WELLNESS"]),
+        group("Здоровье и красота", "Красота", "Салоны красоты", [
+            "SALON", "BARBER", "HAIR", "NAIL", "BEAUTY", "LASH", "BROW", "COSMETOLOG"
+        ]),
+        group("Здоровье и красота", "Массаж и спа", "Массаж и спа", ["MASSAGE", "SPA", "WELLNESS"]),
 
         // Рестораны
-        group("Еда", "Ресторан", "Рестораны", [
+        group("Еда", "Рестораны", "Рестораны", [
             "RESTAURANT", "RESTAUTANT", "RESTORAN", "РЕСТОРАН", "RESTO", "NHA HANG", "PHO", "BBQ", "GRILL",
             "STEAK", "SUSHI", "RAMEN", "KITCHEN", "BISTRO", "DINER", "CUISINE", "EATERY", "NOODLE", "DIMSUM",
             "BANH XEO", "SOMTUM", "SIKDANG", "GUKBAP", "BUNSIK", "GALBI", "ASHANA", "СТОЛОВАЯ", "STOLOVAYA"
@@ -141,32 +142,33 @@ enum BuiltInCategoryRulesManager {
         [rule("Транспорт", "Такси", "Такси", "TAXI", mode: .substring)],
 
         // Общественный транспорт
-        group("Общественный транспорт", nil, "Метро, автобусы", ["BTS", "MRT", "METRO", "ONAY", "TMONEY", "BUS"]),
-        group("Транспорт", "Общественный транспорт", "Метро, автобусы", [
+        group("Транспорт", "Метро и автобусы", "Метро, автобусы", [
             "BTS", "MRT", "METRO", "ONAY", "TMONEY", "T MONEY", "CASHBEE", "BUS", "ARL", "OCTOPUS",
             "EZ LINK", "EZLINK", "OPAL", "TRANSPORT CARD"
         ]),
 
         // Поезда
-        group("Транспорт", "Поезд/электричка", "Поезда", [
+        group("Транспорт", "Поезд", "Поезда", [
             "SRT", "KTX", "KORAIL", "RAILWAY", "TEMIR ZHOLY", "KTZ", "TULPAR", "RAIL"
         ]),
 
         // Самокаты, велосипеды, байки, каршеринг
         group("Транспорт", "Самокат", "Самокаты", ["WHOOSH", "LIME", "JET SHARING", "URENT", "YANDEX SCOOTER", "SCOOTER"]),
         group("Транспорт", "Аренда велосипеда", "Велопрокат", ["BIKE SHARING", "MOBIKE", "TNGO", "ALMATY BIKE", "ASTANA BIKE"]),
-        group("Аренда Байка", nil, "Аренда байка", ["MOTORBIKE", "BIKE RENT", "MOTO RENT"]),
         group("Транспорт", "Аренда байка", "Аренда байка", ["MOTORBIKE", "BIKE RENT", "MOTO RENT"]),
         group("Транспорт", "Каршеринг", "Каршеринг", ["ANYTIME", "DELIMOBIL", "BELKACAR", "YANDEX DRIVE", "SOCAR"]),
 
         // Заправки, парковки, дороги
-        group("Транспорт", "Заправка", "Заправки", [
+        group("Транспорт", "Топливо", "Заправки", [
             "SHELL", "CALTEX", "PTT", "ESSO", "PETRO", "HELIOS", "SINOOIL", "SINO OIL", "KAZMUNAYGAS",
             "QAZAQ OIL", "GAZPROM", "LUKOIL", "ROSNEFT", "GAS STATION", "FUEL", "АЗС", "BANGCHAK", "CHEVRON",
             "SK ENERGY", "GS CALTEX"
         ]),
-        group("Транспорт", "Парковка", "Парковки", ["PARKING", "ПАРКОВКА"]),
-        group("Транспорт", "Платные дороги", "Платные дороги", ["TOLL", "EXPRESSWAY", "HIPASS"]),
+        group("Транспорт", "Другое", "Парковки", ["PARKING", "ПАРКОВКА"]),
+        group("Транспорт", "Другое", "Платные дороги", ["TOLL", "EXPRESSWAY", "HIPASS"]),
+        group("Транспорт", "Паром", "Паромы и лодки", [
+            "FERRY", "SPEEDBOAT", "SPEED BOAT", "FAST BOAT", "LOMPRAYAH", "SEATRAN", "SUPERDONG", "BOAT"
+        ]),
 
         // Путешествия
         group("Путешествия", "Отели", "Отели и жильё в поездках", [
@@ -174,14 +176,14 @@ enum BuiltInCategoryRulesManager {
             "AGODA", "AIRBNB", "EXPEDIA", "TRIP COM", "TRIPCOM", "OSTROVOK", "MOTEL", "INN", "NHA NGHI",
             "KHACH SAN", "LODGE"
         ]),
-        group("Путешествия", "Авиабилеты", "Авиакомпании", [
+        group("Транспорт", "Самолёт", "Авиакомпании", [
             "AIRLINES", "AIRWAYS", "AIR ASTANA", "AIRASTANA", "FLYARYSTAN", "SCAT", "AIRASIA", "AIR ASIA",
             "VIETJET", "BAMBOO", "NOK AIR", "AEROFLOT", "POBEDA", "TURKISH AIR", "QATAR", "EMIRATES",
             "AVIASALES", "KIWI COM"
         ]),
-        group("Путешествия", "Ж/д билеты", "Билеты на поезда и автобусы", ["12GO", "TUTU", "TRAINS", "BAOLAU"]),
-        group("Путешествия", "Аренда авто", "Прокат авто", ["RENT A CAR", "RENTACAR", "HERTZ", "AVIS", "SIXT", "EUROPCAR"]),
-        group("Путешествия", "Виза/страховка", "Визы и страховки", [
+        group("Транспорт", "Поезд", "Билеты на поезда и автобусы", ["12GO", "TUTU", "TRAINS", "BAOLAU"]),
+        group("Транспорт", "Каршеринг", "Прокат авто", ["RENT A CAR", "RENTACAR", "HERTZ", "AVIS", "SIXT", "EUROPCAR"]),
+        group("Путешествия", "Визы и страховки", "Визы и страховки", [
             "VISA", "EVISA", "INSURANCE", "STRAKHOV", "СТРАХОВ", "IMMIGRATION", "VFS"
         ]),
         group("Путешествия", "Экскурсии", "Экскурсии и развлечения в поездках", [
@@ -190,48 +192,50 @@ enum BuiltInCategoryRulesManager {
         ]),
 
         // Здоровье
-        group("Здоровье", "Аптека", "Аптеки", [
+        group("Здоровье и красота", "Аптека", "Аптеки", [
             "PHARMACY", "PHARMA", "APTEKA", "АПТЕКА", "DRUGSTORE", "DRUG STORE", "LONG CHAU", "PHARMACITY",
             "EUROPHARMA", "SADYKHAN"
         ]),
-        group("Здоровье", "Стоматология", "Стоматология", ["DENTAL", "DENTIST", "СТОМАТ", "NHA KHOA"]),
-        group("Здоровье", "Анализы", "Лаборатории", ["INVITRO", "OLYMP", "KDL", "LABORATOR"]),
-        group("Здоровье", "Врач/клиника", "Клиники", [
+        group("Здоровье и красота", "Стоматология", "Стоматология", ["DENTAL", "DENTIST", "СТОМАТ", "NHA KHOA"]),
+        group("Здоровье и красота", "Врачи и анализы", "Лаборатории", ["INVITRO", "OLYMP", "KDL", "LABORATOR"]),
+        group("Здоровье и красота", "Врачи и анализы", "Клиники", [
             "CLINIC", "HOSPITAL", "MEDICAL", "MEDICINE", "MEDCENTER", "KLINIK", "КЛИНИК", "DOCTOR", "BENH VIEN"
         ]),
-        group("Здоровье", "Спорт/фитнес", "Спорт и фитнес", [
+        group("Здоровье и красота", "Спорт и фитнес", "Спорт и фитнес", [
             "FITNESS", "GYM", "WORLD CLASS", "INVICTUS", "CROSSFIT", "YOGA", "MUAY THAI", "BOXING", "SWIM"
         ]),
 
         // Подписки
-        group("Подписки", "ИИ", "Нейросети", [
+        group("Подписки и связь", "Нейросети", "Нейросети", [
             "OPENAI", "CHATGPT", "ANTHROPIC", "CLAUDE AI", "MIDJOURNEY", "PERPLEXITY", "CURSOR", "COPILOT"
         ]),
-        group("Подписки", "Музыка", "Музыка", [
+        group("Подписки и связь", "Музыка и видео", "Музыка и видео", [
             "SPOTIFY", "YANDEX PLUS", "YANDEX MUSIC", "APPLE MUSIC", "DEEZER", "TIDAL", "SOUNDCLOUD"
         ]),
-        group("Подписки", "Облако", "Облачные хранилища", ["ICLOUD", "GOOGLE ONE", "DROPBOX"]),
-        group("Подписки", "Связь", "Мобильная связь и eSIM", [
+        group("Подписки и связь", "Облако", "Облачные хранилища", ["ICLOUD", "GOOGLE ONE", "DROPBOX"]),
+        group("Подписки и связь", "Связь и eSIM", "Мобильная связь и eSIM", [
             "BEELINE", "KCELL", "ACTIV", "TELE2", "ALTEL", "IZI", "MEGAFON", "VIETTEL", "VINAPHONE", "MOBIFONE",
             "TRUEMOVE", "DTAC", "AIRALO", "HOLAFLY", "ESIM", "SIM CARD"
         ]),
-        group("Vpn", nil, "VPN", ["VPN", "SURFSHARK", "PROTON"]),
-        group("Подписки", "Другое", "Сервисы и приложения", [
-            "VPN", "SURFSHARK", "APPLE COM BILL", "GOOGLE PLAY", "NETFLIX", "YOUTUBE", "KINOPOISK", "DISNEY",
-            "HBO", "PRIME VIDEO", "TWITCH", "TELEGRAM", "NOTION", "FIGMA", "ADOBE", "MICROSOFT", "CANVA",
+        group("Подписки и связь", "VPN", "VPN", ["VPN", "SURFSHARK", "PROTON", "HIDEMY", "OUTLINE"]),
+        group("Подписки и связь", "Музыка и видео", "Видео", [
+            "NETFLIX", "YOUTUBE", "KINOPOISK", "DISNEY", "HBO", "PRIME VIDEO", "TWITCH", "IVI"
+        ]),
+        group("Подписки и связь", "Другое", "Сервисы и приложения", [
+            "APPLE COM BILL", "GOOGLE PLAY", "TELEGRAM", "NOTION", "FIGMA", "ADOBE", "MICROSOFT", "CANVA",
             "DUOLINGO"
         ]),
 
         // Покупки
-        group("Покупки", "Подарки", "Подарки и цветы", ["GIFT", "FLOWER", "ЦВЕТЫ", "SOUVENIR"]),
+        group("Покупки", "Подарки и цветы", "Подарки и цветы", ["GIFT", "FLOWER", "ЦВЕТЫ", "SOUVENIR"]),
         group("Покупки", "Маркетплейсы", "Маркетплейсы", [
             "WILDBERRIES", "OZON", "ALIEXPRESS", "AMAZON", "TEMU", "SHEIN", "SHOPEE", "LAZADA", "TIKI",
             "COUPANG", "TAOBAO", "EBAY", "ETSY", "LAMODA", "KASPI MAGAZIN"
         ]),
-        group("Покупки", "Обувь", "Обувь", [
+        group("Покупки", "Одежда и обувь", "Обувь", [
             "ASICS", "NIKE", "ADIDAS", "PUMA", "NEW BALANCE", "SKECHERS", "CROCS", "VANS", "CONVERSE", "SHOES"
         ]),
-        group("Покупки", "Одежда", "Одежда", [
+        group("Покупки", "Одежда и обувь", "Одежда", [
             "UNIQLO", "ZARA", "HENNES", "MANGO", "PULL BEAR", "BERSHKA", "STRADIVARIUS", "MASSIMO DUTTI",
             "LC WAIKIKI", "LCWAIKIKI", "COLINS", "GAP", "LEVI", "TOPSHOP", "DECATHLON", "SPORTMASTER"
         ]),
@@ -239,7 +243,7 @@ enum BuiltInCategoryRulesManager {
             "TECHNODOM", "SULPAK", "MECHTA", "ALSER", "DNS", "APPLE STORE", "ISTORE", "ISPACE", "SAMSUNG",
             "XIAOMI", "THE GIOI DI DONG", "DIEN MAY XANH", "FPT SHOP", "CELLPHONES", "BIC CAMERA", "YODOBASHI"
         ]),
-        group("Покупки", "Дом/быт", "Товары для дома", ["IKEA", "LEROY MERLIN", "HOFF", "MUJI", "DAISO", "MINISO", "HOMEPRO"]),
+        group("Покупки", "Дом и быт", "Товары для дома", ["IKEA", "LEROY MERLIN", "HOFF", "MUJI", "DAISO", "MINISO", "HOMEPRO"]),
         group("Покупки", "Косметика", "Косметика", [
             "SEPHORA", "OLIVE YOUNG", "OLIVEYOUNG", "WATSONS", "GOLDEN APPLE", "LETUAL", "HASAKI", "INNISFREE",
             "NATURE REPUBLIC", "COSMETIC"
@@ -250,11 +254,14 @@ enum BuiltInCategoryRulesManager {
         group("Жильё", "Интернет", "Домашний интернет", ["KAZAKHTELECOM", "BEELINE HOME"]),
         group("Жильё", "Коммуналка", "Коммунальные платежи", ["ALSECO", "ЕРЦ", "ENERGOSBYT", "ВОДОКАНАЛ"]),
 
-        // Развлечения — только если такая категория есть
-        group("Развлечения", nil, "Кино, игры, досуг", [
-            "CINEMA", "KINOPARK", "CHAPLIN", "CGV", "CINEPLEX", "STEAM", "PLAYSTATION", "NINTENDO", "BOWLING",
-            "KARAOKE"
-        ])
+        // Развлечения
+        group("Развлечения", "Кино и концерты", "Кино и концерты", [
+            "CINEMA", "KINOPARK", "CHAPLIN", "CGV", "CINEPLEX", "MAJOR CINE", "TICKETON", "TICKETMASTER",
+            "CONCERT", "THEATRE", "THEATER"
+        ]),
+        group("Развлечения", "Игры", "Игры", ["STEAM", "PLAYSTATION", "NINTENDO", "XBOX", "EPIC GAMES", "GAMES"]),
+        group("Развлечения", "Клубы и вечеринки", "Клубы и караоке", ["NIGHTCLUB", "DISCO", "KARAOKE", "CLUB"]),
+        group("Развлечения", "Другое", "Досуг", ["BOWLING", "BILLIARD", "QUEST", "WATERPARK", "AMUSEMENT"])
     ].flatMap { $0 }
 
     private static func rule(

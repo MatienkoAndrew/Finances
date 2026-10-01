@@ -55,15 +55,15 @@ struct CategoryTotalsTests {
 
     @Test("Категория — сумма подкатегорий; без подкатегории — в «Другое»")
     func subcategoriesSumUp() throws {
-        add(100, "Еда", "Кафе")
-        add(50, "Еда", "Кафе")
-        add(30, "Еда", "Супермаркет")
+        add(100, "Еда", "Кафе и кофейни")
+        add(50, "Еда", "Кафе и кофейни")
+        add(30, "Еда", "Продукты")
         add(20, "Еда")
 
         let food = try #require(categoryTotals().first { $0.category == "Еда" })
         #expect(food.total == 200)
         #expect(food.count == 4)
-        #expect(food.subcategories.map(\.name) == ["Кафе", "Супермаркет", "Другое"])
+        #expect(food.subcategories.map(\.name) == ["Кафе и кофейни", "Продукты", "Другое"])
         #expect(food.subcategories.map(\.total) == [150, 30, 20])
         #expect(food.subcategories.map(\.count) == [2, 1, 1])
         #expect(food.subcategories.first?.emoji == "☕️")
@@ -83,25 +83,25 @@ struct CategoryTotalsTests {
 
     @Test("Курсовая разница «в плюс» уменьшает подкатегорию покупок того же мерчанта")
     func refundGoesToMerchantSubcategory() throws {
-        add(100, "Еда", "Кафе", details: "GS25")
-        add(60, "Еда", "Супермаркет", details: "CU")
+        add(100, "Еда", "Кафе и кофейни", details: "GS25")
+        add(60, "Еда", "Продукты", details: "CU")
         add(1, "Еда", details: "GS25", kind: .income, note: Transaction.exchangeRateDifferenceNote)
 
         let food = try #require(categoryTotals().first { $0.category == "Еда" })
         #expect(food.total == 159)
         #expect(food.count == 2)
-        #expect(food.subcategories.first { $0.name == "Кафе" }?.total == 99)
-        #expect(food.subcategories.first { $0.name == "Супермаркет" }?.total == 60)
+        #expect(food.subcategories.first { $0.name == "Кафе и кофейни" }?.total == 99)
+        #expect(food.subcategories.first { $0.name == "Продукты" }?.total == 60)
         #expect(!food.subcategories.contains { $0.name == "Другое" })
     }
 
     @Test("Список операций подкатегории совпадает с плиткой")
     func drillDownMatchesTile() {
-        let cafe = add(100, "Еда", "Кафе")
+        let cafe = add(100, "Еда", "Кафе и кофейни")
         let other = add(20, "Еда")
         let fun = add(40, "Развлечения")
 
-        #expect(CategoryTotalsAccumulator.subcategoryName(of: cafe) == "Кафе")
+        #expect(CategoryTotalsAccumulator.subcategoryName(of: cafe) == "Кафе и кофейни")
         #expect(CategoryTotalsAccumulator.subcategoryName(of: other) == "Другое")
         #expect(CategoryTotalsAccumulator.subcategoryName(of: fun) == nil)
     }

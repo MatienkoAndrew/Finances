@@ -2,7 +2,7 @@
 //  DefaultSubcategoryDefinitions.swift
 //  Finances
 //
-//  Подкатегории внутри основных категорий. Пока заполнена только «Еда».
+//  Подкатегории внутри основных категорий.
 //
 
 import Foundation
@@ -20,71 +20,71 @@ enum DefaultSubcategoryDefinitions {
 
     static let byCategory: [String: [DefaultSubcategoryDefinition]] = [
         "Еда": [
-            .init(name: "Кафе", emoji: "☕️"),
-            .init(name: "Супермаркет", emoji: "🛒"),
-            .init(name: "Ресторан", emoji: "🍽️"),
-            .init(name: "Доставка", emoji: "🛵"),
+            .init(name: "Продукты", emoji: "🛒"),
+            .init(name: "Кафе и кофейни", emoji: "☕️"),
+            .init(name: "Рестораны", emoji: "🍽️"),
             .init(name: "Фастфуд", emoji: "🍔"),
-            .init(name: "Бар", emoji: "🍺"),
+            .init(name: "Доставка", emoji: "🛵"),
+            .init(name: "Бары", emoji: "🍺"),
             .init(name: "Другое", emoji: "🍴")
         ],
         "Транспорт": [
             .init(name: "Такси", emoji: "🚕"),
-            .init(name: "Общественный транспорт", emoji: "🚌"),
-            .init(name: "Аренда велосипеда", emoji: "🚲"),
+            .init(name: "Метро и автобусы", emoji: "🚇"),
+            .init(name: "Поезд", emoji: "🚆"),
+            .init(name: "Самолёт", emoji: "✈️"),
+            .init(name: "Паром", emoji: "⛴️"),
             .init(name: "Аренда байка", emoji: "🏍️"),
-            .init(name: "Каршеринг", emoji: "🚗"),
-            .init(name: "Заправка", emoji: "⛽"),
-            .init(name: "Парковка", emoji: "🅿️"),
-            .init(name: "Платные дороги", emoji: "🛣️"),
+            .init(name: "Аренда велосипеда", emoji: "🚲"),
             .init(name: "Самокат", emoji: "🛴"),
-            .init(name: "Поезд/электричка", emoji: "🚆"),
+            .init(name: "Каршеринг", emoji: "🚗"),
+            .init(name: "Топливо", emoji: "⛽"),
             .init(name: "Другое", emoji: "🚦")
-        ],
-        "Подписки": [
-            .init(name: "Музыка", emoji: "🎵"),
-            .init(name: "Облако", emoji: "☁️"),
-            .init(name: "Связь", emoji: "📱"),
-            .init(name: "ИИ", emoji: "🤖"),
-            .init(name: "Другое", emoji: "🧩")
-        ],
-        "Покупки": [
-            .init(name: "Одежда", emoji: "👕"),
-            .init(name: "Обувь", emoji: "👟"),
-            .init(name: "Электроника", emoji: "📱"),
-            .init(name: "Дом/быт", emoji: "🏠"),
-            .init(name: "Косметика", emoji: "💄"),
-            .init(name: "Подарки", emoji: "🎁"),
-            .init(name: "Маркетплейсы", emoji: "📦"),
-            .init(name: "Другое", emoji: "🛍️")
         ],
         "Жильё": [
             .init(name: "Аренда", emoji: "🔑"),
-            .init(name: "Ипотека", emoji: "🏦"),
             .init(name: "Коммуналка", emoji: "🧾"),
             .init(name: "Интернет", emoji: "📶"),
-            .init(name: "Ремонт", emoji: "🔨"),
-            .init(name: "Мебель/техника", emoji: "🛋️"),
+            .init(name: "Ремонт и мебель", emoji: "🛋️"),
             .init(name: "Другое", emoji: "🏡")
         ],
-        "Путешествия": [
-            .init(name: "Авиабилеты", emoji: "🛫"),
-            .init(name: "Отели", emoji: "🏨"),
-            .init(name: "Ж/д билеты", emoji: "🚆"),
-            .init(name: "Аренда авто", emoji: "🚗"),
-            .init(name: "Экскурсии", emoji: "🗺️"),
-            .init(name: "Виза/страховка", emoji: "🛂"),
-            .init(name: "Другое", emoji: "✈️")
-        ],
-        "Здоровье": [
+        "Здоровье и красота": [
             .init(name: "Аптека", emoji: "💊"),
-            .init(name: "Врач/клиника", emoji: "🩺"),
-            .init(name: "Анализы", emoji: "🧪"),
+            .init(name: "Врачи и анализы", emoji: "🩺"),
             .init(name: "Стоматология", emoji: "🦷"),
-            .init(name: "Спорт/фитнес", emoji: "🏋️"),
-            .init(name: "Косметолог", emoji: "🧴"),
-            .init(name: "Массаж", emoji: "💆"),
+            .init(name: "Спорт и фитнес", emoji: "🏋️"),
+            .init(name: "Красота", emoji: "💅"),
+            .init(name: "Массаж и спа", emoji: "💆"),
             .init(name: "Другое", emoji: "🏥")
+        ],
+        "Покупки": [
+            .init(name: "Одежда и обувь", emoji: "👕"),
+            .init(name: "Электроника", emoji: "📱"),
+            .init(name: "Дом и быт", emoji: "🏠"),
+            .init(name: "Косметика", emoji: "💄"),
+            .init(name: "Подарки и цветы", emoji: "🎁"),
+            .init(name: "Маркетплейсы", emoji: "📦"),
+            .init(name: "Другое", emoji: "🛍️")
+        ],
+        "Подписки и связь": [
+            .init(name: "Связь и eSIM", emoji: "📡"),
+            .init(name: "VPN", emoji: "🛡️"),
+            .init(name: "Нейросети", emoji: "🤖"),
+            .init(name: "Музыка и видео", emoji: "🎵"),
+            .init(name: "Облако", emoji: "☁️"),
+            .init(name: "Другое", emoji: "🧩")
+        ],
+        "Путешествия": [
+            .init(name: "Отели", emoji: "🏨"),
+            .init(name: "Экскурсии", emoji: "🗺️"),
+            .init(name: "Визы и страховки", emoji: "🛂"),
+            .init(name: "Другое", emoji: "🧳")
+        ],
+        "Развлечения": [
+            .init(name: "Кино и концерты", emoji: "🎬"),
+            .init(name: "Игры", emoji: "🎮"),
+            .init(name: "Клубы и вечеринки", emoji: "🪩"),
+            .init(name: "Другое", emoji: "🎉")
         ]
     ]
 
