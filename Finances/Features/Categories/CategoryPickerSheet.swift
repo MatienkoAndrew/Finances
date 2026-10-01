@@ -2,8 +2,9 @@
 //  CategoryPickerSheet.swift
 //  Finances
 //
-//  Выбор категории в стиле Alipay: сетка категорий, а у категорий с
-//  подкатегориями (бейдж «…») по тапу раскрывается панель подкатегорий.
+//  Выбор категории в стиле Alipay: сетка цветных категорий, у категорий с
+//  подкатегориями по тапу раскрывается панель подкатегорий. Выбор — в одно касание:
+//  категория без подкатегорий или подкатегория сразу применяются.
 //
 
 import SwiftUI
@@ -12,30 +13,31 @@ struct CategoryPickerSheet: View {
     let categories: [ExpenseCategoryItem]
     let initialCategory: String?
     let initialSubcategory: String?
+    /// Подзаголовок — обычно название операции.
+    let subtitle: String?
     let onSelect: (_ category: String?, _ subcategory: String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedCategory: String?
-    @State private var selectedSubcategory: String?
     @State private var expandedCategory: String?
     @State private var isShowingAddCategory = false
+    @State private var selectionFeedback = 0
 
-    private let columnsPerRow = 5
+    private let columnsPerRow = 4
 
     init(
         categories: [ExpenseCategoryItem],
         initialCategory: String?,
         initialSubcategory: String?,
+        subtitle: String? = nil,
         onSelect: @escaping (_ category: String?, _ subcategory: String?) -> Void
     ) {
         self.categories = categories
         self.initialCategory = initialCategory
         self.initialSubcategory = initialSubcategory
+        self.subtitle = subtitle
         self.onSelect = onSelect
 
-        _selectedCategory = State(initialValue: initialCategory)
-        _selectedSubcategory = State(initialValue: initialSubcategory)
         _expandedCategory = State(
             initialValue: DefaultSubcategoryDefinitions.hasSubcategories(initialCategory) ? initialCategory : nil
         )
@@ -50,11 +52,11 @@ struct CategoryPickerSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
                     ForEach(rows.indices, id: \.self) { rowIndex in
                         let row = rows[rowIndex]
 
-                        HStack(alignment: .top, spacing: 8) {
+                        HStack(alignment: .top, spacing: 6) {
                             ForEach(row) { category in
                                 categoryCell(category)
                             }
@@ -68,153 +70,229 @@ struct CategoryPickerSheet: View {
                         }
 
                         if let expandedCategory,
-                           row.contains(where: { $0.name == expandedCategory }),
+                           let category = row.first(where: { $0.name == expandedCategory }),
                            let subs = DefaultSubcategoryDefinitions.subcategories(for: expandedCategory) {
-                            subcategoryPanel(subs)
+                            subcategoryPanel(subs, in: category)
                         }
                     }
 
                     Button {
                         isShowingAddCategory = true
                     } label: {
-                        Label("Новая категория", systemImage: "plus.circle.fill")
-                            .font(.subheadline)
+                        Label("Новая категория", systemImage: "plus")
+                            .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.gray.opacity(0.10))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .padding(.vertical, 13)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                                    .foregroundStyle(.tertiary)
+                            }
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 4)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.bottom)
             }
-            .navigationTitle("Выбор категории")
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $isShowingAddCategory) {
-                AddCategorySheet { newCategoryName in
-                    selectedCategory = newCategoryName
-                    selectedSubcategory = nil
-                    expandedCategory = DefaultSubcategoryDefinitions.hasSubcategories(newCategoryName) ? newCategoryName : nil
-                }
-            }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Отмена") { dismiss() }
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text("Категория")
+                            .font(.headline)
+                        if let subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") { commit() }
-                        .fontWeight(.semibold)
-                        .disabled(selectedCategory == nil)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(Color.gray.opacity(0.15), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Закрыть")
+                }
+            }
+            .sheet(isPresented: $isShowingAddCategory) {
+                AddCategorySheet { newCategoryName in
+                    if DefaultSubcategoryDefinitions.hasSubcategories(newCategoryName) {
+                        expandedCategory = newCategoryName
+                    } else {
+                        select(newCategoryName, nil)
+                    }
                 }
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     // MARK: - Cells
 
     private func categoryCell(_ category: ExpenseCategoryItem) -> some View {
-        let isSelected = selectedCategory == category.name
+        let isCurrent = CategoryNameNormalizer.normalize(initialCategory ?? "") == CategoryNameNormalizer.normalize(category.name)
+        let isExpanded = expandedCategory == category.name
         let hasSubs = DefaultSubcategoryDefinitions.hasSubcategories(category.name)
+        let color = Color(hex: category.colorHex) ?? .gray
 
         return Button {
             handleCategoryTap(category)
         } label: {
-            VStack(spacing: 6) {
-                ZStack(alignment: .topTrailing) {
-                    Circle()
-                        .fill(Color(hex: category.colorHex) ?? .gray)
-                        .frame(width: 44, height: 44)
+            VStack(spacing: 7) {
+                ZStack(alignment: .bottomTrailing) {
+                    CategoryIconView(category: category, size: 50)
+                        .padding(4)
                         .overlay {
-                            Image(systemName: category.iconName)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white)
+                            Circle()
+                                .strokeBorder(color, lineWidth: isCurrent || isExpanded ? 2 : 0)
                         }
 
                     if hasSubs {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 9, weight: .black))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 8, weight: .heavy))
+                            .foregroundStyle(color)
+                            .frame(width: 18, height: 18)
+                            .background(Color(.systemBackground), in: Circle())
+                            .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+                    } else if isCurrent {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .heavy))
                             .foregroundStyle(.white)
-                            .frame(width: 16, height: 16)
-                            .background(Color.accentColor)
-                            .clipShape(Circle())
+                            .frame(width: 18, height: 18)
+                            .background(color, in: Circle())
                             .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
-                            .offset(x: 5, y: -3)
                     }
                 }
 
                 Text(category.name)
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                    .font(.caption.weight(isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isCurrent ? color : .primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func subcategoryPanel(_ subs: [DefaultSubcategoryDefinition]) -> some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    private func subcategoryPanel(_ subs: [DefaultSubcategoryDefinition], in category: ExpenseCategoryItem) -> some View {
+        let color = Color(hex: category.colorHex) ?? .gray
+        let isCurrentCategory = CategoryNameNormalizer.normalize(initialCategory ?? "") == CategoryNameNormalizer.normalize(category.name)
 
-        return LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(subs) { sub in
-                let isSelected = selectedSubcategory == sub.name
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(category.name.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.leading, 4)
 
-                Button {
-                    selectedSubcategory = sub.name
-                } label: {
-                    VStack(spacing: 6) {
-                        Text(sub.emoji)
-                            .font(.system(size: 24))
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
+                ForEach(subs) { sub in
+                    let isSelected = isCurrentCategory && initialSubcategory == sub.name
 
-                        Text(sub.name)
-                            .font(.caption)
-                            .foregroundStyle(isSelected ? Color.accentColor : .primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                    Button {
+                        select(category.name, sub.name)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(sub.emoji)
+                                .font(.system(size: 17))
+                            Text(sub.name)
+                                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .foregroundStyle(isSelected ? .white : .primary)
+                        .background(
+                            isSelected ? AnyShapeStyle(color) : AnyShapeStyle(Color(.systemBackground)),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(isSelected ? Color.accentColor.opacity(0.14) : Color.gray.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 18))
+        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
     }
 
     // MARK: - Actions
 
     private func handleCategoryTap(_ category: ExpenseCategoryItem) {
-        selectedCategory = category.name
-
         if DefaultSubcategoryDefinitions.hasSubcategories(category.name) {
-            withAnimation(.smooth(duration: 0.22)) {
-                expandedCategory = category.name
-            }
-            // По умолчанию выбираем «Другое», если ещё ничего валидного не выбрано.
-            let validSubs = DefaultSubcategoryDefinitions.subcategories(for: category.name)?.map(\.name) ?? []
-            if selectedSubcategory == nil || !validSubs.contains(selectedSubcategory!) {
-                selectedSubcategory = DefaultSubcategoryDefinitions.defaultSubcategory(for: category.name)
+            selectionFeedback += 1
+            withAnimation(.snappy(duration: 0.25)) {
+                expandedCategory = expandedCategory == category.name ? nil : category.name
             }
         } else {
-            withAnimation(.smooth(duration: 0.22)) {
-                expandedCategory = nil
-            }
-            selectedSubcategory = nil
+            select(category.name, nil)
         }
     }
 
-    private func commit() {
-        onSelect(selectedCategory, selectedSubcategory)
+    private func select(_ category: String, _ subcategory: String?) {
+        selectionFeedback += 1
+        onSelect(category, subcategory)
         dismiss()
+    }
+}
+
+/// Капсула с категорией операции: цвет категории, эмодзи подкатегории
+/// (или иконка категории) и «Категория · Подкатегория».
+struct CategoryChip: View {
+    let category: ExpenseCategoryItem?
+    let categoryName: String
+    let subcategoryName: String?
+    var showsChevron = true
+
+    private var color: Color {
+        category.flatMap { Color(hex: $0.colorHex) } ?? .gray
+    }
+
+    private var subcategoryEmoji: String? {
+        guard let subcategoryName else { return nil }
+        return DefaultSubcategoryDefinitions.subcategories(for: categoryName)?
+            .first { $0.name == subcategoryName }?.emoji
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let subcategoryEmoji {
+                Text(subcategoryEmoji)
+                    .font(.system(size: 12))
+            } else if let category {
+                CategoryIconView(category: category, size: 16)
+            }
+
+            Text(subcategoryName.map { "\(categoryName) · \($0)" } ?? categoryName)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+
+            if showsChevron {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .heavy))
+                    .opacity(0.6)
+            }
+        }
+        .foregroundStyle(color)
+        .padding(.leading, subcategoryEmoji == nil && category != nil ? 4 : 8)
+        .padding(.trailing, 9)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.13), in: Capsule())
     }
 }
