@@ -163,25 +163,19 @@ struct AnalyticsView: View {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     if selectedMode == .time {
                         periodNavigation
+                        periodSummaryCards
+                        topSummarySection
+                        breakdownSections
                     } else {
-                        tagPicker
-                        // В режиме меток период жёстко задан самой меткой,
-                        // поэтому W/M/Y и стрелки навигации скрываем —
-                        // вместо них показываем инфо-полоску.
-                        if tagBinGranularity != nil {
-                            tagInfoStrip
+                        // В режиме меток период задан самой меткой, поэтому
+                        // W/M/Y и стрелки скрыты: сверху лента меток и карточка
+                        // выбранной метки с итогами.
+                        tagSelector
+                        if let tag = selectedTag {
+                            tagHeroCard(tag)
+                            breakdownSections
                         }
                     }
-                    
-                    periodSummaryCards
-                    topSummarySection
-                    chartSection
-
-                    // Разбивки идут одна за другой, без переключателя.
-                    dailySection
-                    categoryChartSection
-                    categorySection
-                    merchantSection
                 }
                 .padding()
             }
@@ -274,94 +268,252 @@ struct AnalyticsView: View {
         .accessibilityLabel(selectedMode == .tags ? "Закрыть метки" : "Метки")
     }
     
-    private var tagPicker: some View {
-        VStack(spacing: 12) {
-            if tags.isEmpty {
-                HStack {
-                    Image(systemName: "tag.slash")
-                        .foregroundStyle(.secondary)
-                    Text("Нет меток")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    NavigationLink {
-                        TagsManagementView()
-                    } label: {
-                        Text("Создать")
-                            .font(.subheadline)
-                    }
-                }
-                .padding()
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                Picker("Метка", selection: $selectedTag) {
-                    ForEach(tags) { tag in
-                        Text("\(tag.displayIcon) \(tag.name)")
-                            .tag(tag as TransactionTag?)
-                    }
-                }
-                .pickerStyle(.menu)
-                .padding()
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                
-                if let tag = selectedTag {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tag.name)
-                                .font(.headline)
-                            if tag.startDate != nil || tag.endDate != nil {
-                                Text(tag.periodDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+    /// График и разбивки — общие для режимов времени и меток.
+    @ViewBuilder
+    private var breakdownSections: some View {
+        chartSection
+
+        // Разбивки идут одна за другой, без переключателя.
+        dailySection
+        categoryChartSection
+        categorySection
+        merchantSection
+    }
+
+    // MARK: - Tags mode
+
+    private func tagColor(_ tag: TransactionTag) -> Color {
+        tag.colorHex.flatMap { Color(hex: $0) } ?? .accentColor
+    }
+
+    /// Горизонтальная лента меток: переключение в одно касание.
+    @ViewBuilder
+    private var tagSelector: some View {
+        if tags.isEmpty {
+            tagsEmptyState
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(tags) { tag in
+                            tagChip(tag)
+                                .id(tag.persistentModelID)
                         }
-                        Spacer()
-                        Text("\(filteredTransactions.count)")
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.secondary)
-                        Text("транзакций")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+
+                        NavigationLink {
+                            TagsManagementView()
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, height: 34)
+                                .background(Color.gray.opacity(0.08), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Управление метками")
                     }
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(ColorHelper.fromHex(tag.colorHex ?? "#007AFF").opacity(0.1))
-                    )
+                }
+                .scrollClipDisabled()
+                .onAppear {
+                    if let id = selectedTag?.persistentModelID {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
                 }
             }
         }
     }
 
-    private var tagInfoStrip: some View {
-        HStack(spacing: 8) {
-            if let granularity = tagBinGranularity {
-                Label(granularity.sectionTitle, systemImage: granularityIconName(granularity))
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.accentColor.opacity(0.12))
-                    .foregroundStyle(Color.accentColor)
-                    .clipShape(Capsule())
-            }
+    private func tagChip(_ tag: TransactionTag) -> some View {
+        let isSelected = selectedTag?.persistentModelID == tag.persistentModelID
+        let color = tagColor(tag)
 
-            Text(snapshot.page.displayTitle)
+        return Button {
+            withAnimation(.snappy(duration: 0.25)) {
+                selectedTag = tag
+            }
+        } label: {
+            HStack(spacing: 6) {
+                TagIconView(icon: tag.icon, colorHex: tag.colorHex, size: 26)
+                Text(tag.name)
+                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.leading, 4)
+            .padding(.trailing, 12)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(isSelected ? color.opacity(0.16) : Color.gray.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(isSelected ? color.opacity(0.55) : Color.clear, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var tagsEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "tag")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Text("Пока нет меток")
+                .font(.headline)
+
+            Text("Метки собирают траты поездки, проекта или события — здесь появится их аналитика.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.center)
 
-            Spacer()
+            NavigationLink {
+                TagsManagementView()
+            } label: {
+                Label("Создать метку", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 4)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .padding(.horizontal)
+        .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func granularityIconName(_ granularity: TagBinGranularity) -> String {
-        switch granularity {
-        case .daily: return "calendar"
-        case .weekly: return "calendar.badge.clock"
-        case .monthly: return "calendar.circle"
+    /// Карточка выбранной метки: иконка, период, сумма и ключевые цифры.
+    /// При выборе бара на графике сумма переключается на этот бар.
+    private func tagHeroCard(_ tag: TransactionTag) -> some View {
+        let color = tagColor(tag)
+        let selected = selectedChartPoint
+        let days = tagPeriodDays
+        let perDay = days > 0 ? snapshot.totalExpensesRub / Double(days) : 0
+
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                TagIconView(icon: tag.icon, colorHex: tag.colorHex, size: 48)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tag.name)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+
+                    Text(tagPeriodLine(for: tag))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer(minLength: 4)
+
+                if tag.contains(date: .now) {
+                    Text("Сейчас")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(color)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(color.opacity(0.14), in: Capsule())
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(selected.map { "\(tagBinGranularity?.selectedPointTitle ?? "ПЕРИОД") · \($0.title)" } ?? "ПОТРАЧЕНО ВСЕГО")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
+
+                Text(formattedRubAmount(selected?.total ?? snapshot.totalExpensesRub))
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .contentTransition(.numericText())
+            }
+
+            HStack(spacing: 8) {
+                tagMetric(title: "операций", value: "\(snapshot.expenseCount)")
+                tagMetric(title: "в среднем за день", value: TagFormatting.rub(perDay))
+                tagMetric(title: daysWord(days), value: "\(days)")
+            }
+
+            NavigationLink {
+                TransactionListByKindView(
+                    kind: .expense,
+                    scope: currentAnalyticsScope
+                )
+            } label: {
+                HStack {
+                    Text("Все расходы по метке")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.gray.opacity(0.08))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [color.opacity(0.18), color.opacity(0.03)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                }
+        }
+        .animation(.snappy(duration: 0.25), value: selectedChartPointID)
+    }
+
+    private func tagMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground).opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Явный период метки, а без него — фактический диапазон её операций.
+    private func tagPeriodLine(for tag: TransactionTag) -> String {
+        if let period = TagFormatting.period(of: tag) {
+            return period
+        }
+        return snapshot.page.binCount > 0 ? snapshot.page.displayTitle : "Пока нет операций"
+    }
+
+    private func daysWord(_ count: Int) -> String {
+        let mod10 = count % 10
+        let mod100 = count % 100
+        if mod10 == 1 && mod100 != 11 { return "день" }
+        if (2...4).contains(mod10) && !(12...14).contains(mod100) { return "дня" }
+        return "дней"
+    }
+
+    /// Сколько дней в эффективном периоде метки (до сегодня включительно).
+    private var tagPeriodDays: Int {
+        let page = snapshot.page
+        guard page.binCount > 0 else { return 0 }
+        let days = Calendar.current.dateComponents([.day], from: page.startDate, to: page.endDateExclusive).day ?? 0
+        return max(days, 1)
     }
 
     // Верхние вкладки масштаба в стиле Alipay: текст + подчёркивание.
@@ -445,27 +597,18 @@ struct AnalyticsView: View {
         }
     }
     
+    // Верхняя сводка — только для режима времени; у меток её роль играет карточка метки.
     private var topSummaryAmount: Double {
-        // Если бар выбран — всегда показываем его сумму (и в Time, и в Tags).
+        // Если бар выбран — показываем его сумму.
         if let selected = selectedChartPoint {
             return selected.total
-        }
-        if selectedMode == .tags {
-            return snapshot.totalExpensesRub
         }
         return snapshot.averageExpensePerBin
     }
 
     private var topSummaryTitle: String {
         if selectedChartPoint != nil {
-            // Заголовок выбранной точки зависит от гранулярности бинов.
-            if selectedMode == .tags {
-                return tagBinGranularity?.selectedPointTitle ?? "ПЕРИОД"
-            }
             return selectedScale.selectedPointTitle
-        }
-        if selectedMode == .tags {
-            return selectedTag != nil ? "ВСЕГО ПО МЕТКЕ" : "МЕТКА НЕ ВЫБРАНА"
         }
         return selectedScale.averageTitle
     }
@@ -474,9 +617,6 @@ struct AnalyticsView: View {
         if let selected = selectedChartPoint {
             // При выделенном баре показываем его название (день/неделю/месяц).
             return selected.title
-        }
-        if selectedMode == .tags {
-            return selectedTag?.name ?? "—"
         }
         return snapshot.page.displayTitle
     }
@@ -547,10 +687,12 @@ struct AnalyticsView: View {
             } else if selectedMode == .time && selectedScale == .month {
                 monthDailyCalendar
             } else {
-                // Год и режим меток — прежний список строк.
+                // Год и режим меток — список строк.
+                let items = snapshot.lowerTimeTotals
+                let maxTotal = items.map(\.total).max() ?? 0
                 VStack(spacing: 10) {
-                    ForEach(snapshot.lowerTimeTotals) { item in
-                        dailySectionRow(for: item)
+                    ForEach(items) { item in
+                        dailySectionRow(for: item, maxTotal: maxTotal)
                     }
                 }
             }
@@ -692,7 +834,7 @@ struct AnalyticsView: View {
     }
 
     @ViewBuilder
-    private func dailySectionRow(for item: AnalyticsTimeTotal) -> some View {
+    private func dailySectionRow(for item: AnalyticsTimeTotal, maxTotal: Double) -> some View {
         if selectedMode == .time {
             NavigationLink {
                 if selectedScale == .year {
@@ -716,7 +858,7 @@ struct AnalyticsView: View {
                     scope: tagBinScope(for: item, tag: tag)
                 )
             } label: {
-                dailySectionRowLabel(for: item)
+                tagBinRowLabel(for: item, maxTotal: maxTotal, color: tagColor(tag))
             }
             .buttonStyle(.plain)
         } else {
@@ -763,6 +905,41 @@ struct AnalyticsView: View {
         .padding()
         .background(Color.gray.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// Строка бина метки: сумма и полоска относительно самого дорогого бина.
+    private func tagBinRowLabel(for item: AnalyticsTimeTotal, maxTotal: Double, color: Color) -> some View {
+        let share = maxTotal > 0 ? min(max(item.total, 0) / maxTotal, 1) : 0
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(item.title)
+                    .foregroundStyle(item.total > 0 ? Color.primary : Color.secondary)
+                Spacer()
+                Text(formattedRubAmount(item.total))
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .foregroundStyle(item.total > 0 ? Color.primary : Color.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(color.opacity(0.12))
+                    Capsule()
+                        .fill(color.opacity(0.85))
+                        .frame(width: geometry.size.width * share)
+                }
+            }
+            .frame(height: 4)
+        }
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .contentShape(Rectangle())
     }
 
     private var categorySection: some View {
