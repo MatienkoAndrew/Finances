@@ -215,22 +215,18 @@ struct ExpenseBarChart: View {
 
     @ViewBuilder
     private func chart(selected: ExpenseBar?, yMax: Double) -> some View {
-        let insetRatio = isDense ? 0.12 : 0.16
+        let insetRatio: Double = isDense ? 0.12 : 0.16
         let cornerRadius: CGFloat = isDense ? 2.5 : 5
 
         let base = Chart {
-            ForEach(bars) { bar in
-                let inset = bar.end.timeIntervalSince(bar.start) * insetRatio
-
-                BarMark(
-                    xStart: .value("Начало", bar.start.addingTimeInterval(inset)),
-                    xEnd: .value("Конец", bar.end.addingTimeInterval(-inset)),
-                    yStart: .value("Ноль", 0.0),
-                    yEnd: .value("Сумма", min(max(bar.total, 0), yMax))
+            ForEach(bars) { (bar: ExpenseBar) in
+                barMark(
+                    bar,
+                    isDimmed: selected != nil && selected?.start != bar.start,
+                    yMax: yMax,
+                    insetRatio: insetRatio,
+                    cornerRadius: cornerRadius
                 )
-                .foregroundStyle(tint.gradient)
-                .cornerRadius(cornerRadius)
-                .opacity(selected == nil || selected?.start == bar.start ? 1 : 0.35)
             }
 
             if let selected {
@@ -297,6 +293,29 @@ struct ExpenseBarChart: View {
         } else {
             base
         }
+    }
+
+    /// Столбик — прямоугольник на интервале [start, end) с отступами по краям,
+    /// так ширина верна и для дней, и для недель, и для неполных интервалов меток.
+    private func barMark(
+        _ bar: ExpenseBar,
+        isDimmed: Bool,
+        yMax: Double,
+        insetRatio: Double,
+        cornerRadius: CGFloat
+    ) -> some ChartContent {
+        let inset = bar.end.timeIntervalSince(bar.start) * insetRatio
+        let height = min(max(bar.total, 0), yMax)
+
+        return RectangleMark(
+            xStart: .value("Начало", bar.start.addingTimeInterval(inset)),
+            xEnd: .value("Конец", bar.end.addingTimeInterval(-inset)),
+            yStart: .value("Ноль", 0.0),
+            yEnd: .value("Сумма", height)
+        )
+        .foregroundStyle(tint.gradient)
+        .cornerRadius(cornerRadius)
+        .opacity(isDimmed ? 0.35 : 1)
     }
 
     // MARK: - Visible range

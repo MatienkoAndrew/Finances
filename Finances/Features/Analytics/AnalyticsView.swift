@@ -103,6 +103,13 @@ struct AnalyticsView: View {
         return TagAnalyticsBuilder.granularity(for: tag, taggedTransactions: tagged)
     }
 
+    /// Смена метки или интервала пересоздаёт график (сбрасывает выбор столбика).
+    private var tagChartIdentity: String {
+        let name = selectedTag?.name ?? ""
+        let granularity = tagBinGranularity?.shortTitle ?? ""
+        return name + "|" + granularity
+    }
+
     /// Интервалы, между которыми можно переключать график метки.
     private var availableTagGranularities: [TagBinGranularity] {
         guard selectedMode == .tags, let tag = selectedTag else { return [] }
@@ -656,7 +663,7 @@ struct AnalyticsView: View {
                     axisLabels: points.map(\.axisLabel),
                     tint: selectedTag.map(tagColor) ?? .red
                 )
-                .id("\(selectedTag?.name ?? "")-\(tagBinGranularity.map { "\($0)" } ?? "")")
+                .id(tagChartIdentity)
                 .padding()
                 .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
             } else {
