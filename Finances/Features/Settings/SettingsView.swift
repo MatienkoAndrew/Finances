@@ -112,12 +112,8 @@ struct SettingsView: View {
                         CategoriesView()
                     }
 
-                    NavigationLink("Правила категорий") {
-                        RulesView()
-                    }
-                    
-                    NavigationLink("Встроенные правила") {
-                        BuiltInRulesView()
+                    NavigationLink("Запомненные мерчанты") {
+                        LearnedMerchantsView()
                     }
 
                     AICategorizationRow()
