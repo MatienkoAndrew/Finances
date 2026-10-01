@@ -356,11 +356,8 @@ final class DataExportImportManager {
             }
         }
         
-        // Подгружаем существующие метки один раз — будем применять авто-метки
-        // ко всему импорту разом, чтобы новые транзакции в иностранных валютах
-        // автоматически получили метки-страны (если такие auto-метки уже созданы).
-        let allTagsDescriptor = FetchDescriptor<TransactionTag>()
-        let allTags = (try? modelContext.fetch(allTagsDescriptor)) ?? []
+        // Авто-метки применяем ко всему импорту разом, чтобы новые транзакции
+        // в иностранных валютах получили метки-страны (если такие auto-метки уже созданы).
         var importedTransactionsForAutoTagging: [Transaction] = []
 
         // Импортируем транзакции
@@ -405,7 +402,7 @@ final class DataExportImportManager {
         // подходящие импортированные транзакции автоматически получат её.
         TransactionTagSync.applyAutoTags(
             to: importedTransactionsForAutoTagging,
-            allTags: allTags
+            context: modelContext
         )
     }
 }

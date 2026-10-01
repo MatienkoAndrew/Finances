@@ -212,7 +212,7 @@ struct TransactionDetailView: View {
 
         // Если пользователь сменил валюту — могут измениться авто-метки по стране.
         // Не удаляем уже стоящие теги, только добавляем новые подходящие.
-        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags)
+        TransactionTagSync.applyAutoTags(to: transaction, allTags: allTags, context: modelContext)
 
         try? modelContext.save()
         isEditing = false

@@ -44,8 +44,9 @@ struct TagEditorSheet: View {
 
     private var currencyTransactionCount: Int {
         guard !autoCurrencyCode.isEmpty else { return 0 }
+        let resolver = TripCurrencyResolver(transactions: transactions)
         return transactions.filter {
-            $0.kind != .transfer && CurrencyTagSuggestions.merchantCurrency(of: $0) == autoCurrencyCode
+            $0.kind != .transfer && resolver.locationCurrency(of: $0) == autoCurrencyCode
         }.count
     }
 
@@ -237,13 +238,20 @@ struct TagEditorSheet: View {
                     }
                 }
 
-                Text(autoCurrencyCode.isEmpty
-                     ? "Выбери валюту — и метка будет сама ставиться на траты в ней, например THB → Таиланд."
-                     : "Метка встанет на \(TagFormatting.operations(currencyTransactionCount)) в \(autoCurrencyCode) и на все новые.")
+                Text(autoCurrencyHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var autoCurrencyHint: String {
+        guard !autoCurrencyCode.isEmpty else {
+            return "Выбери валюту — и метка будет сама ставиться на траты в ней, например THB → Таиланд."
+        }
+        let hint = "Метка встанет на \(TagFormatting.operations(currencyTransactionCount)) в \(autoCurrencyCode) и на все новые."
+        guard TripCurrencyResolver.internationalCurrencies.contains(autoCurrencyCode) else { return hint }
+        return hint + " Траты в \(autoCurrencyCode) в поездках по другим странам достанутся меткам этих стран."
     }
 
     private var currencyLabel: String {
@@ -336,8 +344,9 @@ struct TagEditorSheet: View {
 
         // Включили авто-валюту — ставим метку и на прошлые операции в этой валюте.
         if let code = target.autoCurrencyCode, code != oldCode {
+            let resolver = TripCurrencyResolver(transactions: transactions)
             for transaction in transactions where transaction.kind != .transfer
-                && CurrencyTagSuggestions.merchantCurrency(of: transaction) == code
+                && resolver.locationCurrency(of: transaction) == code
                 && !transaction.isTagManuallyExcluded(newName) {
                 transaction.addTag(newName)
             }
