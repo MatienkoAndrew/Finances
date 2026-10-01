@@ -16,19 +16,30 @@ struct TransactionListByKindView: View {
     @Query(sort: \Transaction.date, order: .reverse)
     private var transactions: [Transaction]
 
-    private var filteredTransactions: [Transaction] {
+    /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.
+    private var foldedDifferences: FoldedExchangeRateDifferences {
+        ExchangeRateDifferenceMatcher.fold(transactions)
+    }
+
+    private func filteredTransactions(hiding hidden: Set<PersistentIdentifier>) -> [Transaction] {
         transactions.filter {
-            $0.kind == kind && scope.matches($0)
+            !hidden.contains($0.persistentModelID) && $0.kind == kind && scope.matches($0)
         }
     }
 
     var body: some View {
+        let folded = foldedDifferences
+        let visible = filteredTransactions(hiding: folded.foldedIDs)
+
         List {
-            ForEach(filteredTransactions) { transaction in
+            ForEach(visible) { transaction in
                 NavigationLink {
                     TransactionDetailView(transaction: transaction)
                 } label: {
-                    TransactionRowView(transaction: transaction)
+                    VStack(alignment: .leading, spacing: 6) {
+                        TransactionRowView(transaction: transaction)
+                        ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
+                    }
                 }
                 .buttonStyle(.plain)
                 .listRowSeparator(.hidden)
@@ -43,7 +54,7 @@ struct TransactionListByKindView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(filteredTransactions.count)")
+                Text("\(visible.count)")
                     .font(.subheadline.bold())
                     .foregroundStyle(.secondary)
             }

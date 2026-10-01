@@ -16,8 +16,14 @@ struct TransactionListByMerchantView: View {
     @Query(sort: \Transaction.date, order: .reverse)
     private var transactions: [Transaction]
 
-    private var filteredTransactions: [Transaction] {
+    /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.
+    private var foldedDifferences: FoldedExchangeRateDifferences {
+        ExchangeRateDifferenceMatcher.fold(transactions)
+    }
+
+    private func filteredTransactions(hiding hidden: Set<PersistentIdentifier>) -> [Transaction] {
         transactions.filter {
+            !hidden.contains($0.persistentModelID) &&
             $0.countsAsExpenseInAnalytics &&
             normalizedMerchantName($0.details) == merchantTitle &&
             scope.matches($0)
@@ -25,12 +31,17 @@ struct TransactionListByMerchantView: View {
     }
 
     var body: some View {
+        let folded = foldedDifferences
+
         List {
-            ForEach(filteredTransactions) { transaction in
+            ForEach(filteredTransactions(hiding: folded.foldedIDs)) { transaction in
                 NavigationLink {
                     TransactionDetailView(transaction: transaction)
                 } label: {
-                    TransactionRowView(transaction: transaction)
+                    VStack(alignment: .leading, spacing: 6) {
+                        TransactionRowView(transaction: transaction)
+                        ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
+                    }
                 }
                 .buttonStyle(.plain)
                 .listRowSeparator(.hidden)
