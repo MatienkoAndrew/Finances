@@ -323,13 +323,9 @@ enum AnalyticsSnapshotBuilder {
         switch scale {
         case .week:
             return strideDates(from: page.startDate, to: page.endDateExclusive, component: .day).map { date in
-                let formatter = DateFormatter()
-                formatter.locale = Locale(identifier: "ru_RU")
-                formatter.dateFormat = "EEE"
-
-                return BinDescriptor(
+                BinDescriptor(
                     date: date,
-                    axisLabel: formatter.string(from: date),
+                    axisLabel: AnalyticsDateFormat.weekdayShort.string(from: date),
                     title: formattedShortDate(date)
                 )
             }
@@ -353,12 +349,8 @@ enum AnalyticsSnapshotBuilder {
 
         case .year:
             return strideDates(from: page.startDate, to: page.endDateExclusive, component: .month).map { date in
-                let formatter = DateFormatter()
-                formatter.locale = Locale(identifier: "ru_RU")
-                formatter.dateFormat = "MMMM"
-
                 // Подпись года — одна заглавная буква месяца (Июнь/Июль → «И»).
-                let monthName = formatter.string(from: date)
+                let monthName = AnalyticsDateFormat.monthFull.string(from: date)
                 let initial = String(monthName.prefix(1)).uppercased()
 
                 return BinDescriptor(
@@ -419,9 +411,6 @@ enum AnalyticsSnapshotBuilder {
     }
 
     private static func formattedWeekRange(start: Date, end: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-
         let calendar = Calendar.current
         let startMonth = calendar.component(.month, from: start)
         let endMonth = calendar.component(.month, from: end)
@@ -429,42 +418,48 @@ enum AnalyticsSnapshotBuilder {
         let endYear = calendar.component(.year, from: end)
 
         if startMonth == endMonth && startYear == endYear {
-            formatter.dateFormat = "d"
-            let startDay = formatter.string(from: start)
-
-            formatter.dateFormat = "d MMM yyyy"
-            let endPart = formatter.string(from: end)
+            let startDay = AnalyticsDateFormat.day.string(from: start)
+            let endPart = AnalyticsDateFormat.dayMonthYear.string(from: end)
 
             return "\(startDay)–\(endPart)"
         } else {
-            formatter.dateFormat = "d MMM"
-            let startPart = formatter.string(from: start)
-
-            formatter.dateFormat = "d MMM yyyy"
-            let endPart = formatter.string(from: end)
+            let startPart = AnalyticsDateFormat.dayMonth.string(from: start)
+            let endPart = AnalyticsDateFormat.dayMonthYear.string(from: end)
 
             return "\(startPart)–\(endPart)"
         }
     }
 
     private static func formattedMonthYear(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "LLL yyyy"
-        return formatter.string(from: date).capitalized
+        AnalyticsDateFormat.monthShortYear.string(from: date).capitalized
     }
 
     private static func formattedYear(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "yyyy"
-        return formatter.string(from: date)
+        AnalyticsDateFormat.year.string(from: date)
     }
 
     private static func formattedShortDate(_ date: Date) -> String {
+        AnalyticsDateFormat.dayMonthYear.string(from: date)
+    }
+}
+
+/// Форматтеры дат для снапшотов аналитики — по одному на шаблон.
+/// Снапшот строится на каждой отрисовке, а DateFormatter создавать дорого:
+/// раньше его заводил каждый столбик и каждая подпись.
+enum AnalyticsDateFormat {
+    private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMM yyyy"
-        return formatter.string(from: date)
+        formatter.dateFormat = format
+        return formatter
     }
+
+    static let day = formatter("d")
+    static let dayMonth = formatter("d MMM")
+    static let dayMonthYear = formatter("d MMM yyyy")
+    static let weekdayShort = formatter("EEE")
+    static let monthShort = formatter("MMM")
+    static let monthFull = formatter("MMMM")
+    static let monthShortYear = formatter("LLL yyyy")
+    static let year = formatter("yyyy")
 }

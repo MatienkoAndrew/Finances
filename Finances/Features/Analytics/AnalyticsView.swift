@@ -28,15 +28,11 @@ struct AnalyticsView: View {
     /// Интервал графика, выбранный вручную; nil — автоматический по длине метки.
     @State private var tagGranularityOverride: TagBinGranularity?
 
-    @State private var selectedCategoryName: String?
-    @State private var lastHapticCategoryName: String?
     @State private var categoryNavigationTarget: String?
     /// Свёрнут ли раздел «По дням / неделям / месяцам» (запоминается).
     @AppStorage("analytics.dailySectionCollapsed") private var isDailySectionCollapsed = false
     /// Вид графика по категориям (выбор запоминается между запусками).
     @AppStorage("analytics.categoryChartStyle") private var categoryChartStyle: CategoryChartStyle = .bars
-    /// Значение под пальцем на кольце категорий (накопленная сумма).
-    @State private var donutSelectedValue: Double?
     /// Категории с подкатегориями раскрыты сразу, как в Alipay; здесь — свёрнутые вручную.
     @State private var collapsedCategories: Set<String> = []
 
@@ -56,22 +52,67 @@ struct AnalyticsView: View {
         settingsList.first
     }
     
-    // MARK: - Filtered Transactions
-    
-    private var filteredTransactions: [Transaction] {
-        switch selectedMode {
-        case .time:
-            return transactions
-        case .tags:
-            guard let tag = selectedTag else { return [] }
-            return transactions.filter { $0.hasTag(tag.name) }
-        }
+    // MARK: - Report
+
+    /// Всё, что показывает экран, — посчитанное один раз за отрисовку.
+    ///
+    /// Раньше снапшот был вычисляемым свойством, и каждое обращение к нему
+    /// (шапка, строки категорий и мест, ссылки на списки — за отрисовку их
+    /// набиралось больше сотни) заново проходило по всем операциям. Экран замирал
+    /// на доли секунды, и не только открытый: вкладка перерисовывается при каждом
+    /// сохранении в базу, даже когда на экране другая.
+    private struct Report {
+        let snapshot: AnalyticsSnapshot
+        /// Тот же масштаб периодом раньше — для плашки тренда (режим времени).
+        let previousSnapshot: AnalyticsSnapshot?
+        /// Вся история столбиками — для прокручиваемого графика (режим времени).
+        let timeline: ExpenseTimelineData?
+        /// Интервал графика метки: ручной выбор, если он допустим для её периода,
+        /// иначе автоматический. Нужен для подзаголовков «ДЕНЬ/НЕДЕЛЯ/МЕСЯЦ».
+        let tagGranularity: TagBinGranularity?
+        /// Интервалы, между которыми можно переключать график метки.
+        let availableTagGranularities: [TagBinGranularity]
+        /// Какие операции показывают списки по ссылкам: все расходы, категория, место.
+        let scope: AnalyticsScope
     }
 
-    private var snapshot: AnalyticsSnapshot {
-        if selectedMode == .tags {
-            // В режиме Tags строим снапшот по эффективному периоду метки
-            // (без пустых дней до/после) с авто-гранулярностью бинов.
+    private func makeReport() -> Report {
+        switch selectedMode {
+        case .time:
+            let snapshot = AnalyticsSnapshotBuilder.build(
+                transactions: transactions,
+                scale: selectedScale,
+                anchorDate: pageAnchorDate,
+                settings: settings,
+                trackedRates: trackedRates
+            )
+            let page = snapshot.page
+
+            return Report(
+                snapshot: snapshot,
+                previousSnapshot: AnalyticsSnapshotBuilder.build(
+                    transactions: transactions,
+                    scale: selectedScale,
+                    anchorDate: previousAnchorDate,
+                    settings: settings,
+                    trackedRates: trackedRates
+                ),
+                timeline: ExpenseTimelineData.build(
+                    transactions: transactions,
+                    scale: selectedScale,
+                    settings: settings,
+                    trackedRates: trackedRates
+                ),
+                tagGranularity: nil,
+                availableTagGranularities: [],
+                scope: AnalyticsScope(
+                    title: page.displayTitle,
+                    matches: { tx in page.contains(tx.date) },
+                    containsDate: { date in page.contains(date) }
+                )
+            )
+
+        case .tags:
             guard let tag = selectedTag else {
                 let emptyPage = AnalyticsPeriodPage(
                     startDate: .now,
@@ -79,133 +120,110 @@ struct AnalyticsView: View {
                     displayTitle: "Нет метки",
                     binCount: 0
                 )
-                return AnalyticsSnapshot.empty(for: emptyPage)
+                return Report(
+                    snapshot: AnalyticsSnapshot.empty(for: emptyPage),
+                    previousSnapshot: nil,
+                    timeline: nil,
+                    tagGranularity: nil,
+                    availableTagGranularities: [],
+                    scope: AnalyticsScope(
+                        title: "Нет метки",
+                        matches: { _ in false },
+                        containsDate: { _ in false }
+                    )
+                )
             }
-            return TagAnalyticsBuilder.buildSnapshot(
-                tag: tag,
-                transactions: transactions,
-                settings: settings,
-                trackedRates: trackedRates,
-                granularity: tagBinGranularity
-            )
-        } else {
-            // В режиме Time используем стандартную логику
-            return AnalyticsSnapshotBuilder.build(
-                transactions: filteredTransactions,
-                scale: selectedScale,
-                anchorDate: pageAnchorDate,
-                settings: settings,
-                trackedRates: trackedRates
+
+            let tagged = transactions.filter { $0.hasTag(tag.name) }
+            let available = TagAnalyticsBuilder.availableGranularities(for: tag, taggedTransactions: tagged)
+            let granularity: TagBinGranularity?
+            if let tagGranularityOverride, available.contains(tagGranularityOverride) {
+                granularity = tagGranularityOverride
+            } else {
+                granularity = TagAnalyticsBuilder.granularity(for: tag, taggedTransactions: tagged)
+            }
+
+            // В режиме Tags строим снапшот по эффективному периоду метки
+            // (без пустых дней до/после) с авто-гранулярностью бинов.
+            return Report(
+                snapshot: TagAnalyticsBuilder.buildSnapshot(
+                    tag: tag,
+                    transactions: tagged,
+                    settings: settings,
+                    trackedRates: trackedRates,
+                    granularity: granularity
+                ),
+                previousSnapshot: nil,
+                timeline: nil,
+                tagGranularity: granularity,
+                availableTagGranularities: available,
+                scope: tagScope(for: tag)
             )
         }
     }
 
-    /// Гранулярность бинов для текущей выбранной метки: ручной выбор,
-    /// если он допустим для её периода, иначе автоматическая.
-    /// Используется для подзаголовков и форматирования "ДЕНЬ/НЕДЕЛЯ/МЕСЯЦ".
-    private var tagBinGranularity: TagBinGranularity? {
-        guard selectedMode == .tags, let tag = selectedTag else { return nil }
-        let tagged = transactions.filter { $0.hasTag(tag.name) }
-        if let tagGranularityOverride,
-           TagAnalyticsBuilder.availableGranularities(for: tag, taggedTransactions: tagged).contains(tagGranularityOverride) {
-            return tagGranularityOverride
+    /// Начало периода того же масштаба, но раньше — для сравнения в шапке.
+    private var previousAnchorDate: Date {
+        let calendar = Calendar.current
+
+        switch selectedScale {
+        case .week:
+            return calendar.date(byAdding: .weekOfYear, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+        case .month:
+            return calendar.date(byAdding: .month, value: -1, to: pageAnchorDate) ?? pageAnchorDate
+        case .year:
+            return calendar.date(byAdding: .year, value: -1, to: pageAnchorDate) ?? pageAnchorDate
         }
-        return TagAnalyticsBuilder.granularity(for: tag, taggedTransactions: tagged)
+    }
+
+    /// В режиме меток drill-down должен показывать ТОЛЬКО транзакции
+    /// с этим тегом — иначе после ручного снятия метки транзакция
+    /// продолжала бы всплывать в детализации по диапазону дат.
+    private func tagScope(for tag: TransactionTag) -> AnalyticsScope {
+        let tagName = tag.name
+        if let start = tag.startDate, let end = tag.endDate {
+            return AnalyticsScope(
+                title: tag.name,
+                matches: { tx in
+                    tx.hasTag(tagName) && tx.date >= start && tx.date <= end
+                },
+                containsDate: { date in date >= start && date <= end }
+            )
+        } else {
+            return AnalyticsScope(
+                title: tag.name,
+                matches: { tx in tx.hasTag(tagName) },
+                containsDate: { _ in true }
+            )
+        }
     }
 
     /// Смена метки или интервала пересоздаёт график (сбрасывает выбор столбика).
-    private var tagChartIdentity: String {
+    private func tagChartIdentity(_ report: Report) -> String {
         let name = selectedTag?.name ?? ""
-        let granularity = tagBinGranularity?.shortTitle ?? ""
+        let granularity = report.tagGranularity?.shortTitle ?? ""
         return name + "|" + granularity
     }
 
-    /// Интервалы, между которыми можно переключать график метки.
-    private var availableTagGranularities: [TagBinGranularity] {
-        guard selectedMode == .tags, let tag = selectedTag else { return [] }
-        let tagged = transactions.filter { $0.hasTag(tag.name) }
-        return TagAnalyticsBuilder.availableGranularities(for: tag, taggedTransactions: tagged)
-    }
-
-    private var previousSnapshot: AnalyticsSnapshot {
-        let calendar = Calendar.current
-
-        let previousAnchor: Date
-        switch selectedScale {
-        case .week:
-            previousAnchor = calendar.date(byAdding: .weekOfYear, value: -1, to: pageAnchorDate) ?? pageAnchorDate
-        case .month:
-            previousAnchor = calendar.date(byAdding: .month, value: -1, to: pageAnchorDate) ?? pageAnchorDate
-        case .year:
-            previousAnchor = calendar.date(byAdding: .year, value: -1, to: pageAnchorDate) ?? pageAnchorDate
-        }
-
-        return AnalyticsSnapshotBuilder.build(
-            transactions: filteredTransactions,
-            scale: selectedScale,
-            anchorDate: previousAnchor,
-            settings: settings,
-            trackedRates: trackedRates
-        )
-    }
-
-    private var currentAnalyticsScope: AnalyticsScope {
-        switch selectedMode {
-        case .time:
-            let page = snapshot.page
-            return AnalyticsScope(
-                title: page.displayTitle,
-                matches: { tx in page.contains(tx.date) },
-                containsDate: { date in page.contains(date) }
-            )
-        case .tags:
-            guard let tag = selectedTag else {
-                return AnalyticsScope(
-                    title: "Нет метки",
-                    matches: { _ in false },
-                    containsDate: { _ in false }
-                )
-            }
-
-            // В режиме меток drill-down должен показывать ТОЛЬКО транзакции
-            // с этим тегом — иначе после ручного снятия метки транзакция
-            // продолжала бы всплывать в детализации по диапазону дат.
-            let tagName = tag.name
-            if let start = tag.startDate, let end = tag.endDate {
-                return AnalyticsScope(
-                    title: tag.name,
-                    matches: { tx in
-                        tx.hasTag(tagName) && tx.date >= start && tx.date <= end
-                    },
-                    containsDate: { date in date >= start && date <= end }
-                )
-            } else {
-                return AnalyticsScope(
-                    title: tag.name,
-                    matches: { tx in tx.hasTag(tagName) },
-                    containsDate: { _ in true }
-                )
-            }
-        }
-    }
-
     var body: some View {
+        let report = makeReport()
+
         if focusedTag != nil {
-            content
+            content(report)
                 .navigationTitle("Аналитика")
         } else {
             NavigationStack {
-                content
+                content(report)
             }
         }
     }
 
-    private var content: some View {
+    private func content(_ report: Report) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 if selectedMode == .time {
-                    periodHeroCard
-                    breakdownSections
+                    periodHeroCard(report)
+                    breakdownSections(report)
                 } else {
                     // В режиме меток период задан самой меткой, поэтому
                     // W/M/Y и стрелки скрыты: сверху лента меток и карточка
@@ -214,8 +232,8 @@ struct AnalyticsView: View {
                         tagSelector
                     }
                     if let tag = selectedTag {
-                        tagHeroCard(tag)
-                        breakdownSections
+                        tagHeroCard(tag, report: report)
+                        breakdownSections(report)
                     }
                 }
             }
@@ -237,27 +255,13 @@ struct AnalyticsView: View {
                 }
             }
         }
-        .background {
-            NavigationLink(
-                isActive: Binding(
-                    get: { categoryNavigationTarget != nil },
-                    set: { if !$0 { categoryNavigationTarget = nil } }
-                )
-            ) {
-                Group {
-                    if let categoryNavigationTarget {
-                        TransactionListByCategoryView(
-                            categoryTitle: categoryNavigationTarget,
-                            scope: currentAnalyticsScope
-                        )
-                    } else {
-                        EmptyView()
-                    }
-                }
-            } label: {
-                EmptyView()
-            }
-            .hidden()
+        // Переход из графика и легенды категорий. Скрытая NavigationLink(isActive:)
+        // при быстром «назад» и новом касании оставляла пустую страницу.
+        .navigationDestination(item: $categoryNavigationTarget) { categoryTitle in
+            TransactionListByCategoryView(
+                categoryTitle: categoryTitle,
+                scope: report.scope
+            )
         }
         .onAppear {
             guard !didInitializeAnchor else { return }
@@ -265,15 +269,12 @@ struct AnalyticsView: View {
             pageAnchorDate = latestAllowedAnchorDate
         }
         .onChange(of: selectedScale) { _, _ in
-            selectedCategoryName = nil
             pageAnchorDate = snappedAnchorDate(
                 min(pageAnchorDate, latestAllowedAnchorDate),
                 scale: selectedScale
             )
         }
         .onChange(of: selectedMode) { _, newMode in
-            selectedCategoryName = nil
-            
             // При переключении в режим Tags, автоматически выбираем первую метку
             if newMode == .tags {
                 if selectedTag == nil {
@@ -286,7 +287,6 @@ struct AnalyticsView: View {
             }
         }
         .onChange(of: selectedTag) { _, newTag in
-            selectedCategoryName = nil
             tagGranularityOverride = nil
             
             // При смене метки обновляем anchor date
@@ -313,13 +313,13 @@ struct AnalyticsView: View {
     
     /// График и разбивки — общие для режимов времени и меток.
     @ViewBuilder
-    private var breakdownSections: some View {
-        chartSection
+    private func breakdownSections(_ report: Report) -> some View {
+        chartSection(report)
 
         // Разбивки идут одна за другой, без переключателя.
-        dailySection
-        categorySection
-        merchantSection
+        dailySection(report)
+        categorySection(report)
+        merchantSection(report)
     }
 
     // MARK: - Tags mode
@@ -420,9 +420,10 @@ struct AnalyticsView: View {
     }
 
     /// Карточка выбранной метки: иконка, период, сумма и ключевые цифры.
-    private func tagHeroCard(_ tag: TransactionTag) -> some View {
+    private func tagHeroCard(_ tag: TransactionTag, report: Report) -> some View {
+        let snapshot = report.snapshot
         let color = tagColor(tag)
-        let days = tagPeriodDays
+        let days = tagPeriodDays(snapshot)
         let perDay = days > 0 ? snapshot.totalExpensesRub / Double(days) : 0
 
         return VStack(alignment: .leading, spacing: 18) {
@@ -434,7 +435,7 @@ struct AnalyticsView: View {
                         .font(.title3.weight(.semibold))
                         .lineLimit(1)
 
-                    Text(tagPeriodLine(for: tag))
+                    Text(tagPeriodLine(for: tag, snapshot: snapshot))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -470,7 +471,7 @@ struct AnalyticsView: View {
             NavigationLink {
                 TransactionListByKindView(
                     kind: .expense,
-                    scope: currentAnalyticsScope
+                    scope: report.scope
                 )
             } label: {
                 heroLinkLabel("Все расходы по метке", color: color)
@@ -483,9 +484,9 @@ struct AnalyticsView: View {
 
     /// Переключатель интервала графика метки: Дни / Недели / Месяцы.
     @ViewBuilder
-    private var tagGranularityPicker: some View {
-        let options = availableTagGranularities
-        if options.count > 1, let current = tagBinGranularity {
+    private func tagGranularityPicker(_ report: Report) -> some View {
+        let options = report.availableTagGranularities
+        if options.count > 1, let current = report.tagGranularity {
             Picker(
                 "Интервал",
                 selection: Binding(
@@ -506,7 +507,7 @@ struct AnalyticsView: View {
     }
 
     /// Явный период метки, а без него — фактический диапазон её операций.
-    private func tagPeriodLine(for tag: TransactionTag) -> String {
+    private func tagPeriodLine(for tag: TransactionTag, snapshot: AnalyticsSnapshot) -> String {
         if let period = TagFormatting.period(of: tag) {
             return period
         }
@@ -522,7 +523,7 @@ struct AnalyticsView: View {
     }
 
     /// Сколько дней в эффективном периоде метки (до сегодня включительно).
-    private var tagPeriodDays: Int {
+    private func tagPeriodDays(_ snapshot: AnalyticsSnapshot) -> Int {
         let page = snapshot.page
         guard page.binCount > 0 else { return 0 }
         let days = Calendar.current.dateComponents([.day], from: page.startDate, to: page.endDateExclusive).day ?? 0
@@ -533,7 +534,8 @@ struct AnalyticsView: View {
 
     /// Шапка периода: переключение страниц, итог, тренд к прошлому периоду
     /// и ключевые цифры.
-    private var periodHeroCard: some View {
+    private func periodHeroCard(_ report: Report) -> some View {
+        let snapshot = report.snapshot
         let isYear = selectedScale == .year
 
         return VStack(alignment: .leading, spacing: 18) {
@@ -562,7 +564,7 @@ struct AnalyticsView: View {
 
                 heroAmount(snapshot.totalExpensesRub)
 
-                if let delta = trendDeltaFraction, abs(delta) >= 0.005 {
+                if let delta = trendDeltaFraction(report), abs(delta) >= 0.005 {
                     HStack(spacing: 6) {
                         AnalyticsTrendBadge(delta: delta)
                         Text(trendCaption)
@@ -593,7 +595,7 @@ struct AnalyticsView: View {
             NavigationLink {
                 TransactionListByKindView(
                     kind: .expense,
-                    scope: currentAnalyticsScope
+                    scope: report.scope
                 )
             } label: {
                 heroLinkLabel("Все расходы за период", color: .red)
@@ -694,24 +696,20 @@ struct AnalyticsView: View {
 
     // MARK: - Expense chart
 
-    private var chartSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func chartSection(_ report: Report) -> some View {
+        let snapshot = report.snapshot
+
+        return VStack(alignment: .leading, spacing: 10) {
             sectionHeader("Динамика")
 
             VStack(alignment: .leading, spacing: 14) {
                 if selectedMode == .tags {
-                    tagGranularityPicker
+                    tagGranularityPicker(report)
                 }
 
-                if selectedMode == .time {
+                if let timeline = report.timeline {
                     // Вся история одной лентой: листается пальцем, как в «Здоровье»,
                     // и доводится до границы недели / месяца / года.
-                    let timeline = ExpenseTimelineData.build(
-                        transactions: transactions,
-                        scale: selectedScale,
-                        settings: settings,
-                        trackedRates: trackedRates
-                    )
                     ExpenseBarChart(
                         bars: timeline.bars,
                         domain: timeline.domain,
@@ -737,12 +735,12 @@ struct AnalyticsView: View {
                     ExpenseBarChart(
                         bars: bars,
                         domain: first.date..<pageEnd,
-                        averageTitle: tagBinGranularity?.averageTitle ?? "СРЕДНЕЕ",
+                        averageTitle: report.tagGranularity?.averageTitle ?? "СРЕДНЕЕ",
                         rangeTitle: snapshot.page.displayTitle,
                         axisLabels: points.map(\.axisLabel),
                         tint: selectedTag.map(tagColor) ?? .red
                     )
-                    .id(tagChartIdentity)
+                    .id(tagChartIdentity(report))
                 } else {
                     emptyText("Нет расходов для выбранного периода")
                 }
@@ -761,15 +759,17 @@ struct AnalyticsView: View {
 
     // MARK: - Lower sections
 
-    private var dailySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func dailySection(_ report: Report) -> some View {
+        let snapshot = report.snapshot
+
+        return VStack(alignment: .leading, spacing: 10) {
             Button {
                 withAnimation(.snappy(duration: 0.25)) {
                     isDailySectionCollapsed.toggle()
                 }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(dailySectionTitle)
+                    Text(dailySectionTitle(report))
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.primary)
 
@@ -801,11 +801,11 @@ struct AnalyticsView: View {
                             .analyticsCard()
                     } else if selectedMode == .time && selectedScale != .year {
                         // Неделя — одна строка той же сетки, что и у месяца.
-                        dailyCalendar
+                        dailyCalendar(snapshot)
                             .analyticsCard(padding: 12)
                     } else {
                         // Год и режим меток — список строк.
-                        timeTotalsList
+                        timeTotalsList(report)
                     }
                 }
                 .transition(.opacity)
@@ -814,7 +814,7 @@ struct AnalyticsView: View {
     }
 
     // Неделя и месяц: сетка-календарь с суммой по дням и подсветкой по интенсивности трат.
-    private var dailyCalendar: some View {
+    private func dailyCalendar(_ snapshot: AnalyticsSnapshot) -> some View {
         var calendar = Calendar.current
         calendar.locale = Locale(identifier: "ru_RU")
 
@@ -903,16 +903,16 @@ struct AnalyticsView: View {
         return Array(symbols[shift...] + symbols[..<shift])
     }
 
-    private var dailySectionTitle: String {
-        if selectedMode == .tags, let granularity = tagBinGranularity {
+    private func dailySectionTitle(_ report: Report) -> String {
+        if selectedMode == .tags, let granularity = report.tagGranularity {
             return granularity.sectionTitle
         }
         return selectedScale == .year ? "По месяцам" : "По дням"
     }
 
     /// Год и метки: строки на одной карточке с полоской относительно самого дорогого.
-    private var timeTotalsList: some View {
-        let items = snapshot.lowerTimeTotals
+    private func timeTotalsList(_ report: Report) -> some View {
+        let items = report.snapshot.lowerTimeTotals
         let maxTotal = items.map(\.total).max() ?? 0
         let color = selectedMode == .tags ? (selectedTag.map(tagColor) ?? .red) : .red
 
@@ -922,13 +922,18 @@ struct AnalyticsView: View {
                     Divider()
                         .padding(.leading, 16)
                 }
-                dailySectionRow(for: item, maxTotal: maxTotal, color: color)
+                dailySectionRow(for: item, maxTotal: maxTotal, color: color, granularity: report.tagGranularity)
             }
         }
     }
 
     @ViewBuilder
-    private func dailySectionRow(for item: AnalyticsTimeTotal, maxTotal: Double, color: Color) -> some View {
+    private func dailySectionRow(
+        for item: AnalyticsTimeTotal,
+        maxTotal: Double,
+        color: Color,
+        granularity: TagBinGranularity?
+    ) -> some View {
         if selectedMode == .time {
             NavigationLink {
                 if selectedScale == .year {
@@ -949,7 +954,7 @@ struct AnalyticsView: View {
             NavigationLink {
                 TransactionListByKindView(
                     kind: .expense,
-                    scope: tagBinScope(for: item, tag: tag)
+                    scope: tagBinScope(for: item, tag: tag, granularity: granularity)
                 )
             } label: {
                 timeTotalRowLabel(for: item, maxTotal: maxTotal, color: color)
@@ -961,13 +966,17 @@ struct AnalyticsView: View {
     }
 
     /// Создаёт скоуп для конкретного бина (день/неделя/месяц) в режиме Tags.
-    private func tagBinScope(for item: AnalyticsTimeTotal, tag: TransactionTag) -> AnalyticsScope {
+    private func tagBinScope(
+        for item: AnalyticsTimeTotal,
+        tag: TransactionTag,
+        granularity: TagBinGranularity?
+    ) -> AnalyticsScope {
         let calendar = Calendar.current
         let tagName = tag.name
         let binStart = item.date
 
         let binEndExclusive: Date
-        switch tagBinGranularity {
+        switch granularity {
         case .daily, nil:
             binEndExclusive = calendar.date(byAdding: .day, value: 1, to: binStart) ?? binStart
         case .weekly:
@@ -1017,8 +1026,10 @@ struct AnalyticsView: View {
     // MARK: - Categories
 
     /// Категории: график выбранного вида и список с подкатегориями.
-    private var categorySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func categorySection(_ report: Report) -> some View {
+        let snapshot = report.snapshot
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 sectionHeader("Категории")
 
@@ -1044,19 +1055,24 @@ struct AnalyticsView: View {
             } else {
                 switch categoryChartStyle {
                 case .bars:
-                    categoryBarsChart
+                    CategoryBarsChart(
+                        totals: snapshot.categoryTotals,
+                        totalExpenses: snapshot.totalExpensesRub,
+                        colors: categoryColors(for: snapshot.categoryTotals),
+                        onOpenCategory: { categoryNavigationTarget = $0 }
+                    )
                 case .donut:
-                    categoryDonutChart
+                    categoryDonutChart(snapshot)
                 case .strip:
-                    categoryStripChart
+                    categoryStripChart(snapshot)
                 }
 
-                categoryList
+                categoryList(snapshot, scope: report.scope)
             }
         }
     }
 
-    private var categoryList: some View {
+    private func categoryList(_ snapshot: AnalyticsSnapshot, scope: AnalyticsScope) -> some View {
         let maxTotal = snapshot.categoryTotals.map(\.total).max() ?? 0
 
         return SettingsCard {
@@ -1064,22 +1080,33 @@ struct AnalyticsView: View {
                 if index > 0 {
                     SettingsDivider()
                 }
-                categoryRow(item, maxTotal: maxTotal)
+                categoryRow(
+                    item,
+                    maxTotal: maxTotal,
+                    share: item.share(of: snapshot.totalExpensesRub),
+                    scope: scope
+                )
             }
         }
     }
 
     /// Строка категории. Категория с подкатегориями раскрывает их списком
     /// (свёрнуть — тапом по строке), остальные сразу ведут к операциям.
+    /// - Parameter share: доля категории во всех расходах периода.
     @ViewBuilder
-    private func categoryRow(_ item: AnalyticsCategoryTotal, maxTotal: Double) -> some View {
+    private func categoryRow(
+        _ item: AnalyticsCategoryTotal,
+        maxTotal: Double,
+        share: Double,
+        scope: AnalyticsScope
+    ) -> some View {
         let isExpanded = !collapsedCategories.contains(item.category)
 
         if item.subcategories.isEmpty {
             NavigationLink {
-                TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
+                TransactionListByCategoryView(categoryTitle: item.category, scope: scope)
             } label: {
-                categoryRowLabel(item, maxTotal: maxTotal, accessoryRotation: nil)
+                categoryRowLabel(item, maxTotal: maxTotal, share: share, accessoryRotation: nil)
             }
             .buttonStyle(SettingsPressStyle())
         } else {
@@ -1092,7 +1119,7 @@ struct AnalyticsView: View {
                     }
                 }
             } label: {
-                categoryRowLabel(item, maxTotal: maxTotal, accessoryRotation: isExpanded ? 180 : 0)
+                categoryRowLabel(item, maxTotal: maxTotal, share: share, accessoryRotation: isExpanded ? 180 : 0)
             }
             .buttonStyle(SettingsPressStyle())
 
@@ -1103,7 +1130,7 @@ struct AnalyticsView: View {
                             TransactionListByCategoryView(
                                 categoryTitle: item.category,
                                 subcategoryTitle: subcategory.name,
-                                scope: currentAnalyticsScope
+                                scope: scope
                             )
                         } label: {
                             subcategoryRow(subcategory, in: item)
@@ -1112,7 +1139,7 @@ struct AnalyticsView: View {
                     }
 
                     NavigationLink {
-                        TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
+                        TransactionListByCategoryView(categoryTitle: item.category, scope: scope)
                     } label: {
                         HStack(spacing: 4) {
                             Text("Все операции категории")
@@ -1134,7 +1161,12 @@ struct AnalyticsView: View {
     }
 
     /// - Parameter accessoryRotation: nil — шеврон перехода, иначе — раскрытия с поворотом.
-    private func categoryRowLabel(_ item: AnalyticsCategoryTotal, maxTotal: Double, accessoryRotation: Double?) -> some View {
+    private func categoryRowLabel(
+        _ item: AnalyticsCategoryTotal,
+        maxTotal: Double,
+        share categoryShare: Double,
+        accessoryRotation: Double?
+    ) -> some View {
         let color = categoryColor(item.category)
         let share = maxTotal > 0 ? max(item.total, 0) / maxTotal : 0
 
@@ -1158,7 +1190,7 @@ struct AnalyticsView: View {
                 HStack(spacing: 8) {
                     AnalyticsShareBar(share: share, color: color)
 
-                    Text("\(formattedPercent(categoryShare(for: item.category))) · \(item.count) шт.")
+                    Text("\(formattedPercent(categoryShare)) · \(item.count) шт.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -1215,8 +1247,10 @@ struct AnalyticsView: View {
 
     // MARK: - Merchants
 
-    private var merchantSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func merchantSection(_ report: Report) -> some View {
+        let snapshot = report.snapshot
+
+        return VStack(alignment: .leading, spacing: 10) {
             sectionHeader("Топ мест и сервисов")
 
             if snapshot.merchantTotals.isEmpty {
@@ -1234,7 +1268,7 @@ struct AnalyticsView: View {
                         NavigationLink {
                             TransactionListByMerchantView(
                                 merchantTitle: item.merchant,
-                                scope: currentAnalyticsScope
+                                scope: report.scope
                             )
                         } label: {
                             merchantRow(rank: index + 1, item: item, maxTotal: maxTotal)
@@ -1288,94 +1322,10 @@ struct AnalyticsView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: - Category interactive chart
-
-    // Горизонтальные полосы с выбором пальцем (исходный вариант).
-    private var categoryBarsChart: some View {
-        Chart {
-            ForEach(snapshot.categoryTotals) { item in
-                let isSelected = selectedCategoryName == item.category
-                let color = categoryItem(for: item.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
-
-                BarMark(
-                    x: .value("Сумма", item.total),
-                    y: .value("Категория", item.category),
-                    height: .fixed(isSelected ? 26 : 18)
-                )
-                .foregroundStyle(isSelected ? color : color.opacity(0.72))
-                .cornerRadius(isSelected ? 8 : 5)
-                .annotation(position: .trailing) {
-                    Text(formattedPercent(categoryShare(for: item.category)))
-                        .font(isSelected ? .caption.bold() : .caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .frame(height: chartHeightForCategories)
-        .chartXAxis {
-            AxisMarks(position: .bottom)
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading) { value in
-                AxisValueLabel {
-                    if let name = value.as(String.self) {
-                        let isSelected = selectedCategoryName == name
-                        Text(name)
-                            .font(isSelected ? .caption.bold() : .caption)
-                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                    }
-                }
-            }
-        }
-        .chartOverlay { proxy in
-            GeometryReader { geometry in
-                Rectangle()
-                    .fill(.clear)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                let plotFrame = geometry[proxy.plotAreaFrame]
-                                let yInPlot = value.location.y - plotFrame.origin.y
-
-                                guard yInPlot >= 0, yInPlot <= proxy.plotAreaSize.height else {
-                                    return
-                                }
-
-                                if let nearestCategoryName = nearestCategory(
-                                    at: yInPlot,
-                                    plotHeight: proxy.plotAreaSize.height
-                                ) {
-                                    if selectedCategoryName != nearestCategoryName {
-                                        selectedCategoryName = nearestCategoryName
-
-                                        if lastHapticCategoryName != nearestCategoryName {
-                                            let generator = UIImpactFeedbackGenerator(style: .light)
-                                            generator.impactOccurred(intensity: 0.7)
-                                            lastHapticCategoryName = nearestCategoryName
-                                        }
-                                    }
-                                }
-                            }
-                            .onEnded { value in
-                                let totalTranslation = abs(value.translation.width) + abs(value.translation.height)
-
-                                if totalTranslation < 10, let selectedCategoryName {
-                                    categoryNavigationTarget = selectedCategoryName
-                                }
-
-                                selectedCategoryName = nil
-                                lastHapticCategoryName = nil
-                            }
-                    )
-            }
-        }
-        .analyticsCard()
-        .animation(.smooth(duration: 0.25), value: selectedCategoryName)
-    }
+    // MARK: - Category charts
 
     /// Категории с положительной суммой — для кольца и ленты (доли не бывают отрицательными).
-    private var positiveCategoryTotals: [AnalyticsCategoryTotal] {
+    private func positiveCategoryTotals(_ snapshot: AnalyticsSnapshot) -> [AnalyticsCategoryTotal] {
         snapshot.categoryTotals.filter { $0.total > 0 }
     }
 
@@ -1383,77 +1333,30 @@ struct AnalyticsView: View {
         categoryItem(for: name).flatMap { Color(hex: $0.colorHex) } ?? .gray
     }
 
+    /// Цвета категорий для графиков, которые живут в отдельных видах.
+    private func categoryColors(for items: [AnalyticsCategoryTotal]) -> [String: Color] {
+        Dictionary(
+            items.map { ($0.category, categoryColor($0.category)) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
     // Кольцо: доли категорий, в центре — итог или выбранная категория.
-    private var categoryDonutChart: some View {
-        let items = positiveCategoryTotals
+    private func categoryDonutChart(_ snapshot: AnalyticsSnapshot) -> some View {
+        let items = positiveCategoryTotals(snapshot)
         let total = items.reduce(0) { $0 + $1.total }
-        let selected = donutSelectedValue.flatMap { donutCategory(atCumulative: $0, in: items) }
 
         return VStack(spacing: 16) {
-            Chart(items) { item in
-                let isSelected = selected?.category == item.category
-
-                SectorMark(
-                    angle: .value("Сумма", item.total),
-                    innerRadius: .ratio(0.62),
-                    outerRadius: .ratio(isSelected ? 1 : 0.93),
-                    angularInset: 1.5
-                )
-                .cornerRadius(4)
-                .foregroundStyle(categoryColor(item.category))
-                .opacity(selected == nil || isSelected ? 1 : 0.35)
-            }
-            .chartAngleSelection(value: $donutSelectedValue)
-            .chartBackground { proxy in
-                GeometryReader { geometry in
-                    if let plotFrame = proxy.plotFrame {
-                        let frame = geometry[plotFrame]
-                        VStack(spacing: 2) {
-                            Text(selected?.category ?? "Всего")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-
-                            Text(TagFormatting.rub(selected?.total ?? total))
-                                .font(.title3.weight(.bold))
-                                .monospacedDigit()
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
-
-                            if let selected {
-                                Text(formattedPercent(total > 0 ? selected.total / total : 0))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(width: frame.width * 0.55)
-                        .position(x: frame.midX, y: frame.midY)
-                    }
-                }
-            }
-            .frame(height: 240)
-            .sensoryFeedback(.selection, trigger: selected?.category)
+            CategoryDonutChart(items: items, total: total, colors: categoryColors(for: items))
 
             categoryLegend(items, total: total)
         }
         .analyticsCard()
-        .animation(.smooth(duration: 0.25), value: selected?.category)
-    }
-
-    private func donutCategory(atCumulative value: Double, in items: [AnalyticsCategoryTotal]) -> AnalyticsCategoryTotal? {
-        var accumulated = 0.0
-        for item in items {
-            accumulated += item.total
-            if value <= accumulated {
-                return item
-            }
-        }
-        return items.last
     }
 
     // Лента: одна полоса 100%, поделённая на категории, и легенда под ней.
-    private var categoryStripChart: some View {
-        let items = positiveCategoryTotals
+    private func categoryStripChart(_ snapshot: AnalyticsSnapshot) -> some View {
+        let items = positiveCategoryTotals(snapshot)
         let total = items.reduce(0) { $0 + $1.total }
         let gap: CGFloat = 2
 
@@ -1521,8 +1424,8 @@ struct AnalyticsView: View {
     /// График долистали до другой страницы — переключаем на неё весь экран.
     private func settlePage(at pageStart: Date) {
         let target = snappedAnchorDate(clampAnchorDate(pageStart), scale: selectedScale)
-        guard !snapshot.page.contains(target) else { return }
-        selectedCategoryName = nil
+        let currentPage = AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: pageAnchorDate)
+        guard !currentPage.contains(target) else { return }
         pageAnchorDate = target
     }
 
@@ -1572,8 +1475,6 @@ struct AnalyticsView: View {
             case .year:
                 pageAnchorDate = calendar.date(byAdding: .year, value: -1, to: pageAnchorDate) ?? pageAnchorDate
             }
-            
-            selectedCategoryName = nil
         }
     }
 
@@ -1593,53 +1494,22 @@ struct AnalyticsView: View {
             }
             
             pageAnchorDate = clampAnchorDate(pageAnchorDate)
-            selectedCategoryName = nil
         }
     }
 
     // MARK: - Trend / insights helpers
 
-    private var trendDeltaFraction: Double? {
-        guard previousSnapshot.averageExpensePerBin > 0 else { return nil }
-        return (snapshot.averageExpensePerBin - previousSnapshot.averageExpensePerBin) / previousSnapshot.averageExpensePerBin
-    }
-
-    private var selectedCategoryPoint: AnalyticsCategoryTotal? {
-        snapshot.categoryTotals.first { $0.category == selectedCategoryName }
-    }
-
-    private func categoryShare(for categoryName: String) -> Double {
-        guard snapshot.totalExpensesRub > 0 else { return 0 }
-        let total = snapshot.categoryTotals.first(where: { $0.category == categoryName })?.total ?? 0
-        return total / snapshot.totalExpensesRub
+    private func trendDeltaFraction(_ report: Report) -> Double? {
+        guard let previous = report.previousSnapshot, previous.averageExpensePerBin > 0 else { return nil }
+        return (report.snapshot.averageExpensePerBin - previous.averageExpensePerBin) / previous.averageExpensePerBin
     }
 
     private func formattedPercent(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .percent
-        formatter.maximumFractionDigits = 0
-        formatter.minimumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
-    }
-
-    private func nearestCategory(at yInPlot: CGFloat, plotHeight: CGFloat) -> String? {
-        guard !snapshot.categoryTotals.isEmpty, plotHeight > 0 else { return nil }
-
-        let rowHeight = plotHeight / CGFloat(snapshot.categoryTotals.count)
-        let rawIndex = Int((yInPlot / rowHeight).rounded(.down))
-        let index = min(max(rawIndex, 0), snapshot.categoryTotals.count - 1)
-
-        return snapshot.categoryTotals[index].category
+        AnalyticsFormat.percent(value)
     }
 
     private func categoryItem(for categoryName: String) -> ExpenseCategoryItem? {
         CategoryLookup.findCategory(named: categoryName, in: categories)
-    }
-
-    private var chartHeightForCategories: CGFloat {
-        let count = max(snapshot.categoryTotals.count, 1)
-        let base = CGFloat(count) * 44
-        return min(max(base, 180), 420)
     }
 
     private func monthScope(for date: Date) -> AnalyticsScope {
@@ -1652,23 +1522,11 @@ struct AnalyticsView: View {
     }
 
     private func monthYear(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "LLL yyyy"
-        return formatter.string(from: date).capitalized
+        AnalyticsFormat.monthYear(date)
     }
 
     private func formattedRubAmount(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        formatter.groupingSeparator = " "
-        formatter.decimalSeparator = ","
-
-        let number = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
-        return "\(number) ₽"
+        AnalyticsFormat.rub(value)
     }
 
     private func signedFormattedRubAmount(_ value: Double) -> String {
@@ -1709,5 +1567,247 @@ enum CategoryChartStyle: String, CaseIterable, Identifiable {
         case .donut: return "chart.pie.fill"
         case .strip: return "rectangle.split.3x1.fill"
         }
+    }
+}
+
+// MARK: - Category charts with finger selection
+
+/// Полосы категорий: ведёшь пальцем — полоса выделяется, короткое касание
+/// открывает операции категории.
+///
+/// Выделение хранится здесь, а не в `AnalyticsView`: пока палец двигается,
+/// перерисовывается только график, а не весь экран аналитики.
+private struct CategoryBarsChart: View {
+    let totals: [AnalyticsCategoryTotal]
+    /// Все расходы периода — от них считаются доли у полос.
+    let totalExpenses: Double
+    let colors: [String: Color]
+    let onOpenCategory: (String) -> Void
+
+    @State private var selectedCategoryName: String?
+    @State private var lastHapticCategoryName: String?
+
+    var body: some View {
+        Chart {
+            ForEach(totals) { item in
+                let isSelected = selectedCategoryName == item.category
+                let color = colors[item.category] ?? .gray
+
+                BarMark(
+                    x: .value("Сумма", item.total),
+                    y: .value("Категория", item.category),
+                    height: .fixed(isSelected ? 26 : 18)
+                )
+                .foregroundStyle(isSelected ? color : color.opacity(0.72))
+                .cornerRadius(isSelected ? 8 : 5)
+                .annotation(position: .trailing) {
+                    Text(AnalyticsFormat.percent(item.share(of: totalExpenses)))
+                        .font(isSelected ? .caption.bold() : .caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(height: chartHeight)
+        .chartXAxis {
+            AxisMarks(position: .bottom)
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisValueLabel {
+                    if let name = value.as(String.self) {
+                        let isSelected = selectedCategoryName == name
+                        Text(name)
+                            .font(isSelected ? .caption.bold() : .caption)
+                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    }
+                }
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let plotFrame = geometry[proxy.plotAreaFrame]
+                                let yInPlot = value.location.y - plotFrame.origin.y
+
+                                guard yInPlot >= 0, yInPlot <= proxy.plotAreaSize.height else {
+                                    return
+                                }
+
+                                if let nearestCategoryName = nearestCategory(
+                                    at: yInPlot,
+                                    plotHeight: proxy.plotAreaSize.height
+                                ) {
+                                    if selectedCategoryName != nearestCategoryName {
+                                        selectedCategoryName = nearestCategoryName
+
+                                        if lastHapticCategoryName != nearestCategoryName {
+                                            let generator = UIImpactFeedbackGenerator(style: .light)
+                                            generator.impactOccurred(intensity: 0.7)
+                                            lastHapticCategoryName = nearestCategoryName
+                                        }
+                                    }
+                                }
+                            }
+                            .onEnded { value in
+                                let totalTranslation = abs(value.translation.width) + abs(value.translation.height)
+
+                                if totalTranslation < 10, let selectedCategoryName {
+                                    onOpenCategory(selectedCategoryName)
+                                }
+
+                                selectedCategoryName = nil
+                                lastHapticCategoryName = nil
+                            }
+                    )
+            }
+        }
+        .analyticsCard()
+        .animation(.smooth(duration: 0.25), value: selectedCategoryName)
+    }
+
+    private var chartHeight: CGFloat {
+        let count = max(totals.count, 1)
+        let base = CGFloat(count) * 44
+        return min(max(base, 180), 420)
+    }
+
+    private func nearestCategory(at yInPlot: CGFloat, plotHeight: CGFloat) -> String? {
+        guard !totals.isEmpty, plotHeight > 0 else { return nil }
+
+        let rowHeight = plotHeight / CGFloat(totals.count)
+        let rawIndex = Int((yInPlot / rowHeight).rounded(.down))
+        let index = min(max(rawIndex, 0), totals.count - 1)
+
+        return totals[index].category
+    }
+}
+
+/// Кольцо долей категорий: палец на кольце показывает категорию в центре.
+///
+/// Выбор хранится здесь же: пока палец двигается, перерисовывается только кольцо.
+private struct CategoryDonutChart: View {
+    let items: [AnalyticsCategoryTotal]
+    let total: Double
+    let colors: [String: Color]
+
+    /// Значение под пальцем (накопленная сумма).
+    @State private var selectedValue: Double?
+
+    var body: some View {
+        let selected = selectedValue.flatMap { category(atCumulative: $0) }
+
+        Chart(items) { item in
+            let isSelected = selected?.category == item.category
+
+            SectorMark(
+                angle: .value("Сумма", item.total),
+                innerRadius: .ratio(0.62),
+                outerRadius: .ratio(isSelected ? 1 : 0.93),
+                angularInset: 1.5
+            )
+            .cornerRadius(4)
+            .foregroundStyle(colors[item.category] ?? .gray)
+            .opacity(selected == nil || isSelected ? 1 : 0.35)
+        }
+        .chartAngleSelection(value: $selectedValue)
+        .chartBackground { proxy in
+            GeometryReader { geometry in
+                if let plotFrame = proxy.plotFrame {
+                    let frame = geometry[plotFrame]
+                    VStack(spacing: 2) {
+                        Text(selected?.category ?? "Всего")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Text(TagFormatting.rub(selected?.total ?? total))
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+
+                        if let selected {
+                            Text(AnalyticsFormat.percent(total > 0 ? selected.total / total : 0))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: frame.width * 0.55)
+                    .position(x: frame.midX, y: frame.midY)
+                }
+            }
+        }
+        .frame(height: 240)
+        .sensoryFeedback(.selection, trigger: selected?.category)
+        .animation(.smooth(duration: 0.25), value: selected?.category)
+    }
+
+    private func category(atCumulative value: Double) -> AnalyticsCategoryTotal? {
+        var accumulated = 0.0
+        for item in items {
+            accumulated += item.total
+            if value <= accumulated {
+                return item
+            }
+        }
+        return items.last
+    }
+}
+
+private extension AnalyticsCategoryTotal {
+    /// Доля категории во всех расходах периода.
+    func share(of totalExpenses: Double) -> Double {
+        totalExpenses > 0 ? total / totalExpenses : 0
+    }
+}
+
+/// Форматтеры аналитики создаются один раз: NumberFormatter и DateFormatter
+/// дорогие, а суммы и доли форматируются в каждой строке на каждой отрисовке.
+private enum AnalyticsFormat {
+    private static let rubFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+        return formatter
+    }()
+
+    private static let percentFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .percent
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        return formatter
+    }()
+
+    private static let monthYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "LLL yyyy"
+        return formatter
+    }()
+
+    /// «1 234,50 ₽».
+    static func rub(_ value: Double) -> String {
+        let number = rubFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        return "\(number) ₽"
+    }
+
+    /// «12 %».
+    static func percent(_ value: Double) -> String {
+        percentFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value * 100))%"
+    }
+
+    /// «Окт. 2026».
+    static func monthYear(_ date: Date) -> String {
+        monthYearFormatter.string(from: date).capitalized
     }
 }

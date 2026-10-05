@@ -153,7 +153,7 @@ struct ExpenseBarChart: View {
         VStack(alignment: .leading, spacing: 10) {
             header(average: summary.average, window: window, selected: selected)
 
-            chart(selected: selected, yMax: summary.yMax)
+            chart(selected: selected, yMax: summary.yMax, near: window)
                 .animation(.easeOut(duration: 0.2), value: summary.yMax)
         }
         .sensoryFeedback(.selection, trigger: selected?.start)
@@ -196,13 +196,16 @@ struct ExpenseBarChart: View {
 
     // MARK: - Chart
 
+    /// - Parameter window: видимое окно — рисуется только то, что рядом с ним.
     @ViewBuilder
-    private func chart(selected: ExpenseBar?, yMax: Double) -> some View {
+    private func chart(selected: ExpenseBar?, yMax: Double, near window: Range<Date>) -> some View {
         let insetRatio: Double = isDense ? 0.12 : 0.16
         let cornerRadius: CGFloat = isDense ? 2.5 : 5
+        let drawn = drawnRange(around: window)
+        let drawnBars = bars.filter { $0.end > drawn.lowerBound && $0.start < drawn.upperBound }
 
         let base = Chart {
-            ForEach(bars) { (bar: ExpenseBar) in
+            ForEach(drawnBars) { (bar: ExpenseBar) in
                 barMark(
                     bar,
                     isDimmed: selected != nil && selected?.start != bar.start,
@@ -222,10 +225,10 @@ struct ExpenseBarChart: View {
         .chartXScale(domain: domain.lowerBound...domain.upperBound)
         .chartYScale(domain: 0...yMax)
         .chartXAxis {
-            AxisMarks(values: axis.gridDates) { _ in
+            AxisMarks(values: axis.gridDates.filter { drawn.contains($0) }) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
             }
-            AxisMarks(values: axis.labelDates) { value in
+            AxisMarks(values: axis.labelDates.filter { drawn.contains($0) }) { value in
                 AxisValueLabel {
                     if let date = value.as(Date.self), let text = axis.labels[Self.key(date)] {
                         Text(text)
@@ -303,6 +306,18 @@ struct ExpenseBarChart: View {
             return domain.upperBound.timeIntervalSince(domain.lowerBound)
         }
         return page.duration
+    }
+
+    /// Что рисовать: видимое окно и по две страницы с каждой стороны, чтобы при
+    /// прокрутке края не пустели. У статичного графика — весь домен.
+    ///
+    /// Прокручиваемый график перерисовывается на каждом кадре прокрутки (его тело
+    /// читает позицию), а столбиков, линий сетки и подписей за всю историю — сотни;
+    /// их пересчёт и давал рывки.
+    private func drawnRange(around window: Range<Date>) -> Range<Date> {
+        guard timeline != nil else { return domain }
+        let margin = pageLength * 2
+        return window.lowerBound.addingTimeInterval(-margin)..<window.upperBound.addingTimeInterval(margin)
     }
 
     private var visibleWindow: Range<Date> {

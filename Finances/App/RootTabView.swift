@@ -8,11 +8,17 @@ struct RootTabView: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    @Query
+    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
     @Query
     private var accounts: [Account]
+
+    @Query
+    private var settingsList: [AppSettings]
+
+    @Query(sort: \TrackedExchangeRate.code, order: .forward)
+    private var trackedRates: [TrackedExchangeRate]
 
     @State private var selectedTab: RootTab = .transactions
     /// PDF, отправленный в приложение через «Поделиться» (например, выписка из Kaspi).
@@ -50,6 +56,12 @@ struct RootTabView: View {
                 }
                 .tag(RootTab.settings)
         }
+        // Справочники для строк операций — один набор на все списки приложения.
+        .environment(\.transactionRowLookup, TransactionRowLookup(
+            categories: categories,
+            settings: settingsList.first,
+            trackedRates: trackedRates
+        ))
         .onOpenURL { url in
             // Импорт и его итог показывает экран транзакций.
             guard url.isFileURL else { return }

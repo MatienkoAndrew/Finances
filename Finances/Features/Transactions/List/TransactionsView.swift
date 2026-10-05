@@ -54,10 +54,11 @@ struct TransactionsView: View {
 
     private func filteredTransactions(folded: FoldedExchangeRateDifferences) -> [Transaction] {
         let hidden = folded.foldedIDs
+        let query = searchQuery
         return transactions.filter { transaction in
             !hidden.contains(transaction.persistentModelID)
                 && selectedFilter.matches(transaction)
-                && matchesSearch(transaction)
+                && matchesSearch(transaction, query: query)
         }
     }
 
@@ -312,11 +313,14 @@ struct TransactionsView: View {
         try? modelContext.save()
     }
 
-    private func matchesSearch(_ transaction: Transaction) -> Bool {
+    /// Запрос в нижнем регистре; nil — поиск пуст.
+    private var searchQuery: String? {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
+        return trimmed.isEmpty ? nil : trimmed.lowercased()
+    }
 
-        let query = trimmed.lowercased()
+    private func matchesSearch(_ transaction: Transaction, query: String?) -> Bool {
+        guard let query else { return true }
 
         let haystack = [
             transaction.details,
@@ -331,11 +335,28 @@ struct TransactionsView: View {
         return haystack.contains(query)
     }
 
-    private func formattedSectionDate(_ date: Date) -> String {
+    // Форматтеры — по одному на экран: заголовок и сумма есть у каждого дня
+    // в списке, а создавать DateFormatter и NumberFormatter заново дорого.
+    private static let sectionDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
         formatter.dateFormat = "d MMMM yyyy"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private static let rubFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+        return formatter
+    }()
+
+    private func formattedSectionDate(_ date: Date) -> String {
+        Self.sectionDateFormatter.string(from: date)
     }
     
     /// Подсчет суммы за день в рублях с учетом фильтра
@@ -392,15 +413,7 @@ struct TransactionsView: View {
     
     /// Форматирование суммы в рублях
     private func formattedRubAmount(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 2
-        formatter.groupingSeparator = " "
-        formatter.decimalSeparator = ","
-        
-        let number = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        let number = Self.rubFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
         return "\(number) ₽"
     }
     

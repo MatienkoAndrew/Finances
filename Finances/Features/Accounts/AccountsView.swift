@@ -32,16 +32,18 @@ struct AccountsView: View {
     }
 
     var body: some View {
+        let balances = AccountBalanceCalculator.balances(transactions: transactions)
+
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if activeAccounts.isEmpty {
                         emptyState
                     } else {
-                        activeSection
+                        activeSection(balances)
 
                         if !archivedAccounts.isEmpty {
-                            archivedSection
+                            archivedSection(balances)
                         }
                     }
                 }
@@ -76,7 +78,7 @@ struct AccountsView: View {
         }
     }
 
-    private var activeSection: some View {
+    private func activeSection(_ balances: [PersistentIdentifier: Double]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Активные")
                 .font(.title3.bold())
@@ -87,10 +89,7 @@ struct AccountsView: View {
                 } label: {
                     AccountRowView(
                         account: account,
-                        balance: AccountBalanceCalculator.balance(
-                            for: account,
-                            transactions: transactions
-                        )
+                        balance: balances[account.persistentModelID] ?? 0
                     )
                 }
                 .buttonStyle(.plain)
@@ -98,7 +97,7 @@ struct AccountsView: View {
         }
     }
 
-    private var archivedSection: some View {
+    private func archivedSection(_ balances: [PersistentIdentifier: Double]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Архив")
                 .font(.title3.bold())
@@ -109,10 +108,7 @@ struct AccountsView: View {
                 } label: {
                     AccountRowView(
                         account: account,
-                        balance: AccountBalanceCalculator.balance(
-                            for: account,
-                            transactions: transactions
-                        )
+                        balance: balances[account.persistentModelID] ?? 0
                     )
                     .opacity(0.7)
                 }

@@ -1,19 +1,36 @@
 import SwiftUI
 import SwiftData
 
+/// Справочники для строк операций: категории (плашка и выбор категории) и курсы —
+/// на случай, если у операции ещё нет суммы в рублях.
+///
+/// Раньше каждая строка запрашивала их из базы сама: три запроса на строку при
+/// каждом её появлении в списке и повторно после каждого сохранения. Теперь их
+/// один раз собирает `RootTabView` и раздаёт строкам через окружение.
+struct TransactionRowLookup: Equatable {
+    var categories: [ExpenseCategoryItem] = []
+    var settings: AppSettings?
+    var trackedRates: [TrackedExchangeRate] = []
+
+    /// Сравнение по составу: правки самих категорий и курсов строки и так
+    /// получают через наблюдение за моделями, а лишние перерисовки всех строк
+    /// при каждом обновлении корневого экрана не нужны.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.categories.map(\.persistentModelID) == rhs.categories.map(\.persistentModelID)
+            && lhs.settings?.persistentModelID == rhs.settings?.persistentModelID
+            && lhs.trackedRates.map(\.persistentModelID) == rhs.trackedRates.map(\.persistentModelID)
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var transactionRowLookup = TransactionRowLookup()
+}
+
 struct TransactionRowView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.transactionRowLookup) private var lookup
 
     let transaction: Transaction
-
-    @Query
-    private var settingsList: [AppSettings]
-
-    @Query(sort: \TrackedExchangeRate.code, order: .forward)
-    private var trackedRates: [TrackedExchangeRate]
-
-    @Query(sort: \ExpenseCategoryItem.name, order: .forward)
-    private var categories: [ExpenseCategoryItem]
 
     @State private var isShowingCategoryPicker = false
     @State private var pickedCategory: CategoryMatch?
@@ -30,12 +47,8 @@ struct TransactionRowView: View {
         }
     }
 
-    private var settings: AppSettings? {
-        settingsList.first
-    }
-
     private var categoryItem: ExpenseCategoryItem? {
-        CategoryLookup.findCategory(named: transaction.categoryName, in: categories)
+        CategoryLookup.findCategory(named: transaction.categoryName, in: lookup.categories)
     }
 
     var body: some View {
@@ -166,7 +179,7 @@ struct TransactionRowView: View {
             .buttonStyle(.borderless)
             .sheet(isPresented: $isShowingCategoryPicker, onDismiss: applyPickedCategory) {
                 CategoryPickerSheet(
-                    categories: categories,
+                    categories: lookup.categories,
                     initialCategory: transaction.categoryName,
                     initialSubcategory: transaction.subcategoryName,
                     subtitle: transaction.details
@@ -187,8 +200,8 @@ struct TransactionRowView: View {
     private var resolvedRubAmount: Double? {
         TransactionRubConverter.displayRubAmount(
             for: transaction,
-            settings: settings,
-            trackedRates: trackedRates
+            settings: lookup.settings,
+            trackedRates: lookup.trackedRates
         )
     }
 
@@ -419,7 +432,8 @@ struct TransactionRowView: View {
         "\(formattedNumber(abs(value))) \(currency)"
     }
 
-    private func formattedNumber(_ value: Double) -> String {
+    /// Один на все строки: создавать NumberFormatter на каждую сумму дорого.
+    private static let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.locale = Locale(identifier: "ru_RU")
@@ -427,7 +441,10 @@ struct TransactionRowView: View {
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = " "
         formatter.decimalSeparator = ","
+        return formatter
+    }()
 
-        return formatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
+    private func formattedNumber(_ value: Double) -> String {
+        Self.numberFormatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
     }
 }

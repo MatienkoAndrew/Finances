@@ -23,7 +23,7 @@ struct ExchangeRateDifferenceCaption: View {
         }
     }
 
-    private static func format(_ value: Double, signed: Bool) -> String {
+    private static let formatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.locale = Locale(identifier: "ru_RU")
@@ -31,6 +31,10 @@ struct ExchangeRateDifferenceCaption: View {
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = " "
         formatter.decimalSeparator = ","
+        return formatter
+    }()
+
+    private static func format(_ value: Double, signed: Bool) -> String {
         let number = formatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
         let sign = signed ? (value < 0 ? "− " : "+ ") : ""
         return "\(sign)\(number) ₸"

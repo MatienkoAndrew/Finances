@@ -318,8 +318,6 @@ enum TagAnalyticsBuilder {
         granularity: TagBinGranularity,
         calendar: Calendar
     ) -> [TagBin] {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
         var bins: [TagBin] = []
 
         switch granularity {
@@ -328,10 +326,8 @@ enum TagAnalyticsBuilder {
             while current < endExclusive {
                 let next = calendar.date(byAdding: .day, value: 1, to: current) ?? endExclusive
 
-                formatter.dateFormat = "d"
-                let axis = formatter.string(from: current)
-                formatter.dateFormat = "d MMM yyyy"
-                let title = formatter.string(from: current)
+                let axis = AnalyticsDateFormat.day.string(from: current)
+                let title = AnalyticsDateFormat.dayMonthYear.string(from: current)
 
                 bins.append(TagBin(start: current, endExclusive: next, axisLabel: axis, title: title))
                 current = next
@@ -344,11 +340,8 @@ enum TagAnalyticsBuilder {
                 let next = min(nextRaw, endExclusive)
                 let lastDayInBin = calendar.date(byAdding: .day, value: -1, to: next) ?? current
 
-                formatter.dateFormat = "d"
-                let axis = formatter.string(from: current)
-
-                formatter.dateFormat = "d MMM"
-                let title = "\(formatter.string(from: current))–\(formatter.string(from: lastDayInBin))"
+                let axis = AnalyticsDateFormat.day.string(from: current)
+                let title = "\(AnalyticsDateFormat.dayMonth.string(from: current))–\(AnalyticsDateFormat.dayMonth.string(from: lastDayInBin))"
 
                 bins.append(TagBin(start: current, endExclusive: next, axisLabel: axis, title: title))
                 current = next
@@ -360,10 +353,8 @@ enum TagAnalyticsBuilder {
                 let nextRaw = calendar.date(byAdding: .month, value: 1, to: current) ?? endExclusive
                 let next = min(nextRaw, endExclusive)
 
-                formatter.dateFormat = "MMM"
-                let axis = formatter.string(from: current).capitalized
-                formatter.dateFormat = "LLL yyyy"
-                let title = formatter.string(from: current).capitalized
+                let axis = AnalyticsDateFormat.monthShort.string(from: current).capitalized
+                let title = AnalyticsDateFormat.monthShortYear.string(from: current).capitalized
 
                 bins.append(TagBin(start: current, endExclusive: next, axisLabel: axis, title: title))
                 current = next
@@ -398,8 +389,6 @@ enum TagAnalyticsBuilder {
     private static func formattedDateRange(start: Date, endExclusive: Date) -> String {
         let calendar = Calendar.current
         let endInclusive = calendar.date(byAdding: .day, value: -1, to: endExclusive) ?? endExclusive
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
 
         let startMonth = calendar.component(.month, from: start)
         let endMonth = calendar.component(.month, from: endInclusive)
@@ -407,25 +396,19 @@ enum TagAnalyticsBuilder {
         let endYear = calendar.component(.year, from: endInclusive)
 
         if calendar.isDate(start, inSameDayAs: endInclusive) {
-            formatter.dateFormat = "d MMM yyyy"
-            return formatter.string(from: start)
+            return AnalyticsDateFormat.dayMonthYear.string(from: start)
         }
 
         if startYear == endYear && startMonth == endMonth {
-            formatter.dateFormat = "d"
-            let startDay = formatter.string(from: start)
-            formatter.dateFormat = "d MMM yyyy"
-            return "\(startDay)–\(formatter.string(from: endInclusive))"
+            let startDay = AnalyticsDateFormat.day.string(from: start)
+            return "\(startDay)–\(AnalyticsDateFormat.dayMonthYear.string(from: endInclusive))"
         }
 
         if startYear == endYear {
-            formatter.dateFormat = "d MMM"
-            let startPart = formatter.string(from: start)
-            formatter.dateFormat = "d MMM yyyy"
-            return "\(startPart)–\(formatter.string(from: endInclusive))"
+            let startPart = AnalyticsDateFormat.dayMonth.string(from: start)
+            return "\(startPart)–\(AnalyticsDateFormat.dayMonthYear.string(from: endInclusive))"
         }
 
-        formatter.dateFormat = "d MMM yyyy"
-        return "\(formatter.string(from: start))–\(formatter.string(from: endInclusive))"
+        return "\(AnalyticsDateFormat.dayMonthYear.string(from: start))–\(AnalyticsDateFormat.dayMonthYear.string(from: endInclusive))"
     }
 }

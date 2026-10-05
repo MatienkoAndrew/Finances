@@ -99,7 +99,10 @@ final class ExchangeRateSync {
         let table = RubRateTable.load(context: context)
         recalculate(transactions, table: table)
         updateCurrentRates(tracked, table: table, context: context)
-        try? context.save()
+        // Сохранение перерисовывает все экраны с данными из базы — только если что-то поменялось.
+        if context.hasChanges {
+            try? context.save()
+        }
 
         if failed {
             lastError = "Не удалось обновить курсы — проверь интернет. Пока считаем по последним известным."
@@ -202,18 +205,22 @@ final class ExchangeRateSync {
         }
     }
 
-    /// Текущие курсы для экрана валют и старых расчётов.
+    /// Текущие курсы для экрана валют и старых расчётов. Пишем только изменившиеся:
+    /// запись того же значения тоже считается правкой и вызывает лишнее сохранение.
     private func updateCurrentRates(_ tracked: [TrackedExchangeRate], table: RubRateTable, context: ModelContext) {
         for rate in tracked {
-            if let latest = table.latest(rate.code), latest.rubPerUnit > 0 {
+            if let latest = table.latest(rate.code), latest.rubPerUnit > 0, rate.rubPerUnit != latest.rubPerUnit {
                 rate.rubPerUnit = latest.rubPerUnit
             }
         }
         if let kzt = table.latest("KZT"), kzt.rubPerUnit > 0 {
+            let kztPerRub = 1 / kzt.rubPerUnit
             if let settings = try? context.fetch(FetchDescriptor<AppSettings>()).first {
-                settings.kztPerRub = 1 / kzt.rubPerUnit
+                if settings.kztPerRub != kztPerRub {
+                    settings.kztPerRub = kztPerRub
+                }
             } else {
-                context.insert(AppSettings(kztPerRub: 1 / kzt.rubPerUnit))
+                context.insert(AppSettings(kztPerRub: kztPerRub))
             }
         }
     }
