@@ -4,6 +4,9 @@ import SwiftData
 import UniformTypeIdentifiers
 
 struct TransactionsView: View {
+    /// PDF из «Поделиться» — импортируется сразу, без выбора файла.
+    @Binding var sharedStatementURL: URL?
+
     @Environment(\.modelContext) private var modelContext
 
     @Query(sort: \Transaction.date, order: .reverse)
@@ -179,6 +182,11 @@ struct TransactionsView: View {
                 allowsMultipleSelection: false
             ) { result in
                 handleImport(result)
+            }
+            .onChange(of: sharedStatementURL, initial: true) { _, url in
+                guard let url else { return }
+                sharedStatementURL = nil
+                importSharedStatement(from: url)
             }
             .overlay {
                 if let importProgress {
@@ -415,17 +423,50 @@ struct TransactionsView: View {
                 return
             }
 
-            importProgress = 0
+            startImport(from: url)
+        }
+    }
 
-            Task {
-                defer { importProgress = nil }
+    /// Файл из «Поделиться»: iOS кладёт его копию в tmp/<bundle id>-Inbox
+    /// (на старых версиях — в Documents/Inbox), после импорта она не нужна.
+    private func importSharedStatement(from url: URL) {
+        let path = url.resolvingSymlinksInPath().path
+        let isInboxCopy = [URL.temporaryDirectory, URL.documentsDirectory.appending(path: "Inbox")]
+            .map { $0.resolvingSymlinksInPath().path + "/" }
+            .contains { path.hasPrefix($0) }
+        let removeCopy = {
+            if isInboxCopy {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
 
-                do {
-                    let statement = try await readStatementInBackground(from: url)
-                    finishImport(statement, fileName: url.lastPathComponent)
-                } catch {
-                    importErrorMessage = error.localizedDescription
-                }
+        guard importProgress == nil else {
+            removeCopy()
+            importErrorMessage = "Дождись окончания текущего импорта и отправь выписку ещё раз."
+            return
+        }
+
+        // Открытые поверх списка окна закрываются — иначе итог импорта не покажется.
+        isShowingAddTransaction = false
+        isShowingQuickTag = false
+
+        startImport(from: url, onFinish: removeCopy)
+    }
+
+    private func startImport(from url: URL, onFinish: @escaping () -> Void = {}) {
+        importProgress = 0
+
+        Task {
+            defer {
+                importProgress = nil
+                onFinish()
+            }
+
+            do {
+                let statement = try await readStatementInBackground(from: url)
+                finishImport(statement, fileName: url.lastPathComponent)
+            } catch {
+                importErrorMessage = error.localizedDescription
             }
         }
     }

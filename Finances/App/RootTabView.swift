@@ -2,6 +2,10 @@ import SwiftUI
 import SwiftData
 
 struct RootTabView: View {
+    private enum RootTab: Hashable {
+        case transactions, accounts, analytics, settings
+    }
+
     @Environment(\.modelContext) private var modelContext
 
     @Query
@@ -10,18 +14,24 @@ struct RootTabView: View {
     @Query
     private var accounts: [Account]
 
+    @State private var selectedTab: RootTab = .transactions
+    /// PDF, отправленный в приложение через «Поделиться» (например, выписка из Kaspi).
+    @State private var sharedStatementURL: URL?
+
     var body: some View {
-        TabView {
-            TransactionsView()
+        TabView(selection: $selectedTab) {
+            TransactionsView(sharedStatementURL: $sharedStatementURL)
                 .tabItem {
                     Label("Транзакции", systemImage: "list.bullet.rectangle")
                 }
+                .tag(RootTab.transactions)
             
             
             AccountsView()
                 .tabItem {
                     Label("Счета", systemImage: "wallet.bifold")
                 }
+                .tag(RootTab.accounts)
             
 //            ContentView()
 //                .tabItem {
@@ -32,11 +42,19 @@ struct RootTabView: View {
                 .tabItem {
                     Label("Аналитика", systemImage: "chart.bar")
                 }
+                .tag(RootTab.analytics)
 
             SettingsView()
                 .tabItem {
                     Label("Настройки", systemImage: "gearshape")
                 }
+                .tag(RootTab.settings)
+        }
+        .onOpenURL { url in
+            // Импорт и его итог показывает экран транзакций.
+            guard url.isFileURL else { return }
+            selectedTab = .transactions
+            sharedStatementURL = url
         }
         .onAppear {
             CategorySeeder.seedIfNeeded(existing: categories, modelContext: modelContext)
