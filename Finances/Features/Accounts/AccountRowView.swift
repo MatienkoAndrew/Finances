@@ -53,7 +53,7 @@ struct AccountRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
-    private func formattedAmount(_ value: Double, currency: String) -> String {
+    private static let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.locale = Locale(identifier: "ru_RU")
@@ -61,9 +61,12 @@ struct AccountRowView: View {
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = " "
         formatter.decimalSeparator = ","
+        return formatter
+    }()
 
+    private func formattedAmount(_ value: Double, currency: String) -> String {
         let sign = value < 0 ? "-" : ""
-        let number = formatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
+        let number = Self.numberFormatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
         return "\(sign)\(number) \(currency)"
     }
 
