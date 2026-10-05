@@ -100,6 +100,7 @@ struct AnalyticsView: View {
                 timeline: ExpenseTimelineData.build(
                     transactions: transactions,
                     scale: selectedScale,
+                    pageStart: page.startDate,
                     settings: settings,
                     trackedRates: trackedRates
                 ),
