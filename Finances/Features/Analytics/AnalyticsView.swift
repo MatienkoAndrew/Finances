@@ -202,10 +202,9 @@ struct AnalyticsView: View {
 
     private var content: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 24) {
                 if selectedMode == .time {
-                    periodNavigation
-                    periodSummaryCards
+                    periodHeroCard
                     breakdownSections
                 } else {
                     // В режиме меток период задан самой меткой, поэтому
@@ -220,13 +219,16 @@ struct AnalyticsView: View {
                     }
                 }
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
+        .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if selectedMode == .time {
                 ToolbarItem(placement: .principal) {
-                    scaleTabs
+                    AnalyticsScaleTabs(selection: $selectedScale)
                 }
             }
             if focusedTag == nil {
@@ -316,7 +318,6 @@ struct AnalyticsView: View {
 
         // Разбивки идут одна за другой, без переключателя.
         dailySection
-        categoryChartSection
         categorySection
         merchantSection
     }
@@ -348,7 +349,7 @@ struct AnalyticsView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 34, height: 34)
-                                .background(Color.gray.opacity(0.08), in: Circle())
+                                .background(Color(.secondarySystemGroupedBackground), in: Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Управление метками")
@@ -383,7 +384,7 @@ struct AnalyticsView: View {
             .padding(.leading, 4)
             .padding(.trailing, 12)
             .padding(.vertical, 4)
-            .background(Capsule().fill(isSelected ? color.opacity(0.16) : Color.gray.opacity(0.08)))
+            .background(Capsule().fill(isSelected ? color.opacity(0.16) : Color(.secondarySystemGroupedBackground)))
             .overlay(Capsule().strokeBorder(isSelected ? color.opacity(0.55) : Color.clear, lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -415,7 +416,7 @@ struct AnalyticsView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
         .padding(.horizontal)
-        .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     /// Карточка выбранной метки: иконка, период, сумма и ключевые цифры.
@@ -424,7 +425,7 @@ struct AnalyticsView: View {
         let days = tagPeriodDays
         let perDay = days > 0 ? snapshot.totalExpensesRub / Double(days) : 0
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
                 TagIconView(icon: tag.icon, colorHex: tag.colorHex, size: 48)
 
@@ -452,23 +453,18 @@ struct AnalyticsView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("ПОТРАЧЕНО ВСЕГО")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                Text(formattedRubAmount(snapshot.totalExpensesRub))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .contentTransition(.numericText())
+                heroAmount(snapshot.totalExpensesRub)
             }
 
             HStack(spacing: 8) {
-                tagMetric(title: "операций", value: "\(snapshot.expenseCount)")
-                tagMetric(title: "в среднем за день", value: TagFormatting.rub(perDay))
-                tagMetric(title: daysWord(days), value: "\(days)")
+                AnalyticsMetricTile(value: "\(snapshot.expenseCount)", title: operationsWord(snapshot.expenseCount))
+                AnalyticsMetricTile(value: TagFormatting.rub(perDay), title: "в день")
+                AnalyticsMetricTile(value: "\(days)", title: daysWord(days))
             }
 
             NavigationLink {
@@ -477,35 +473,12 @@ struct AnalyticsView: View {
                     scope: currentAnalyticsScope
                 )
             } label: {
-                HStack {
-                    Text("Все расходы по метке")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .contentShape(Rectangle())
+                heroLinkLabel("Все расходы по метке", color: color)
             }
             .buttonStyle(.plain)
         }
         .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.gray.opacity(0.08))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [color.opacity(0.18), color.opacity(0.03)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                }
-        }
+        .background(heroBackground(color))
     }
 
     /// Переключатель интервала графика метки: Дни / Недели / Месяцы.
@@ -532,26 +505,6 @@ struct AnalyticsView: View {
         }
     }
 
-    private func tagMetric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground).opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
     /// Явный период метки, а без него — фактический диапазон её операций.
     private func tagPeriodLine(for tag: TransactionTag) -> String {
         if let period = TagFormatting.period(of: tag) {
@@ -576,151 +529,240 @@ struct AnalyticsView: View {
         return max(days, 1)
     }
 
-    // Верхние вкладки масштаба в стиле Alipay: текст + подчёркивание.
-    private var scaleTabs: some View {
-        HStack(spacing: 22) {
-            ForEach(AnalyticsTimeScale.allCases) { scale in
-                let isSelected = selectedScale == scale
+    // MARK: - Hero
 
-                Button {
-                    selectedScale = scale
-                } label: {
-                    VStack(spacing: 3) {
-                        Text(scale.tabTitle)
-                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+    /// Шапка периода: переключение страниц, итог, тренд к прошлому периоду
+    /// и ключевые цифры.
+    private var periodHeroCard: some View {
+        let isYear = selectedScale == .year
 
-                        Capsule()
-                            .fill(isSelected ? Color.primary : Color.clear)
-                            .frame(width: 16, height: 2)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 8) {
+                periodArrow("chevron.left", isEnabled: true, action: moveToPreviousPeriod)
+                    .accessibilityLabel("Предыдущий период")
 
-    private var periodNavigation: some View {
-        HStack(spacing: 16) {
-            Button {
-                moveToPreviousPeriod()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                Spacer(minLength: 0)
 
-            Spacer()
+                Text(snapshot.page.displayTitle)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .contentTransition(.opacity)
 
-            Text(snapshot.page.displayTitle)
-                .font(.title3.weight(.semibold))
-                .contentTransition(.opacity)
+                Spacer(minLength: 0)
 
-            Spacer()
-
-            Button {
-                moveToNextPeriod()
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(canMoveToNextPeriod ? Color.primary : Color.secondary.opacity(0.3))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canMoveToNextPeriod)
-        }
-        .frame(height: 44)
-    }
-
-    private var chartSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("График расходов")
-                .font(.title3.bold())
-
-            if selectedMode == .tags {
-                tagGranularityPicker
+                periodArrow("chevron.right", isEnabled: canMoveToNextPeriod, action: moveToNextPeriod)
+                    .accessibilityLabel("Следующий период")
             }
 
-            if selectedMode == .time {
-                // Вся история одной лентой: листается пальцем, как в «Здоровье»,
-                // и доводится до границы недели / месяца / года.
-                let timeline = ExpenseTimelineData.build(
-                    transactions: transactions,
-                    scale: selectedScale,
-                    settings: settings,
-                    trackedRates: trackedRates
-                )
-                ExpenseBarChart(
-                    bars: timeline.bars,
-                    domain: timeline.domain,
-                    averageTitle: selectedScale.averageTitle,
-                    timeline: ExpenseChartTimeline(
-                        scale: selectedScale,
-                        pageStart: snapshot.page.startDate,
-                        onPageSettled: settlePage(at:)
-                    )
-                )
-                .id(selectedScale)
-                .padding()
-                .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-            } else if let first = snapshot.chartPoints.first {
-                let points = snapshot.chartPoints
-                let pageEnd = snapshot.page.endDateExclusive
-                let bars = points.enumerated().map { index, point in
-                    ExpenseBar(
-                        start: point.date,
-                        end: index + 1 < points.count ? points[index + 1].date : pageEnd,
-                        total: point.total,
-                        title: point.title
-                    )
-                }
-                ExpenseBarChart(
-                    bars: bars,
-                    domain: first.date..<pageEnd,
-                    averageTitle: tagBinGranularity?.averageTitle ?? "СРЕДНЕЕ",
-                    rangeTitle: snapshot.page.displayTitle,
-                    axisLabels: points.map(\.axisLabel),
-                    tint: selectedTag.map(tagColor) ?? .red
-                )
-                .id(tagChartIdentity)
-                .padding()
-                .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-            } else {
-                Text("Нет расходов для выбранного периода")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ПОТРАЧЕНО")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+
+                heroAmount(snapshot.totalExpensesRub)
+
+                if let delta = trendDeltaFraction, abs(delta) >= 0.005 {
+                    HStack(spacing: 6) {
+                        AnalyticsTrendBadge(delta: delta)
+                        Text(trendCaption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .transition(.opacity)
+                }
             }
-        }
-    }
 
-    // MARK: - Summary cards
+            HStack(spacing: 8) {
+                AnalyticsMetricTile(
+                    value: "\(snapshot.expenseCount)",
+                    title: operationsWord(snapshot.expenseCount)
+                )
+                AnalyticsMetricTile(
+                    value: TagFormatting.rub(snapshot.averageExpensePerBin),
+                    title: isYear ? "в месяц" : "в день"
+                )
+                AnalyticsMetricTile(
+                    value: snapshot.peakChartPoint.flatMap { $0.total > 0 ? TagFormatting.rub($0.total) : nil } ?? "—",
+                    title: "максимум"
+                )
+            }
 
-    private var periodSummaryCards: some View {
-        VStack(spacing: 12) {
             NavigationLink {
                 TransactionListByKindView(
                     kind: .expense,
                     scope: currentAnalyticsScope
                 )
             } label: {
-                AnalyticsCardView(
-                    title: "Расходы",
-                    value: formattedRubAmount(snapshot.totalExpensesRub),
-                    secondaryValue: "\(snapshot.expenseCount) операций",
-                    systemImage: "arrow.up.circle.fill"
-                )
+                heroLinkLabel("Все расходы за период", color: .red)
             }
             .buttonStyle(.plain)
         }
+        .padding(16)
+        .background(heroBackground(.red))
+        .animation(.snappy(duration: 0.25), value: snapshot.page.startDate)
+    }
+
+    private func periodArrow(_ systemImage: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.35))
+                .frame(width: 34, height: 34)
+                .background(Color(.tertiarySystemFill), in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+    }
+
+    /// Крупная сумма: рубли жирно, копейки и знак — мельче и светлее.
+    private func heroAmount(_ value: Double) -> some View {
+        let text = formattedRubAmount(value)
+        let parts = text.split(separator: ",", maxSplits: 1).map(String.init)
+        let whole = parts.first ?? text
+        let fraction = parts.count > 1 ? "," + parts[1] : ""
+
+        return (
+            Text(whole)
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+            + Text(fraction)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+        )
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+        .contentTransition(.numericText(value: value))
+    }
+
+    private func heroLinkLabel(_ title: String, color: Color) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(Rectangle())
+    }
+
+    /// Подложка шапки: карточка с мягким цветным отсветом в углу.
+    private func heroBackground(_ color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(RadialGradient(
+                        colors: [color.opacity(0.20), color.opacity(0)],
+                        center: .topLeading,
+                        startRadius: 0,
+                        endRadius: 320
+                    ))
+            }
+    }
+
+    private var trendCaption: String {
+        switch selectedScale {
+        case .week: return "в день к прошлой неделе"
+        case .month: return "в день к прошлому месяцу"
+        case .year: return "в месяц к прошлому году"
+        }
+    }
+
+    private func operationsWord(_ count: Int) -> String {
+        let mod10 = count % 10
+        let mod100 = count % 100
+        if mod10 == 1 && mod100 != 11 { return "операция" }
+        if (2...4).contains(mod10) && !(12...14).contains(mod100) { return "операции" }
+        return "операций"
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.weight(.semibold))
+            .padding(.horizontal, 4)
+    }
+
+    // MARK: - Expense chart
+
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Динамика")
+
+            VStack(alignment: .leading, spacing: 14) {
+                if selectedMode == .tags {
+                    tagGranularityPicker
+                }
+
+                if selectedMode == .time {
+                    // Вся история одной лентой: листается пальцем, как в «Здоровье»,
+                    // и доводится до границы недели / месяца / года.
+                    let timeline = ExpenseTimelineData.build(
+                        transactions: transactions,
+                        scale: selectedScale,
+                        settings: settings,
+                        trackedRates: trackedRates
+                    )
+                    ExpenseBarChart(
+                        bars: timeline.bars,
+                        domain: timeline.domain,
+                        averageTitle: selectedScale.averageTitle,
+                        timeline: ExpenseChartTimeline(
+                            scale: selectedScale,
+                            pageStart: snapshot.page.startDate,
+                            onPageSettled: settlePage(at:)
+                        )
+                    )
+                    .id(selectedScale)
+                } else if let first = snapshot.chartPoints.first {
+                    let points = snapshot.chartPoints
+                    let pageEnd = snapshot.page.endDateExclusive
+                    let bars = points.enumerated().map { index, point in
+                        ExpenseBar(
+                            start: point.date,
+                            end: index + 1 < points.count ? points[index + 1].date : pageEnd,
+                            total: point.total,
+                            title: point.title
+                        )
+                    }
+                    ExpenseBarChart(
+                        bars: bars,
+                        domain: first.date..<pageEnd,
+                        averageTitle: tagBinGranularity?.averageTitle ?? "СРЕДНЕЕ",
+                        rangeTitle: snapshot.page.displayTitle,
+                        axisLabels: points.map(\.axisLabel),
+                        tint: selectedTag.map(tagColor) ?? .red
+                    )
+                    .id(tagChartIdentity)
+                } else {
+                    emptyText("Нет расходов для выбранного периода")
+                }
+            }
+            .analyticsCard()
+        }
+    }
+
+    private func emptyText(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
     }
 
     // MARK: - Lower sections
 
     private var dailySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Button {
                 withAnimation(.snappy(duration: 0.25)) {
                     isDailySectionCollapsed.toggle()
@@ -728,7 +770,7 @@ struct AnalyticsView: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(dailySectionTitle)
-                        .font(.title3.bold())
+                        .font(.title3.weight(.semibold))
                         .foregroundStyle(.primary)
 
                     Spacer()
@@ -746,64 +788,33 @@ struct AnalyticsView: View {
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isDailySectionCollapsed ? -90 : 0))
                 }
+                .padding(.horizontal, 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint(isDailySectionCollapsed ? "Развернуть" : "Свернуть")
 
-            if isDailySectionCollapsed {
-                EmptyView()
-            } else if snapshot.chartPoints.isEmpty {
-                Text("Нет расходов для выбранного периода")
-                    .foregroundStyle(.secondary)
-            } else if selectedMode == .time && selectedScale == .week {
-                weekDailyStrip
-            } else if selectedMode == .time && selectedScale == .month {
-                monthDailyCalendar
-            } else {
-                // Год и режим меток — список строк.
-                let items = snapshot.lowerTimeTotals
-                let maxTotal = items.map(\.total).max() ?? 0
-                VStack(spacing: 10) {
-                    ForEach(items) { item in
-                        dailySectionRow(for: item, maxTotal: maxTotal)
+            if !isDailySectionCollapsed {
+                Group {
+                    if snapshot.chartPoints.isEmpty {
+                        emptyText("Нет расходов для выбранного периода")
+                            .analyticsCard()
+                    } else if selectedMode == .time && selectedScale != .year {
+                        // Неделя — одна строка той же сетки, что и у месяца.
+                        dailyCalendar
+                            .analyticsCard(padding: 12)
+                    } else {
+                        // Год и режим меток — список строк.
+                        timeTotalsList
                     }
                 }
+                .transition(.opacity)
             }
         }
     }
 
-    // Неделя: горизонтальная лента из 7 карточек (дата + сумма), стиль Alipay.
-    private var weekDailyStrip: some View {
-        HStack(spacing: 8) {
-            ForEach(snapshot.chartPoints) { point in
-                NavigationLink {
-                    TransactionListByDateView(date: point.date)
-                } label: {
-                    VStack(spacing: 6) {
-                        Text(Self.dayMonthFormatter.string(from: point.date))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-
-                        Text(dayCellAmount(point.total))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 4)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    // Месяц: сетка-календарь с суммой по дням и подсветкой по интенсивности трат.
-    private var monthDailyCalendar: some View {
+    // Неделя и месяц: сетка-календарь с суммой по дням и подсветкой по интенсивности трат.
+    private var dailyCalendar: some View {
         var calendar = Calendar.current
         calendar.locale = Locale(identifier: "ru_RU")
 
@@ -812,21 +823,21 @@ struct AnalyticsView: View {
         let leadingBlanks = points.first.map { first in
             (calendar.component(.weekday, from: first.date) - calendar.firstWeekday + 7) % 7
         } ?? 0
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
 
         return VStack(spacing: 8) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 ForEach(orderedWeekdaySymbols(calendar), id: \.self) { symbol in
                     Text(symbol)
-                        .font(.caption2)
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                 }
             }
 
-            LazyVGrid(columns: columns, spacing: 6) {
+            LazyVGrid(columns: columns, spacing: 5) {
                 ForEach(0..<leadingBlanks, id: \.self) { _ in
-                    Color.clear.frame(height: 52)
+                    Color.clear.frame(height: 48)
                 }
 
                 ForEach(points) { point in
@@ -844,30 +855,44 @@ struct AnalyticsView: View {
         let day = calendar.component(.day, from: point.date)
         let hasSpend = point.total > 0
         let intensity = hasSpend ? min(point.total / maxTotal, 1) : 0
+        let isToday = calendar.isDateInToday(point.date)
+        let isFuture = point.date > .now
         let background = hasSpend
-            ? Color.red.opacity(0.10 + 0.30 * intensity)
-            : Color.gray.opacity(0.08)
+            ? Color.red.opacity(0.10 + 0.45 * intensity)
+            : Color(.tertiarySystemFill).opacity(0.5)
 
         return NavigationLink {
             TransactionListByDateView(date: point.date)
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 Text("\(day)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(intensity > 0.6 ? Color.white : Color.primary)
 
-                Text(hasSpend ? dayCellAmount(point.total) : "—")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text(hasSpend ? dayCellAmount(point.total) : " ")
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(intensity > 0.6 ? Color.white.opacity(0.9) : Color.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(background)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .frame(height: 48)
+            .background(background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                if isToday {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.red, lineWidth: 1.5)
+                }
+            }
+            .opacity(isFuture ? 0.4 : 1)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Сумма в клетке: до тысячи — целым числом, дальше — «12,5к».
+    private func dayCellAmount(_ value: Double) -> String {
+        value < 1_000 ? "\(Int(value.rounded()))" : ExpenseChartFormat.compact(value)
     }
 
     // Короткие названия дней недели в порядке от firstWeekday (Пн … Вс для ru).
@@ -878,28 +903,6 @@ struct AnalyticsView: View {
         return Array(symbols[shift...] + symbols[..<shift])
     }
 
-    private static let dayMonthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "MM.dd"
-        return formatter
-    }()
-
-    private static let dayCellAmountFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 0
-        formatter.groupingSeparator = ""
-        formatter.decimalSeparator = ","
-        return formatter
-    }()
-
-    private func dayCellAmount(_ value: Double) -> String {
-        Self.dayCellAmountFormatter.string(from: NSNumber(value: value)) ?? "0"
-    }
-
     private var dailySectionTitle: String {
         if selectedMode == .tags, let granularity = tagBinGranularity {
             return granularity.sectionTitle
@@ -907,8 +910,25 @@ struct AnalyticsView: View {
         return selectedScale == .year ? "По месяцам" : "По дням"
     }
 
+    /// Год и метки: строки на одной карточке с полоской относительно самого дорогого.
+    private var timeTotalsList: some View {
+        let items = snapshot.lowerTimeTotals
+        let maxTotal = items.map(\.total).max() ?? 0
+        let color = selectedMode == .tags ? (selectedTag.map(tagColor) ?? .red) : .red
+
+        return SettingsCard {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    Divider()
+                        .padding(.leading, 16)
+                }
+                dailySectionRow(for: item, maxTotal: maxTotal, color: color)
+            }
+        }
+    }
+
     @ViewBuilder
-    private func dailySectionRow(for item: AnalyticsTimeTotal, maxTotal: Double) -> some View {
+    private func dailySectionRow(for item: AnalyticsTimeTotal, maxTotal: Double, color: Color) -> some View {
         if selectedMode == .time {
             NavigationLink {
                 if selectedScale == .year {
@@ -920,9 +940,9 @@ struct AnalyticsView: View {
                     TransactionListByDateView(date: item.date)
                 }
             } label: {
-                dailySectionRowLabel(for: item)
+                timeTotalRowLabel(for: item, maxTotal: maxTotal, color: color)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SettingsPressStyle())
         } else if let tag = selectedTag {
             // В режиме Tags строки кликабельны: переход к списку расходов
             // с этим тегом за данный день/неделю/месяц.
@@ -932,11 +952,11 @@ struct AnalyticsView: View {
                     scope: tagBinScope(for: item, tag: tag)
                 )
             } label: {
-                tagBinRowLabel(for: item, maxTotal: maxTotal, color: tagColor(tag))
+                timeTotalRowLabel(for: item, maxTotal: maxTotal, color: color)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SettingsPressStyle())
         } else {
-            dailySectionRowLabel(for: item)
+            timeTotalRowLabel(for: item, maxTotal: maxTotal, color: color)
         }
     }
 
@@ -969,280 +989,58 @@ struct AnalyticsView: View {
         )
     }
 
-    private func dailySectionRowLabel(for item: AnalyticsTimeTotal) -> some View {
-        HStack {
-            Text(item.title)
-            Spacer()
-            Text(formattedRubAmount(item.total))
-                .fontWeight(.semibold)
-        }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    /// Строка бина метки: сумма и полоска относительно самого дорогого бина.
-    private func tagBinRowLabel(for item: AnalyticsTimeTotal, maxTotal: Double, color: Color) -> some View {
-        let share = maxTotal > 0 ? min(max(item.total, 0) / maxTotal, 1) : 0
+    /// Строка периода: сумма и полоска относительно самого дорогого.
+    private func timeTotalRowLabel(for item: AnalyticsTimeTotal, maxTotal: Double, color: Color) -> some View {
+        let share = maxTotal > 0 ? max(item.total, 0) / maxTotal : 0
 
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(item.title)
                     .foregroundStyle(item.total > 0 ? Color.primary : Color.secondary)
-                Spacer()
+                Spacer(minLength: 8)
                 Text(formattedRubAmount(item.total))
                     .fontWeight(.semibold)
                     .monospacedDigit()
                     .foregroundStyle(item.total > 0 ? Color.primary : Color.secondary)
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
 
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(color.opacity(0.12))
-                    Capsule()
-                        .fill(color.opacity(0.85))
-                        .frame(width: geometry.size.width * share)
-                }
-            }
-            .frame(height: 4)
+            AnalyticsShareBar(share: share, color: color)
         }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 
+    // MARK: - Categories
+
+    /// Категории: график выбранного вида и список с подкатегориями.
     private var categorySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("По категориям")
-                .font(.title3.bold())
-
-            if snapshot.categoryTotals.isEmpty {
-                Text("Нет данных для выбранного периода")
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(snapshot.categoryTotals) { item in
-                        categoryCard(item)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Карточка категории. Категория с подкатегориями показывает плитки подкатегорий
-    /// (как в Alipay) и сворачивается по тапу, остальные сразу ведут к операциям.
-    private func categoryCard(_ item: AnalyticsCategoryTotal) -> some View {
-        let isExpanded = !collapsedCategories.contains(item.category)
-
-        return VStack(alignment: .leading, spacing: 12) {
-            if item.subcategories.isEmpty {
-                NavigationLink {
-                    TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
-                } label: {
-                    categoryHeader(item, accessory: "chevron.right")
-                }
-                .buttonStyle(.plain)
-            } else {
-                Button {
-                    withAnimation(.snappy(duration: 0.25)) {
-                        if isExpanded {
-                            collapsedCategories.insert(item.category)
-                        } else {
-                            collapsedCategories.remove(item.category)
-                        }
-                    }
-                } label: {
-                    categoryHeader(item, accessory: isExpanded ? "chevron.up" : "chevron.down")
-                }
-                .buttonStyle(.plain)
-
-                if isExpanded {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
-                        ForEach(item.subcategories) { subcategory in
-                            NavigationLink {
-                                TransactionListByCategoryView(
-                                    categoryTitle: item.category,
-                                    subcategoryTitle: subcategory.name,
-                                    scope: currentAnalyticsScope
-                                )
-                            } label: {
-                                subcategoryTile(subcategory, in: item)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    NavigationLink {
-                        TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Все операции категории")
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func categoryHeader(_ item: AnalyticsCategoryTotal, accessory: String) -> some View {
-        HStack {
-            HStack(spacing: 8) {
-                if let categoryItem = categoryItem(for: item.category) {
-                    Circle()
-                        .fill(Color(hex: categoryItem.colorHex) ?? .gray)
-                        .frame(width: 24, height: 24)
-                        .overlay {
-                            Image(systemName: categoryItem.iconName)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                }
-
-                Text(item.category)
-
-                Text(categoryPercentLabel(item.total))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(formattedRubAmount(item.total))
-                    .fontWeight(.semibold)
-
-                Text("(\(item.count) всего)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Image(systemName: accessory)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-    }
-
-    private func subcategoryTile(_ subcategory: AnalyticsSubcategoryTotal, in category: AnalyticsCategoryTotal) -> some View {
-        let color = categoryItem(for: category.category).flatMap { Color(hex: $0.colorHex) } ?? .gray
-        let share = category.total > 0 ? subcategory.total / category.total : 0
-
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(subcategory.emoji ?? "•")
-                .font(.title2)
-
-            HStack(spacing: 2) {
-                Text(subcategory.name)
-                    .lineLimit(1)
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .font(.subheadline)
-
-            Text(formattedRubAmount(subcategory.total))
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            Text("\(formattedPercent(share)) · \(subcategory.count) шт.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(color.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .contentShape(Rectangle())
-    }
-
-    private var merchantSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Топ мест и сервисов")
-                .font(.title3.bold())
-
-            if snapshot.merchantTotals.isEmpty {
-                Text("Нет расходов для выбранного периода")
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(Array(snapshot.merchantTotals.enumerated()), id: \.offset) { index, item in
-                        NavigationLink {
-                            TransactionListByMerchantView(
-                                merchantTitle: item.merchant,
-                                scope: currentAnalyticsScope
-                            )
-                        } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                Text("\(index + 1)")
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 24)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.merchant)
-                                        .font(.body)
-                                        .fontWeight(.medium)
-                                        .lineLimit(2)
-
-                                    Text(formattedRubAmount(item.total))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-                            }
-                            .padding()
-                            .background(Color.gray.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Category interactive chart
-
-    private var categoryChartSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("График по категориям")
-                    .font(.title3.bold())
+                sectionHeader("Категории")
 
                 Spacer()
 
                 // Вид графика: полосы, кольцо или лента — запоминается.
-                Picker("Вид графика", selection: $categoryChartStyle.animation(.snappy(duration: 0.25))) {
-                    ForEach(CategoryChartStyle.allCases) { style in
-                        Image(systemName: style.iconName)
-                            .accessibilityLabel(style.title)
-                            .tag(style)
+                if !snapshot.categoryTotals.isEmpty {
+                    Picker("Вид графика", selection: $categoryChartStyle.animation(.snappy(duration: 0.25))) {
+                        ForEach(CategoryChartStyle.allCases) { style in
+                            Image(systemName: style.iconName)
+                                .accessibilityLabel(style.title)
+                                .tag(style)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
             }
 
             if snapshot.categoryTotals.isEmpty {
-                Text("Нет данных для выбранного периода")
-                    .foregroundStyle(.secondary)
+                emptyText("Нет данных для выбранного периода")
+                    .analyticsCard()
             } else {
                 switch categoryChartStyle {
                 case .bars:
@@ -1252,9 +1050,245 @@ struct AnalyticsView: View {
                 case .strip:
                     categoryStripChart
                 }
+
+                categoryList
             }
         }
     }
+
+    private var categoryList: some View {
+        let maxTotal = snapshot.categoryTotals.map(\.total).max() ?? 0
+
+        return SettingsCard {
+            ForEach(Array(snapshot.categoryTotals.enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    SettingsDivider()
+                }
+                categoryRow(item, maxTotal: maxTotal)
+            }
+        }
+    }
+
+    /// Строка категории. Категория с подкатегориями раскрывает их списком
+    /// (свёрнуть — тапом по строке), остальные сразу ведут к операциям.
+    @ViewBuilder
+    private func categoryRow(_ item: AnalyticsCategoryTotal, maxTotal: Double) -> some View {
+        let isExpanded = !collapsedCategories.contains(item.category)
+
+        if item.subcategories.isEmpty {
+            NavigationLink {
+                TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
+            } label: {
+                categoryRowLabel(item, maxTotal: maxTotal, accessoryRotation: nil)
+            }
+            .buttonStyle(SettingsPressStyle())
+        } else {
+            Button {
+                withAnimation(.snappy(duration: 0.25)) {
+                    if isExpanded {
+                        collapsedCategories.insert(item.category)
+                    } else {
+                        collapsedCategories.remove(item.category)
+                    }
+                }
+            } label: {
+                categoryRowLabel(item, maxTotal: maxTotal, accessoryRotation: isExpanded ? 180 : 0)
+            }
+            .buttonStyle(SettingsPressStyle())
+
+            if isExpanded {
+                VStack(spacing: 0) {
+                    ForEach(item.subcategories) { subcategory in
+                        NavigationLink {
+                            TransactionListByCategoryView(
+                                categoryTitle: item.category,
+                                subcategoryTitle: subcategory.name,
+                                scope: currentAnalyticsScope
+                            )
+                        } label: {
+                            subcategoryRow(subcategory, in: item)
+                        }
+                        .buttonStyle(SettingsPressStyle())
+                    }
+
+                    NavigationLink {
+                        TransactionListByCategoryView(categoryTitle: item.category, scope: currentAnalyticsScope)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Все операции категории")
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(categoryColor(item.category))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 62)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(SettingsPressStyle())
+                }
+                .padding(.bottom, 4)
+            }
+        }
+    }
+
+    /// - Parameter accessoryRotation: nil — шеврон перехода, иначе — раскрытия с поворотом.
+    private func categoryRowLabel(_ item: AnalyticsCategoryTotal, maxTotal: Double, accessoryRotation: Double?) -> some View {
+        let color = categoryColor(item.category)
+        let share = maxTotal > 0 ? max(item.total, 0) / maxTotal : 0
+
+        return HStack(spacing: 14) {
+            AnalyticsCategoryIcon(category: categoryItem(for: item.category))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.category)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(formattedRubAmount(item.total))
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+
+                HStack(spacing: 8) {
+                    AnalyticsShareBar(share: share, color: color)
+
+                    Text("\(formattedPercent(categoryShare(for: item.category))) · \(item.count) шт.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+            }
+
+            Image(systemName: accessoryRotation == nil ? "chevron.right" : "chevron.down")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .rotationEffect(.degrees(accessoryRotation ?? 0))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
+    private func subcategoryRow(_ subcategory: AnalyticsSubcategoryTotal, in category: AnalyticsCategoryTotal) -> some View {
+        let share = category.total > 0 ? subcategory.total / category.total : 0
+
+        return HStack(spacing: 10) {
+            Text(subcategory.emoji ?? "•")
+                .font(.callout)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(subcategory.name)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text("\(formattedPercent(share)) · \(subcategory.count) шт.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            Spacer(minLength: 8)
+
+            Text(formattedRubAmount(subcategory.total))
+                .font(.subheadline.weight(.medium))
+                .monospacedDigit()
+                .fixedSize()
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.leading, 58)
+        .padding(.trailing, 16)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Merchants
+
+    private var merchantSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Топ мест и сервисов")
+
+            if snapshot.merchantTotals.isEmpty {
+                emptyText("Нет расходов для выбранного периода")
+                    .analyticsCard()
+            } else {
+                let maxTotal = snapshot.merchantTotals.map(\.total).max() ?? 0
+
+                SettingsCard {
+                    ForEach(Array(snapshot.merchantTotals.enumerated()), id: \.offset) { index, item in
+                        if index > 0 {
+                            SettingsDivider()
+                        }
+
+                        NavigationLink {
+                            TransactionListByMerchantView(
+                                merchantTitle: item.merchant,
+                                scope: currentAnalyticsScope
+                            )
+                        } label: {
+                            merchantRow(rank: index + 1, item: item, maxTotal: maxTotal)
+                        }
+                        .buttonStyle(SettingsPressStyle())
+                    }
+                }
+            }
+        }
+    }
+
+    /// Строка места: номер в рейтинге (первые три — на цветной плашке), сумма и доля.
+    private func merchantRow(rank: Int, item: AnalyticsMerchantTotal, maxTotal: Double) -> some View {
+        let isTop = rank <= 3
+        let share = maxTotal > 0 ? max(item.total, 0) / maxTotal : 0
+
+        return HStack(spacing: 14) {
+            Text("\(rank)")
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(isTop ? Color.white : Color.secondary)
+                .frame(width: 32, height: 32)
+                .background {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isTop ? AnyShapeStyle(Color.orange.gradient) : AnyShapeStyle(Color(.tertiarySystemFill)))
+                }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.merchant)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(formattedRubAmount(item.total))
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+
+                AnalyticsShareBar(share: share, color: .orange)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Category interactive chart
 
     // Горизонтальные полосы с выбором пальцем (исходный вариант).
     private var categoryBarsChart: some View {
@@ -1336,9 +1370,7 @@ struct AnalyticsView: View {
                     )
             }
         }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .analyticsCard()
         .animation(.smooth(duration: 0.25), value: selectedCategoryName)
     }
 
@@ -1404,9 +1436,7 @@ struct AnalyticsView: View {
 
             categoryLegend(items, total: total)
         }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .analyticsCard()
         .animation(.smooth(duration: 0.25), value: selected?.category)
     }
 
@@ -1444,9 +1474,7 @@ struct AnalyticsView: View {
 
             categoryLegend(items, total: total)
         }
-        .padding()
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .analyticsCard()
     }
 
     /// Легенда в две колонки: цвет, категория, доля. Тап — операции категории.
@@ -1578,12 +1606,6 @@ struct AnalyticsView: View {
 
     private var selectedCategoryPoint: AnalyticsCategoryTotal? {
         snapshot.categoryTotals.first { $0.category == selectedCategoryName }
-    }
-
-    // Доля категории в процентах с одним знаком: "92.3%".
-    private func categoryPercentLabel(_ total: Double) -> String {
-        guard snapshot.totalExpensesRub > 0 else { return "0%" }
-        return String(format: "%.1f%%", total / snapshot.totalExpensesRub * 100)
     }
 
     private func categoryShare(for categoryName: String) -> Double {
