@@ -298,6 +298,7 @@ final class DataExportImportManager {
             fingerprint: exported.fingerprint,
             sourceFileName: exported.sourceFileName,
             importedAt: exported.importedAt,
+            walletMerchant: exported.walletMerchant,
             createdAt: exported.createdAt,
             fromAccount: exported.fromAccountID.flatMap { accounts[$0] },
             toAccount: exported.toAccountID.flatMap { accounts[$0] }
@@ -542,6 +543,8 @@ struct ExportableTransaction: Codable {
     let fingerprint: String?
     let sourceFileName: String?
     let importedAt: Date?
+    /// Оплата из Apple Pay, ещё не сверенная с выпиской. Optional — старые копии декодируются.
+    let walletMerchant: String?
     let createdAt: Date
     
     init(from transaction: Transaction, accountIDs: [PersistentIdentifier: String]) {
@@ -567,6 +570,7 @@ struct ExportableTransaction: Codable {
         self.fingerprint = transaction.fingerprint
         self.sourceFileName = transaction.sourceFileName
         self.importedAt = transaction.importedAt
+        self.walletMerchant = transaction.walletMerchant
         self.createdAt = transaction.createdAt
     }
 }

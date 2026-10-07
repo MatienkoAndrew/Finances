@@ -15,6 +15,9 @@ struct PDFImportResult {
     let accountsToCreate: [Account]
     /// Новые операции — их нужно вставить в контекст.
     let transactions: [Transaction]
+    /// Оплаты из Apple Pay, найденные в выписке, и заменяющие их строки
+    /// (они уже есть в `transactions`).
+    let walletConfirmations: [WalletConfirmation]
     /// Строки выписки, которые уже были в базе.
     let skippedDuplicatesCount: Int
     /// Уже импортированные валютные операции, у которых предварительная сумма
@@ -30,8 +33,11 @@ struct PDFImportResult {
     let unrecognizedLinesCount: Int
 
     var summaryMessage: String {
-        var parts = ["Новых операций: \(transactions.count)"]
+        var parts = ["Новых операций: \(transactions.count - walletConfirmations.count)"]
 
+        if !walletConfirmations.isEmpty {
+            parts.append("сверено с оплатами Apple Pay: \(walletConfirmations.count)")
+        }
         if skippedDuplicatesCount > 0 {
             parts.append("уже были в базе: \(skippedDuplicatesCount)")
         }

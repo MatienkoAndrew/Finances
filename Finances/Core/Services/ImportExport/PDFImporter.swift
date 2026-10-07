@@ -70,6 +70,8 @@ enum PDFImporter {
     /// Новые операции возвращаются в `transactions` — их нужно вставить в контекст.
     /// Уже существующие совпавшие транзакции обновляются на месте (уточнённая сумма,
     /// исправленный знак «Курсовой разницы»), поэтому после вызова контекст нужно сохранить.
+    /// Найденные в выписке оплаты из Apple Pay не трогаются: их заменяют строки выписки
+    /// из `walletConfirmations` (см. `ApplePayExpenses.replaceWithStatement`).
     static func importStatement(
         _ statement: KaspiStatement,
         fileName: String,
@@ -111,9 +113,16 @@ enum PDFImporter {
         var settledCount = 0
         var repairedCount = 0
         var modifications: [TransactionModification] = []
+        var walletMatches: [(rowIndex: Int, payment: Transaction)] = []
 
         for match in matching.matches {
             let transaction = candidates[match.existingIndex]
+            // Оплату из Apple Pay заменит строка выписки — с точной суммой и названием из банка.
+            if transaction.isAwaitingStatement {
+                walletMatches.append((match.rowIndex, transaction))
+                continue
+            }
+
             let before = TransactionFieldValues(transaction)
             let outcome = update(transaction, with: rows[match.rowIndex], context: context)
             if outcome.amountSettled { settledCount += 1 }
@@ -129,7 +138,8 @@ enum PDFImporter {
             }
         }
 
-        let newRows = matching.unmatchedRowIndices.map { rows[$0] }
+        let newRowIndices = (matching.unmatchedRowIndices + walletMatches.map(\.rowIndex)).sorted()
+        let newRows = newRowIndices.map { rows[$0] }
         let fingerprints = StatementDeduplicator.fingerprints(
             for: newRows,
             avoiding: Set(existingTransactions.compactMap(\.fingerprint))
@@ -151,12 +161,18 @@ enum PDFImporter {
             throw PDFImporterError.noNewTransactionsFound
         }
 
+        let transactionsByRow = Dictionary(uniqueKeysWithValues: zip(newRowIndices, newTransactions))
+        let walletConfirmations = walletMatches.compactMap { match in
+            transactionsByRow[match.rowIndex].map { WalletConfirmation(payment: match.payment, statementTransaction: $0) }
+        }
+
         return PDFImportResult(
             importedAt: context.importedAt,
             fileName: context.fileName,
             accountsToCreate: accountsToCreate,
             transactions: newTransactions,
-            skippedDuplicatesCount: matching.matches.count,
+            walletConfirmations: walletConfirmations,
+            skippedDuplicatesCount: matching.matches.count - walletMatches.count,
             settledAmountsCount: settledCount,
             repairedCount: repairedCount,
             modifications: modifications,
@@ -212,7 +228,9 @@ enum PDFImporter {
 
         return transactions.filter { transaction in
             guard transaction.date >= lowerBound, transaction.date < upperBound else { return false }
+            // Оплата из Apple Pay в чужой валюте могла записаться без счёта.
             return transaction.fingerprint != nil
+                || (transaction.isAwaitingStatement && transaction.fromAccount == nil)
                 || isKaspi(transaction.fromAccount, kaspiAccount)
                 || isKaspi(transaction.toAccount, kaspiAccount)
         }
@@ -227,7 +245,8 @@ enum PDFImporter {
             foreignAmount: transaction.foreignAmount,
             foreignCurrencyCode: transaction.foreignCurrencyCode,
             direction: direction(of: transaction, kaspiAccount: kaspiAccount),
-            wasImported: transaction.fingerprint != nil
+            wasImported: transaction.fingerprint != nil,
+            isFromWallet: transaction.isAwaitingStatement
         )
     }
 

@@ -7,18 +7,6 @@ struct FinancesApp: App {
         WindowGroup {
             RootTabView()
         }
-        .modelContainer(for: [
-            Expense.self,
-            CategoryRule.self,
-            AppSettings.self,
-            ExpenseCategoryItem.self,
-            ExpenseSubcategoryItem.self,
-            ExchangeRateEntry.self,
-            DailyExchangeRate.self,
-            TrackedExchangeRate.self,
-            Account.self,
-            Transaction.self,
-            TransactionTag.self
-        ])
+        .modelContainer(AppModelContainer.shared)
     }
 }

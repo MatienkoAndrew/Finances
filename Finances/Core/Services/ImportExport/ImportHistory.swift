@@ -62,6 +62,9 @@ struct ImportRecord: Codable, Identifiable {
     let modifications: [TransactionModification]
     /// Дубли, удалённые автоочисткой сразу после импорта (id записей `DuplicateRemovalLog`).
     let removedDuplicateIDs: [UUID]
+    /// Оплаты из Apple Pay, которые заменили строки выписки. Optional — старые
+    /// записи истории декодируются.
+    var replacedWalletPayments: [RemovedDuplicate]? = nil
 }
 
 /// Один импорт в истории.
@@ -81,6 +84,7 @@ struct ImportUndoSummary {
     var deletedCount = 0
     var revertedCount = 0
     var restoredDuplicatesCount = 0
+    var restoredWalletPaymentsCount = 0
     /// Поправленные импортом операции, которые потом изменили вручную, — их не трогаем.
     var skippedChangedCount = 0
 
@@ -91,6 +95,9 @@ struct ImportUndoSummary {
         }
         if restoredDuplicatesCount > 0 {
             parts.append("возвращены удалённые дубли: \(restoredDuplicatesCount)")
+        }
+        if restoredWalletPaymentsCount > 0 {
+            parts.append("возвращены оплаты Apple Pay: \(restoredWalletPaymentsCount)")
         }
         var message = parts.joined(separator: ", ") + "."
         if skippedChangedCount > 0 {
@@ -193,7 +200,8 @@ enum ImportHistory {
 
     /// Отменяет импорт: удаляет добавленные им операции, возвращает прежние значения
     /// поправленных (если их не меняли после), возвращает удалённые сразу после импорта
-    /// дубли и удаляет созданные импортом счета, если они больше не нужны.
+    /// дубли и заменённые выпиской оплаты из Apple Pay и удаляет созданные импортом
+    /// счета, если они больше не нужны.
     static func undo(importedAt: Date, context: ModelContext) throws -> ImportUndoSummary {
         var summary = ImportUndoSummary()
         let record = loadRecords().first { $0.importedAt == importedAt }
@@ -239,6 +247,13 @@ enum ImportHistory {
                 context.insert(entry.makeTransaction(accounts: accounts))
             }
             summary.restoredDuplicatesCount = restoredEntries.count
+
+            // Оплаты из Apple Pay, вместо которых встали строки выписки, — обратно.
+            let walletPayments = record.replacedWalletPayments ?? []
+            for payment in walletPayments {
+                context.insert(payment.makeTransaction(accounts: accounts))
+            }
+            summary.restoredWalletPaymentsCount = walletPayments.count
 
             let stillUsed = Set(
                 remaining

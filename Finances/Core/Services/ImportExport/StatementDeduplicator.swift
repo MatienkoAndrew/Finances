@@ -14,6 +14,9 @@ struct TransactionSnapshot {
     let direction: Int
     /// Транзакция создана импортом (а не вручную).
     let wasImported: Bool
+    /// Оплата из Apple Pay, ещё не сверенная с выпиской: время настоящее,
+    /// описание — из Wallet (см. `Transaction.isAwaitingStatement`).
+    var isFromWallet = false
 }
 
 /// Сопоставляет строки выписки с уже сохранёнными транзакциями, чтобы повторный
@@ -74,7 +77,87 @@ enum StatementDeduplicator {
             )
         }
 
-        return match(incoming, against: existing, matchRenamed: true, calendar: calendar)
+        let result = match(incoming, against: existing, matchRenamed: true, calendar: calendar)
+        return matchWalletPayments(after: result, incoming: incoming, existing: existing, calendar: calendar)
+    }
+
+    /// Насколько сумма в тенге у валютной покупки из Wallet может отличаться
+    /// от выписки: в Wallet — предварительная, в выписке — окончательная.
+    private static let walletAmountTolerance = 0.03
+
+    /// 3. Оплаты из Apple Pay. Название из Wallet обычно не похоже на строку выписки
+    ///    («Magnum» и «MAGNUM CASH&CARRY»), поэтому сопоставляем по дню (по времени
+    ///    Kaspi) и сумме. Сначала тот же день, потом соседний: у покупки около полуночи
+    ///    банк мог поставить другую дату.
+    private static func matchWalletPayments(
+        after result: Result,
+        incoming: [TransactionSnapshot],
+        existing: [TransactionSnapshot],
+        calendar: Calendar
+    ) -> Result {
+        let wallet = existing.indices
+            .filter { existing[$0].isFromWallet }
+            .map { (index: $0, day: dayNumber(of: existing[$0], calendar: calendar)) }
+        guard !wallet.isEmpty, !result.unmatchedRowIndices.isEmpty else { return result }
+
+        var rowToStored = Dictionary(uniqueKeysWithValues: result.matches.map { ($0.rowIndex, $0.existingIndex) })
+        var matchedStored = Set(rowToStored.values)
+
+        for maxDayGap in 0...1 {
+            for rowIndex in result.unmatchedRowIndices where rowToStored[rowIndex] == nil {
+                let row = incoming[rowIndex]
+                let rowDay = dayNumber(of: row, calendar: calendar)
+
+                let best = wallet
+                    .filter { candidate in
+                        !matchedStored.contains(candidate.index)
+                            && existing[candidate.index].direction == row.direction
+                            && abs(candidate.day - rowDay) <= maxDayGap
+                    }
+                    .compactMap { candidate in
+                        walletAmountCost(row, existing[candidate.index]).map { (index: candidate.index, cost: $0) }
+                    }
+                    .min { $0.cost < $1.cost }
+
+                if let best {
+                    rowToStored[rowIndex] = best.index
+                    matchedStored.insert(best.index)
+                }
+            }
+        }
+
+        return Result(
+            matches: rowToStored
+                .map { Match(rowIndex: $0.key, existingIndex: $0.value) }
+                .sorted { $0.rowIndex < $1.rowIndex },
+            unmatchedRowIndices: incoming.indices.filter { rowToStored[$0] == nil }
+        )
+    }
+
+    /// Похожа ли сумма оплаты из Wallet на строку выписки: 0 — совпадает (у валютной
+    /// покупки — сумма в валюте), больше — близкая сумма в тенге, nil — не похожа.
+    /// Близкая сумма бывает, когда Wallet передал валютную покупку в валюте карты.
+    private static func walletAmountCost(_ row: TransactionSnapshot, _ wallet: TransactionSnapshot) -> Double? {
+        let rowKey = amountKey(
+            amount: row.amount,
+            currency: row.currencyCode,
+            foreignAmount: row.foreignAmount,
+            foreignCurrency: row.foreignCurrencyCode
+        )
+        let walletKey = amountKey(
+            amount: wallet.amount,
+            currency: wallet.currencyCode,
+            foreignAmount: wallet.foreignAmount,
+            foreignCurrency: wallet.foreignCurrencyCode
+        )
+        if rowKey == walletKey { return 0 }
+
+        guard wallet.foreignAmount == nil, row.foreignAmount != nil, row.amount > 0,
+              CurrencyDisplay.normalizedCode(from: wallet.currencyCode) == CurrencyDisplay.normalizedCode(from: row.currencyCode) else {
+            return nil
+        }
+        let share = abs(wallet.amount - row.amount) / row.amount
+        return share <= walletAmountTolerance ? 1 + share : nil
     }
 
     /// Сопоставляет два набора транзакций. Внутри одного набора одинаковые операции
@@ -326,7 +409,12 @@ enum StatementDeduplicator {
     /// если импорт был западнее (Москва), или 18:00–24:00 предыдущего дня,
     /// если восточнее (Корея, Вьетнам). Во втором случае настоящий день — следующий.
     /// Ручные транзакции — по местному календарю, как их ввёл пользователь.
+    /// Оплаты из Apple Pay хранят настоящее время — их день считаем по Kaspi, как в выписке.
     static func dayNumber(of snapshot: TransactionSnapshot, calendar: Calendar = .current) -> Int {
+        if snapshot.isFromWallet {
+            return dayNumber(snapshot.date, calendar: KaspiStatementParser.calendar)
+        }
+
         guard snapshot.wasImported else {
             return dayNumber(snapshot.date, calendar: calendar)
         }

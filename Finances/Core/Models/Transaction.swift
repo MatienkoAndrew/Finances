@@ -58,6 +58,11 @@ final class Transaction {
     var sourceFileName: String?
     var importedAt: Date?
 
+    /// Название магазина, как его передал Wallet при оплате через Apple Pay
+    /// (автоматизация «Транзакция» в «Командах»). nil — операция не из Apple Pay.
+    /// Optional — чтобы старые транзакции в SwiftData не сломались при миграции.
+    var walletMerchant: String?
+
     var createdAt: Date
 
     var fromAccount: Account?
@@ -83,6 +88,7 @@ final class Transaction {
         fingerprint: String? = nil,
         sourceFileName: String? = nil,
         importedAt: Date? = nil,
+        walletMerchant: String? = nil,
         createdAt: Date = Date(),
         fromAccount: Account? = nil,
         toAccount: Account? = nil
@@ -106,6 +112,7 @@ final class Transaction {
         self.fingerprint = fingerprint
         self.sourceFileName = sourceFileName
         self.importedAt = importedAt
+        self.walletMerchant = walletMerchant
         self.createdAt = createdAt
         self.fromAccount = fromAccount
         self.toAccount = toAccount
@@ -123,6 +130,13 @@ extension Transaction {
 
     var isExchangeRateDifference: Bool {
         note == Self.exchangeRateDifferenceNote
+    }
+
+    /// Оплата из Apple Pay, которую ещё не сверили с выпиской: описание — из Wallet,
+    /// время — настоящее, сумма валютной покупки в тенге — примерная.
+    /// При импорте выписки её строка заменит эту операцию.
+    var isAwaitingStatement: Bool {
+        walletMerchant != nil && fingerprint == nil
     }
 
     /// Курсовая разница «в плюс» — Kaspi вернул часть уже списанной суммы покупки.

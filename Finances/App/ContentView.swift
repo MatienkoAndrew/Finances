@@ -253,6 +253,7 @@ struct ContentView: View {
                 for transaction in result.transactions {
                     modelContext.insert(transaction)
                 }
+                _ = ApplePayExpenses.replaceWithStatement(result.walletConfirmations, context: modelContext)
 
                 try modelContext.save()
 

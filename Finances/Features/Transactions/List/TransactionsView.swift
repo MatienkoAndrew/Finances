@@ -521,6 +521,12 @@ struct TransactionsView: View {
                 modelContext.insert(transaction)
             }
 
+            // Оплаты из Apple Pay, найденные в выписке, заменяются её строками.
+            let replacedWalletPayments = ApplePayExpenses.replaceWithStatement(
+                importResult.walletConfirmations,
+                context: modelContext
+            )
+
             // Метки, в даты которых попали операции, — как и у добавленных вручную.
             TransactionTagSync.applyPeriodTags(to: importResult.transactions, context: modelContext)
 
@@ -536,7 +542,8 @@ struct TransactionsView: View {
                 fileName: importResult.fileName,
                 createdAccountKeys: importResult.accountsToCreate.map(ImportHistory.key(of:)),
                 modifications: importResult.modifications,
-                removedDuplicateIDs: removedDuplicates.map(\.id)
+                removedDuplicateIDs: removedDuplicates.map(\.id),
+                replacedWalletPayments: replacedWalletPayments
             ))
 
             lastImportedAt = importResult.importedAt
