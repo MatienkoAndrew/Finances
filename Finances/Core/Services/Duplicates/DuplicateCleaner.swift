@@ -187,6 +187,8 @@ struct RemovedDuplicate: Codable, Identifiable, Equatable {
     let fingerprint: String?
     let sourceFileName: String?
     let importedAt: Date?
+    /// Optional — старые записи журнала декодируются.
+    let walletMerchant: String?
     let createdAt: Date
     let fromAccountName: String?
     let toAccountName: String?
@@ -215,6 +217,7 @@ struct RemovedDuplicate: Codable, Identifiable, Equatable {
         fingerprint = transaction.fingerprint
         sourceFileName = transaction.sourceFileName
         importedAt = transaction.importedAt
+        walletMerchant = transaction.walletMerchant
         createdAt = transaction.createdAt
         fromAccountName = transaction.fromAccount?.name
         toAccountName = transaction.toAccount?.name
@@ -246,6 +249,7 @@ struct RemovedDuplicate: Codable, Identifiable, Equatable {
             fingerprint: fingerprint,
             sourceFileName: sourceFileName,
             importedAt: importedAt,
+            walletMerchant: walletMerchant,
             createdAt: createdAt,
             fromAccount: account(named: fromAccountName),
             toAccount: account(named: toAccountName)

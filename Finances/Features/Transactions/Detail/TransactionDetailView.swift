@@ -634,7 +634,9 @@ struct TransactionDetailView: View {
         VStack(spacing: 8) {
             footerRow("Счёт", accountSummary)
 
-            if let source = transaction.sourceFileName {
+            if transaction.isAwaitingStatement {
+                footerRow("Источник", "Apple Pay · ждёт выписку")
+            } else if let source = transaction.sourceFileName {
                 footerRow("Источник", source)
             }
 

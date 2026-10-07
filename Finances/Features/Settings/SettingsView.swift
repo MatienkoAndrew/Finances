@@ -233,6 +233,15 @@ struct SettingsView: View {
 
             SettingsCard {
                 NavigationLink {
+                    ApplePaySetupView()
+                } label: {
+                    SettingsRow(title: "Траты из Apple Pay", systemImage: "wave.3.right", color: .cyan, value: awaitingStatementCount > 0 ? "\(awaitingStatementCount)" : nil)
+                }
+                .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                NavigationLink {
                     ImportHistoryView()
                 } label: {
                     SettingsRow(title: "История импортов", systemImage: "clock.arrow.circlepath", color: .indigo, value: importCount > 0 ? "\(importCount)" : nil)
@@ -249,6 +258,11 @@ struct SettingsView: View {
                 .buttonStyle(SettingsPressStyle())
             }
         }
+    }
+
+    /// Оплаты из Apple Pay, которые ещё не сверили с выпиской.
+    private var awaitingStatementCount: Int {
+        transactions.filter(\.isAwaitingStatement).count
     }
 
     private var backupSection: some View {
