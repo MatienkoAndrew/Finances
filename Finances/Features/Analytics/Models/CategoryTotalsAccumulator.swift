@@ -6,8 +6,16 @@ import Foundation
 /// по умолчанию («Другое») — так же её предлагает выбор категории. Курсовая разница
 /// «в плюс» уменьшает ту подкатегорию, в которой у мерчанта больше всего покупок
 /// за период: своей подкатегории у неё обычно нет.
+///
+/// Возврат может прийти в другом периоде, чем покупка, — тогда за период сумма
+/// выходит нулевой или отрицательной. Такие категории и подкатегории не показываются.
 struct CategoryTotalsAccumulator {
     static let uncategorized = "Без категории"
+
+    /// Сумма, которая после округления до копеек остаётся расходом.
+    static func isPositive(_ total: Double) -> Bool {
+        total >= 0.005
+    }
 
     private var totals: [String: Double] = [:]
     private var counts: [String: Int] = [:]
@@ -64,6 +72,7 @@ struct CategoryTotalsAccumulator {
         }
 
         return totals
+            .filter { Self.isPositive($0.value) }
             .map { category, total in
                 AnalyticsCategoryTotal(
                     category: category,
@@ -76,6 +85,7 @@ struct CategoryTotalsAccumulator {
     }
 
     private func subcategories(of category: String, totals: [String: Double]) -> [AnalyticsSubcategoryTotal] {
+        let totals = totals.filter { Self.isPositive($0.value) }
         // Всё в «Другом» — подкатегории никто не выбирал, разбивка ничего не скажет.
         guard totals.keys.contains(where: { $0 != DefaultSubcategoryDefinitions.defaultName }) else { return [] }
 

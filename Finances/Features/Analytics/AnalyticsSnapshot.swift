@@ -248,6 +248,7 @@ enum AnalyticsSnapshotBuilder {
 
 
         let merchantTotals = merchantMap
+            .filter { CategoryTotalsAccumulator.isPositive($0.value) }
             .map { AnalyticsMerchantTotal(merchant: $0.key, total: $0.value) }
             .sorted { $0.total > $1.total }
             .prefix(10)
