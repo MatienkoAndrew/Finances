@@ -78,7 +78,7 @@ struct TransactionsView: View {
                 Section {
                     // При поиске сводка не нужна — на экране только найденное.
                     if searchQuery == nil {
-                        monthSummary
+                        monthSummary(folded: folded)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -225,29 +225,30 @@ struct TransactionsView: View {
     }
 
     /// Сводка текущего месяца; касание открывает его аналитику.
-    private var monthSummary: some View {
+    private func monthSummary(folded: FoldedExchangeRateDifferences) -> some View {
         let now = Date.now
         let previousMonth = Calendar.current.date(byAdding: .month, value: -1, to: now) ?? now
-        let current = monthSnapshot(anchor: now)
+        let current = monthSnapshot(anchor: now, folded: folded)
 
         return Button {
             path.append(MonthAnalyticsRoute(month: current.page.startDate))
         } label: {
             TransactionsMonthSummary(
                 current: current,
-                previous: monthSnapshot(anchor: previousMonth)
+                previous: monthSnapshot(anchor: previousMonth, folded: folded)
             )
         }
         .buttonStyle(.plain)
     }
 
-    private func monthSnapshot(anchor: Date) -> AnalyticsSnapshot {
+    private func monthSnapshot(anchor: Date, folded: FoldedExchangeRateDifferences) -> AnalyticsSnapshot {
         AnalyticsSnapshotBuilder.build(
             transactions: transactions,
             scale: .month,
             anchorDate: anchor,
             settings: settings,
-            trackedRates: trackedRates
+            trackedRates: trackedRates,
+            folded: folded
         )
     }
 

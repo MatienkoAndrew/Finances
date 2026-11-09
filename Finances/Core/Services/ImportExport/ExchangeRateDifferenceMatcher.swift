@@ -35,6 +35,27 @@ struct FoldedExchangeRateDifferences {
             return total + sign * abs(difference.rubAmount ?? 0)
         }
     }
+
+    /// Курсовые разницы покупки в рублях для аналитики: доплата — плюс, возврат — минус.
+    ///
+    /// В аналитике разница считается внутри своей покупки — в её дне, категории и
+    /// подкатегории, — а не отдельной операцией: иначе возврат, пришедший в следующем
+    /// месяце, давал там категорию с минусом и «0 шт.».
+    func rubAdjustment(
+        for purchase: Transaction,
+        settings: AppSettings?,
+        trackedRates: [TrackedExchangeRate]
+    ) -> Double {
+        differences(for: purchase).reduce(0) { total, difference in
+            let rub = TransactionRubConverter.displayRubAmount(
+                for: difference,
+                settings: settings,
+                trackedRates: trackedRates
+            ) ?? 0
+            let sign = ExchangeRateDifferenceMatcher.signedCharge(of: difference) < 0 ? -1.0 : 1.0
+            return total + sign * rub
+        }
+    }
 }
 
 /// Находит, к какой покупке относится курсовая разница.

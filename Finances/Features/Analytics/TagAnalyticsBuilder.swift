@@ -160,7 +160,8 @@ enum TagAnalyticsBuilder {
         transactions: [Transaction],
         settings: AppSettings?,
         trackedRates: [TrackedExchangeRate],
-        granularity requestedGranularity: TagBinGranularity? = nil
+        granularity requestedGranularity: TagBinGranularity? = nil,
+        folded: FoldedExchangeRateDifferences? = nil
     ) -> AnalyticsSnapshot {
         let calendar = Calendar.current
         let tagged = transactions.filter { $0.hasTag(tag.name) }
@@ -196,12 +197,19 @@ enum TagAnalyticsBuilder {
         var merchantMap: [String: Double] = [:]
         var merchantByCategory: [String: [String: Double]] = [:]
 
+        // Пары ищутся по всем переданным операциям, не только по отмеченным:
+        // у курсовой разницы метки может не быть.
+        let folded = folded ?? ExchangeRateDifferenceMatcher.fold(transactions)
+
         for transaction in tagged {
             // Только транзакции внутри эффективного периода метки.
             guard transaction.date >= period.start && transaction.date < period.endExclusive else {
                 continue
             }
-            guard let rub = TransactionRubConverter.displayRubAmount(
+            // Курсовая разница считается внутри своей покупки, отдельно — нет.
+            if transaction.isExchangeRateDifference { continue }
+
+            guard var rub = TransactionRubConverter.displayRubAmount(
                 for: transaction,
                 settings: settings,
                 trackedRates: trackedRates
@@ -209,6 +217,7 @@ enum TagAnalyticsBuilder {
 
             switch transaction.kind {
             case .expense:
+                rub += folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
                 totalExpensesRub += rub
                 expenseCount += 1
 
@@ -224,24 +233,6 @@ enum TagAnalyticsBuilder {
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] += rub
                 merchantByCategory[category, default: [:]][merchant, default: 0] += rub
-
-            case .income where transaction.reducesExpensesInAnalytics:
-                // Курсовая разница «в плюс» — возврат части покупки: уменьшает расходы,
-                // но отдельной операцией в счётчиках не считается.
-                totalExpensesRub -= rub
-
-                if let idx = bins.firstIndex(where: {
-                    transaction.date >= $0.start && transaction.date < $0.endExclusive
-                }) {
-                    chartTotals[idx] -= rub
-                }
-
-                categoryTotals.addRefund(transaction, rub: rub)
-                let category = CategoryTotalsAccumulator.categoryName(of: transaction)
-
-                let merchant = normalizedMerchantName(transaction.details)
-                merchantMap[merchant, default: 0] -= rub
-                merchantByCategory[category, default: [:]][merchant, default: 0] -= rub
 
             case .income:
                 totalIncomeRub += rub

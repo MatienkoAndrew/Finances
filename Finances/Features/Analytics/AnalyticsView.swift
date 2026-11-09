@@ -89,6 +89,9 @@ struct AnalyticsView: View {
     }
 
     private func makeReport() -> Report {
+        // Курсовые разницы считаются внутри своих покупок — пары ищутся один раз на отчёт.
+        let folded = ExchangeRateDifferenceMatcher.fold(transactions)
+
         switch selectedMode {
         case .time:
             let snapshot = AnalyticsSnapshotBuilder.build(
@@ -96,7 +99,8 @@ struct AnalyticsView: View {
                 scale: selectedScale,
                 anchorDate: pageAnchorDate,
                 settings: settings,
-                trackedRates: trackedRates
+                trackedRates: trackedRates,
+                folded: folded
             )
             let page = snapshot.page
 
@@ -107,14 +111,16 @@ struct AnalyticsView: View {
                     scale: selectedScale,
                     anchorDate: previousAnchorDate,
                     settings: settings,
-                    trackedRates: trackedRates
+                    trackedRates: trackedRates,
+                    folded: folded
                 ),
                 timeline: ExpenseTimelineData.build(
                     transactions: transactions,
                     scale: selectedScale,
                     pageStart: page.startDate,
                     settings: settings,
-                    trackedRates: trackedRates
+                    trackedRates: trackedRates,
+                    folded: folded
                 ),
                 tagGranularity: nil,
                 availableTagGranularities: [],
@@ -164,7 +170,8 @@ struct AnalyticsView: View {
                     transactions: tagged,
                     settings: settings,
                     trackedRates: trackedRates,
-                    granularity: granularity
+                    granularity: granularity,
+                    folded: folded
                 ),
                 previousSnapshot: nil,
                 timeline: nil,
