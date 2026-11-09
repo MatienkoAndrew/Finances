@@ -685,6 +685,8 @@ struct TagChip: View {
     let name: String
     let tag: TransactionTag?
     var isSelected = false
+    /// Помельче — для строк и заголовков дней в списках операций.
+    var isCompact = false
 
     private var color: Color {
         tag?.colorHex.flatMap { Color(hex: $0) } ?? .accentColor
@@ -705,10 +707,10 @@ struct TagChip: View {
             Text(name)
                 .lineLimit(1)
         }
-        .font(.caption.weight(.semibold))
+        .font(isCompact ? .caption.weight(.medium) : .caption.weight(.semibold))
         .foregroundStyle(isSelected ? .white : color)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
+        .padding(.horizontal, isCompact ? 7 : 9)
+        .padding(.vertical, isCompact ? 2 : 5)
         .background(isSelected ? AnyShapeStyle(color) : AnyShapeStyle(color.opacity(0.13)), in: Capsule())
     }
 }

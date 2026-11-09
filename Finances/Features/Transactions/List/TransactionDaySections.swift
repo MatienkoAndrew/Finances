@@ -29,9 +29,11 @@ struct TransactionDaySections: View {
 
     var body: some View {
         ForEach(TransactionSectionGrouper.groupedByDay(transactions), id: \.date) { section in
+            let dayTags = Self.commonTagNames(of: section.items)
+
             Section {
                 ForEach(section.items) { transaction in
-                    link(for: transaction)
+                    link(for: transaction, hiddenTagNames: Set(dayTags))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             if let onDelete {
                                 Button(role: .destructive) {
@@ -45,25 +47,41 @@ struct TransactionDaySections: View {
             } header: {
                 TransactionDayHeader(
                     date: section.date,
-                    total: TransactionDayTotal.make(for: section.items, folded: folded, filter: filter)
+                    total: TransactionDayTotal.make(for: section.items, folded: folded, filter: filter),
+                    tagNames: dayTags
                 )
             }
         }
     }
 
+    /// Метки дня (обычно поездка) — те, что стоят больше чем на половине его операций.
+    /// Они показываются в заголовке дня, а не в каждой строке. Не «на всех»: перевод
+    /// или доход без метки иначе возвращал бы её в каждую строку дня.
+    static func commonTagNames(of transactions: [Transaction]) -> [String] {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for name in transactions.flatMap({ $0.tagNames ?? [] }) {
+            if counts[name] == nil { order.append(name) }
+            counts[name, default: 0] += 1
+        }
+        return order.filter { (counts[$0] ?? 0) * 2 > transactions.count }
+    }
+
     @ViewBuilder
-    private func link(for transaction: Transaction) -> some View {
+    private func link(for transaction: Transaction, hiddenTagNames: Set<String>) -> some View {
+        let row = TransactionListRow(transaction: transaction, folded: folded, hiddenTagNames: hiddenTagNames)
+
         switch linkStyle {
         case .destination:
             NavigationLink {
                 TransactionDetailView(transaction: transaction)
             } label: {
-                TransactionListRow(transaction: transaction, folded: folded)
+                row
             }
 
         case .value:
             NavigationLink(value: transaction.persistentModelID) {
-                TransactionListRow(transaction: transaction, folded: folded)
+                row
             }
         }
     }
@@ -73,10 +91,11 @@ struct TransactionDaySections: View {
 struct TransactionListRow: View {
     let transaction: Transaction
     let folded: FoldedExchangeRateDifferences
+    var hiddenTagNames: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TransactionRowView(transaction: transaction)
+            TransactionRowView(transaction: transaction, hiddenTagNames: hiddenTagNames)
             ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
                 // Вровень с текстом строки, а не с иконкой.
                 .padding(.leading, 50)
@@ -84,18 +103,34 @@ struct TransactionListRow: View {
     }
 }
 
-/// Заголовок дня: «Сегодня», «Вчера» или дата — и итог дня справа.
+/// Заголовок дня: «Сегодня», «Вчера» или дата, общая метка дня — и итог дня справа.
 struct TransactionDayHeader: View {
+    @Environment(\.transactionRowLookup) private var lookup
+
     let date: Date
     let total: TransactionDayTotal?
+    /// Метки, которые стоят на большинстве операций дня.
+    var tagNames: [String] = []
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 8) {
             Text(Self.title(for: date))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(1)
 
-            Spacer()
+            if let tagName = tagNames.first {
+                tagLink(tagName)
+
+                if tagNames.count > 1 {
+                    Text("+\(tagNames.count - 1)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 8)
 
             if let total {
                 Text(total.text)
@@ -105,6 +140,23 @@ struct TransactionDayHeader: View {
             }
         }
         .textCase(nil)
+    }
+
+    /// Касание по метке открывает её экран со всеми операциями.
+    @ViewBuilder
+    private func tagLink(_ name: String) -> some View {
+        let chip = TagChip(name: name, tag: lookup.tag(named: name), isCompact: true)
+
+        if let tag = lookup.tag(named: name) {
+            NavigationLink {
+                TagTransactionsView(tag: tag)
+            } label: {
+                chip
+            }
+            .buttonStyle(.plain)
+        } else {
+            chip
+        }
     }
 
     static func title(for date: Date) -> String {
