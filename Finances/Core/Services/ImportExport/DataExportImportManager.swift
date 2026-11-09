@@ -299,6 +299,7 @@ final class DataExportImportManager {
             sourceFileName: exported.sourceFileName,
             importedAt: exported.importedAt,
             walletMerchant: exported.walletMerchant,
+            walletAmountText: exported.walletAmountText,
             createdAt: exported.createdAt,
             fromAccount: exported.fromAccountID.flatMap { accounts[$0] },
             toAccount: exported.toAccountID.flatMap { accounts[$0] }
@@ -545,6 +546,8 @@ struct ExportableTransaction: Codable {
     let importedAt: Date?
     /// Оплата из Apple Pay, ещё не сверенная с выпиской. Optional — старые копии декодируются.
     let walletMerchant: String?
+    /// Сумма оплаты текстом из Wallet. Optional — старые копии декодируются.
+    let walletAmountText: String?
     let createdAt: Date
     
     init(from transaction: Transaction, accountIDs: [PersistentIdentifier: String]) {
@@ -571,6 +574,7 @@ struct ExportableTransaction: Codable {
         self.sourceFileName = transaction.sourceFileName
         self.importedAt = transaction.importedAt
         self.walletMerchant = transaction.walletMerchant
+        self.walletAmountText = transaction.walletAmountText
         self.createdAt = transaction.createdAt
     }
 }

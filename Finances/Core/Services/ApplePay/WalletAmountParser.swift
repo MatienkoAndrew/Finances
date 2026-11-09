@@ -83,13 +83,18 @@ nonisolated enum WalletAmountParser {
 
     // MARK: - Currency
 
-    /// Символы, которые Wallet ставит вместо кода. Сначала длинные: «S$» раньше «$».
+    /// Символы, которые Wallet ставит вместо кода. Многие валюты — «доллары» со своей
+    /// приставкой: «NT$» (Тайвань), «HK$», «CA$». Голый «$» — доллар США.
+    /// Проверяются от длинных к коротким, иначе «CA$» нашёлся бы как «A$», а «NT$» — как «$».
     private static let symbols: [(symbol: String, code: String)] = [
-        ("US$", "USD"), ("S$", "SGD"), ("HK$", "HKD"), ("A$", "AUD"), ("C$", "CAD"),
+        ("US$", "USD"), ("NT$", "TWD"), ("HK$", "HKD"), ("CA$", "CAD"), ("AU$", "AUD"),
+        ("NZ$", "NZD"), ("MX$", "MXN"), ("EC$", "XCD"), ("S$", "SGD"), ("A$", "AUD"), ("C$", "CAD"),
+        ("R$", "BRL"), ("CN¥", "CNY"),
         ("₸", "KZT"), ("₽", "RUB"), ("€", "EUR"), ("£", "GBP"), ("₩", "KRW"), ("₫", "VND"),
-        ("฿", "THB"), ("₹", "INR"), ("₺", "TRY"), ("₴", "UAH"), ("₾", "GEL"), ("¥", "JPY"),
+        ("฿", "THB"), ("₹", "INR"), ("₺", "TRY"), ("₴", "UAH"), ("₾", "GEL"), ("₪", "ILS"),
+        ("₱", "PHP"), ("¥", "JPY"),
         ("$", "USD")
-    ]
+    ].sorted { $0.symbol.count > $1.symbol.count }
 
     /// Сокращения на русском: «2 450 тг», «500 руб.».
     private static let words: [(word: String, code: String)] = [

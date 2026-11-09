@@ -85,6 +85,12 @@ enum StatementDeduplicator {
     /// от выписки: в Wallet — предварительная, в выписке — окончательная.
     private static let walletAmountTolerance = 0.03
 
+    /// Валюты, которые в тексте суммы могут выглядеть одинаково: «$» и «¥».
+    private static let sameSymbolFamilies: [Set<String>] = [
+        ["USD", "TWD", "HKD", "CAD", "AUD", "NZD", "MXN", "SGD", "XCD", "BRL"],
+        ["JPY", "CNY"]
+    ]
+
     /// 3. Оплаты из Apple Pay. Название из Wallet обычно не похоже на строку выписки
     ///    («Magnum» и «MAGNUM CASH&CARRY»), поэтому сопоставляем по дню (по времени
     ///    Kaspi) и сумме. Сначала тот же день, потом соседний: у покупки около полуночи
@@ -135,7 +141,8 @@ enum StatementDeduplicator {
     }
 
     /// Похожа ли сумма оплаты из Wallet на строку выписки: 0 — совпадает (у валютной
-    /// покупки — сумма в валюте), больше — близкая сумма в тенге, nil — не похожа.
+    /// покупки — сумма в валюте), 0.5 — та же сумма в валюте с тем же значком,
+    /// больше — близкая сумма в тенге, nil — не похожа.
     /// Близкая сумма бывает, когда Wallet передал валютную покупку в валюте карты.
     private static func walletAmountCost(_ row: TransactionSnapshot, _ wallet: TransactionSnapshot) -> Double? {
         let rowKey = amountKey(
@@ -151,6 +158,15 @@ enum StatementDeduplicator {
             foreignCurrency: wallet.foreignCurrencyCode
         )
         if rowKey == walletKey { return 0 }
+
+        // Та же сумма, но валюта с тем же значком: Wallet мог прислать голый «$» за
+        // тайваньский доллар («$79.00» на телефоне с регионом Тайвань), а раньше
+        // приложение и «NT$» читало как USD. Выписка знает точную валюту.
+        if rowKey.cents == walletKey.cents,
+           let family = sameSymbolFamilies.first(where: { $0.contains(walletKey.currency) }),
+           family.contains(rowKey.currency) {
+            return 0.5
+        }
 
         guard wallet.foreignAmount == nil, row.foreignAmount != nil, row.amount > 0,
               CurrencyDisplay.normalizedCode(from: wallet.currencyCode) == CurrencyDisplay.normalizedCode(from: row.currencyCode) else {

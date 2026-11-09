@@ -636,6 +636,9 @@ struct TransactionDetailView: View {
 
             if transaction.isAwaitingStatement {
                 footerRow("Источник", "Apple Pay · ждёт выписку")
+                if let amountText = transaction.walletAmountText, !amountText.isEmpty {
+                    footerRow("Сумма из Wallet", amountText)
+                }
             } else if let source = transaction.sourceFileName {
                 footerRow("Источник", source)
             }
