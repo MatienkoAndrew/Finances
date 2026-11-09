@@ -156,6 +156,9 @@ enum ApplePayExpenses {
             for tag in payment.manuallyExcludedTagNames ?? [] {
                 statement.removeTag(tag, manual: true)
             }
+            for tag in payment.manuallyIncludedTagNames ?? [] {
+                statement.addTag(tag, manual: true)
+            }
 
             let removed = RemovedDuplicate(payment, keptDetails: statement.details, removedAt: removedAt, automatic: true)
             context.delete(payment)

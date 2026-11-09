@@ -144,8 +144,8 @@ struct TagsManagementView: View {
     // MARK: - Actions
 
     private func delete(_ tag: TransactionTag) {
-        for transaction in transactions where transaction.hasTag(tag.name) {
-            transaction.removeTag(tag.name)
+        for transaction in transactions {
+            transaction.forgetTag(tag.name)
         }
         modelContext.delete(tag)
         try? modelContext.save()

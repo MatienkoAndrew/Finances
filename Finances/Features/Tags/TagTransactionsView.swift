@@ -25,6 +25,7 @@ struct TagTransactionsView: View {
     @State private var isEditingTag = false
     @State private var isConfirmingDelete = false
     @State private var isShowingAnalytics = false
+    @State private var isShowingReview = false
     @State private var openedTransaction: Transaction?
     @Environment(\.dismiss) private var dismiss
 
@@ -32,9 +33,16 @@ struct TagTransactionsView: View {
         transactions.filter { $0.hasTag(tag.name) }
     }
 
+    /// Расходы за даты поездки не в её валюте — ждут решения.
+    private var pendingCount: Int {
+        transactions.reduce(0) { $0 + ($1.isTagPending(tag.name) ? 1 : 0) }
+    }
+
     var body: some View {
+        let pendingCount = pendingCount
+
         List {
-            if taggedTransactions.isEmpty {
+            if taggedTransactions.isEmpty && pendingCount == 0 {
                 ContentUnavailableView(
                     "Нет транзакций",
                     systemImage: "tag.slash",
@@ -45,6 +53,12 @@ struct TagTransactionsView: View {
                     summaryCard
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+                    if pendingCount > 0 {
+                        reviewBanner(count: pendingCount)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                    }
                 }
 
                 ForEach(taggedTransactions) { transaction in
@@ -89,6 +103,9 @@ struct TagTransactionsView: View {
         }
         .navigationDestination(isPresented: $isShowingAnalytics) {
             AnalyticsView(focusedTag: tag)
+        }
+        .navigationDestination(isPresented: $isShowingReview) {
+            TagReviewView(tag: tag)
         }
         .sheet(isPresented: $isEditingTag) {
             TagEditorSheet(tag: tag) { _ in isConfirmingDelete = true }
@@ -156,9 +173,45 @@ struct TagTransactionsView: View {
         }
     }
 
+    /// Плашка «На рассмотрении»: расходы за даты поездки не в её валюте.
+    private func reviewBanner(count: Int) -> some View {
+        Button {
+            isShowingReview = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("На рассмотрении: \(count)")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Не в валюте поездки")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer(minLength: 8)
+
+                Text("Разобрать")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func deleteTag() {
-        for transaction in transactions where transaction.hasTag(tag.name) {
-            transaction.removeTag(tag.name)
+        for transaction in transactions {
+            transaction.forgetTag(tag.name)
         }
         modelContext.delete(tag)
         try? modelContext.save()
