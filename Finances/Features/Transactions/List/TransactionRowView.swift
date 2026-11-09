@@ -31,6 +31,8 @@ struct TransactionRowView: View {
     @Environment(\.transactionRowLookup) private var lookup
 
     let transaction: Transaction
+    /// Дата в подписи — для списков без разбивки по дням.
+    var showsDate = false
 
     @State private var isShowingCategoryPicker = false
     @State private var pickedCategory: CategoryMatch?
@@ -51,24 +53,65 @@ struct TransactionRowView: View {
         CategoryLookup.findCategory(named: transaction.categoryName, in: lookup.categories)
     }
 
+    private static let iconSize: CGFloat = 38
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            topRow
+        HStack(spacing: 12) {
+            leadingIcon
 
-            if let text = secondaryAmountsText {
-                secondaryAmountsRow(text: text)
-            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(transaction.details)
+                        .font(.body.weight(.medium))
+                        .lineLimit(1)
 
-            metaRow
+                    Spacer(minLength: 8)
 
-            if let note = transaction.note, !note.isEmpty {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    Text(primaryAmountText)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(primaryAmountColor)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    subtitle
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    if let secondaryAmountText {
+                        Text(secondaryAmountText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
+                }
+
+                if let note = transaction.note, !note.isEmpty {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
+        .sheet(isPresented: $isShowingCategoryPicker, onDismiss: applyPickedCategory) {
+            CategoryPickerSheet(
+                categories: lookup.categories,
+                initialCategory: transaction.categoryName,
+                initialSubcategory: transaction.subcategoryName,
+                subtitle: transaction.details
+            ) { category, subcategory in
+                pickedCategory = category.map { CategoryMatch(category: $0, subcategory: subcategory) }
+            }
+        }
         .confirmationDialog(
             confirmationDialogTitle,
             isPresented: Binding(
@@ -109,84 +152,24 @@ struct TransactionRowView: View {
         return "транзакций"
     }
 
-    private var topRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(transaction.details)
-                    .font(.system(size: 17, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-
-                categoryMenu
-            }
-
-            Spacer(minLength: 10)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(primaryAmountText)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(primaryAmountColor)
-                    .multilineTextAlignment(.trailing)
-
-                Text(transaction.date, format: .dateTime.day().month(.abbreviated).year())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
+    /// Слева — иконка: у расхода это категория, и касание по ней меняет категорию.
     @ViewBuilder
-    private func secondaryAmountsRow(text: String) -> some View {
-        HStack {
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(secondaryAmountColor)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-
-            Spacer()
-        }
-    }
-
-    private var metaRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: metaIconName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(metaIconColor)
-
-            Text(accountLine)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer()
-        }
-    }
-
-    @ViewBuilder
-    private var categoryMenu: some View {
-        if transaction.kind == .expense {
+    private var leadingIcon: some View {
+        switch transaction.kind {
+        case .expense:
             Button {
                 isShowingCategoryPicker = true
             } label: {
-                CategoryChip(
-                    category: categoryItem,
-                    categoryName: transaction.categoryName ?? "Другое",
-                    subcategoryName: transaction.subcategoryName
-                )
+                AnalyticsCategoryIcon(category: categoryItem, size: Self.iconSize)
             }
             .buttonStyle(.borderless)
-            .sheet(isPresented: $isShowingCategoryPicker, onDismiss: applyPickedCategory) {
-                CategoryPickerSheet(
-                    categories: lookup.categories,
-                    initialCategory: transaction.categoryName,
-                    initialSubcategory: transaction.subcategoryName,
-                    subtitle: transaction.details
-                ) { category, subcategory in
-                    pickedCategory = category.map { CategoryMatch(category: $0, subcategory: subcategory) }
-                }
-            }
+            .accessibilityLabel("Категория: \(categoryTitle). Сменить")
+
+        case .income:
+            SettingsIcon(systemImage: "arrow.down", color: .green, size: Self.iconSize)
+
+        case .transfer:
+            SettingsIcon(systemImage: "arrow.left.arrow.right", color: .gray, size: Self.iconSize)
         }
     }
 
@@ -197,6 +180,48 @@ struct TransactionRowView: View {
         updateCategory(picked.category, subcategory: picked.subcategory)
     }
 
+    /// Подкатегория точнее категории, а сама категория и так видна по иконке.
+    private var categoryTitle: String {
+        transaction.subcategoryName ?? transaction.categoryName ?? "Другое"
+    }
+
+    /// Вторая строка: категория и счёт, у перевода — откуда и куда.
+    private var subtitle: Text {
+        var parts: [String] = []
+
+        if showsDate {
+            let isThisYear = Calendar.current.isDate(transaction.date, equalTo: .now, toGranularity: .year)
+            parts.append(isThisYear
+                ? transaction.date.formatted(.dateTime.day().month(.abbreviated))
+                : transaction.date.formatted(.dateTime.day().month(.abbreviated).year()))
+        }
+
+        switch transaction.kind {
+        case .expense:
+            parts.append(categoryTitle)
+            if let account = transaction.fromAccount?.name {
+                parts.append(account)
+            }
+
+        case .income:
+            if let category = transaction.categoryName, !category.isEmpty {
+                parts.append(category)
+            }
+            parts.append(transaction.toAccount?.name ?? "Без счета")
+
+        case .transfer:
+            let from = transaction.fromAccount?.name ?? "Без счета"
+            let to = transaction.toAccount?.name ?? "Без счета"
+            parts.append("\(from) → \(to)")
+        }
+
+        let text = Text(parts.joined(separator: " · "))
+
+        // Оплата из Apple Pay, которую ещё не сверили с выпиской.
+        guard transaction.isAwaitingStatement else { return text }
+        return Text(Image(systemName: "clock")) + Text(" ") + text
+    }
+
     private var resolvedRubAmount: Double? {
         TransactionRubConverter.displayRubAmount(
             for: transaction,
@@ -205,87 +230,40 @@ struct TransactionRowView: View {
         )
     }
 
+    /// Справа — сумма в рублях со знаком; если рублей ещё нет, то в валюте счёта.
     private var primaryAmountText: String {
         switch transaction.kind {
         case .expense, .income:
             if let rub = resolvedRubAmount {
-                return signedFormattedAmount(
-                    rub,
-                    currency: "₽",
-                    kind: transaction.kind
-                )
-            } else {
-                return signedFormattedAmount(
-                    transaction.amount,
-                    currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode),
-                    kind: transaction.kind
-                )
+                return signedAmount(rub, currencyCode: "RUB")
             }
+            return signedAmount(transaction.amount, currencyCode: transaction.currencyCode)
 
         case .transfer:
             if transaction.isCrossCurrencyTransfer {
-                return formattedUnsignedAmount(
-                    transaction.creditedAmount,
-                    currency: CurrencyDisplay.normalizedCode(from: transaction.creditedCurrencyCode)
-                )
-            } else {
-                return formattedUnsignedAmount(
-                    transaction.amount,
-                    currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode)
-                )
+                return Self.amount(transaction.creditedAmount, currencyCode: transaction.creditedCurrencyCode)
             }
+            return Self.amount(transaction.amount, currencyCode: transaction.currencyCode)
         }
     }
 
-    private var secondaryAmountsText: String? {
+    /// Под суммой — сумма в валюте покупки: за границей это валюта страны,
+    /// иначе валюта счёта. Списание со счёта при покупке за границей — на экране операции.
+    private var secondaryAmountText: String? {
         switch transaction.kind {
         case .expense, .income:
-            var parts: [String] = []
-
             if let foreignAmount = transaction.foreignAmount,
                let foreignCurrencyCode = transaction.foreignCurrencyCode {
-                parts.append(
-                    signedFormattedAmount(
-                        foreignAmount,
-                        currency: CurrencyDisplay.normalizedCode(from: foreignCurrencyCode),
-                        kind: transaction.kind
-                    )
-                )
+                return Self.amount(foreignAmount, currencyCode: foreignCurrencyCode)
             }
 
-            if resolvedRubAmount != nil || transaction.foreignAmount != nil {
-                parts.append(
-                    signedFormattedAmount(
-                        transaction.amount,
-                        currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode),
-                        kind: transaction.kind
-                    )
-                )
-            }
-
-            return parts.isEmpty ? nil : parts.joined(separator: " • ")
+            let isRub = CurrencyDisplay.normalizedCode(from: transaction.currencyCode) == "RUB"
+            guard resolvedRubAmount != nil, !isRub else { return nil }
+            return Self.amount(transaction.amount, currencyCode: transaction.currencyCode)
 
         case .transfer:
-            if transaction.isCrossCurrencyTransfer {
-                return "\(formattedUnsignedAmount(transaction.amount, currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode))) → \(formattedUnsignedAmount(transaction.creditedAmount, currency: CurrencyDisplay.normalizedCode(from: transaction.creditedCurrencyCode)))"
-            } else {
-                return nil
-            }
-        }
-    }
-
-    private var accountLine: String {
-        switch transaction.kind {
-        case .expense:
-            return transaction.fromAccount?.name ?? "Без счета"
-
-        case .income:
-            return transaction.toAccount?.name ?? "Без счета"
-
-        case .transfer:
-            let from = transaction.fromAccount?.name ?? "Без счета"
-            let to = transaction.toAccount?.name ?? "Без счета"
-            return "\(from) → \(to)"
+            guard transaction.isCrossCurrencyTransfer else { return nil }
+            return Self.amount(transaction.amount, currencyCode: transaction.currencyCode)
         }
     }
 
@@ -297,39 +275,6 @@ struct TransactionRowView: View {
             return .green
         case .transfer:
             return .primary
-        }
-    }
-
-    private var secondaryAmountColor: Color {
-        switch transaction.kind {
-        case .expense:
-            return .red.opacity(0.75)
-        case .income:
-            return .green.opacity(0.75)
-        case .transfer:
-            return .secondary
-        }
-    }
-
-    private var metaIconName: String {
-        switch transaction.kind {
-        case .expense:
-            return "arrow.up.circle.fill"
-        case .income:
-            return "arrow.down.circle.fill"
-        case .transfer:
-            return "arrow.left.arrow.right.circle.fill"
-        }
-    }
-
-    private var metaIconColor: Color {
-        switch transaction.kind {
-        case .expense:
-            return .red.opacity(0.75)
-        case .income:
-            return .green.opacity(0.75)
-        case .transfer:
-            return .secondary
         }
     }
 
@@ -406,45 +351,59 @@ struct TransactionRowView: View {
         pendingCategoryChange = nil
     }
 
-    private func signedFormattedAmount(
-        _ value: Double,
-        currency: String,
-        kind: TransactionKind
-    ) -> String {
+    private func signedAmount(_ value: Double, currencyCode: String) -> String {
         let sign: String
-        switch kind {
+        switch transaction.kind {
         case .expense:
-            sign = "-"
+            sign = "−"
         case .income:
             sign = "+"
         case .transfer:
             sign = ""
         }
-
-        let number = formattedNumber(abs(value))
-        return sign.isEmpty ? "\(number) \(currency)" : "\(sign) \(number) \(currency)"
+        return sign + Self.amount(value, currencyCode: currencyCode)
     }
 
-    private func formattedUnsignedAmount(
-        _ value: Double,
-        currency: String
-    ) -> String {
-        "\(formattedNumber(abs(value))) \(currency)"
+    /// Сумма с символом валюты; копейки — только если они есть.
+    @MainActor private static func amount(_ value: Double, currencyCode: String) -> String {
+        let value = abs(value)
+        let isWhole = (value * 100).rounded() == (value.rounded() * 100)
+        let formatter = isWhole ? wholeFormatter : fractionFormatter
+        let number = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        return "\(number) \(symbol(for: currencyCode))"
     }
 
-    /// Один на все строки: создавать NumberFormatter на каждую сумму дорого.
-    private static let numberFormatter: NumberFormatter = {
+    /// Короткий знак валюты: ₽, ₸, $, ₫. У рубля и тенге системные форматтеры
+    /// вместо знака дают буквенный код, поэтому их знаки заданы явно.
+    private static func symbol(for currencyCode: String) -> String {
+        let code = CurrencyDisplay.normalizedCode(from: currencyCode)
+        if let cached = symbolCache[code] { return cached }
+        if let fixed = fixedSymbols[code] { return fixed }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.currencyCode = code
+        let symbol = formatter.currencySymbol ?? code
+        symbolCache[code] = symbol
+        return symbol
+    }
+
+    @MainActor private static var symbolCache: [String: String] = [:]
+    private static let fixedSymbols = ["RUB": "₽", "KZT": "₸"]
+
+    // Форматтеры — одни на все строки: создавать их на каждую сумму дорого.
+    private static let wholeFormatter = makeFormatter(fractionDigits: 0)
+    private static let fractionFormatter = makeFormatter(fractionDigits: 2)
+
+    private static func makeFormatter(fractionDigits: Int) -> NumberFormatter {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = fractionDigits
+        formatter.maximumFractionDigits = fractionDigits
         formatter.groupingSeparator = " "
         formatter.decimalSeparator = ","
         return formatter
-    }()
-
-    private func formattedNumber(_ value: Double) -> String {
-        Self.numberFormatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
     }
 }

@@ -32,20 +32,10 @@ struct TransactionListByKindView: View {
         let visible = filteredTransactions(hiding: folded.foldedIDs)
 
         List {
-            ForEach(visible) { transaction in
-                NavigationLink {
-                    TransactionDetailView(transaction: transaction)
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        TransactionRowView(transaction: transaction)
-                        ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
-                    }
-                }
-                .buttonStyle(.plain)
-                .listRowSeparator(.hidden)
-            }
+            TransactionDaySections(transactions: visible, folded: folded)
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
         .navigationTitle(kind.title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) {

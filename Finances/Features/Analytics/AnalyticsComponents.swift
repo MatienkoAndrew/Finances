@@ -21,44 +21,28 @@ extension View {
 /// Переключатель неделя / месяц / год: капсула со скользящим выделением.
 struct AnalyticsScaleTabs: View {
     @Binding var selection: AnalyticsTimeScale
-    @Namespace private var namespace
-
-    /// Выделение как у системного сегмента: белое днём, светло-серое ночью.
-    private static let selectionFill = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? .systemGray3 : .white
-    })
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(AnalyticsTimeScale.allCases) { scale in
-                let isSelected = selection == scale
+        CapsuleTabs(options: AnalyticsTimeScale.allCases, selection: $selection, title: \.tabTitle)
+    }
+}
 
-                Button {
-                    withAnimation(.snappy(duration: 0.28)) {
-                        selection = scale
-                    }
-                } label: {
-                    Text(scale.tabTitle)
-                        .font(.subheadline.weight(isSelected ? .semibold : .medium))
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background {
-                            if isSelected {
-                                Capsule()
-                                    .fill(Self.selectionFill)
-                                    .shadow(color: .black.opacity(0.08), radius: 4, y: 1)
-                                    .matchedGeometryEffect(id: "scale", in: namespace)
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
+/// Подложка шапки: карточка с мягким цветным отсветом в углу.
+struct AnalyticsHeroBackground: View {
+    let color: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(RadialGradient(
+                        colors: [color.opacity(0.20), color.opacity(0)],
+                        center: .topLeading,
+                        startRadius: 0,
+                        endRadius: 320
+                    ))
             }
-        }
-        .padding(3)
-        .background(Color(.tertiarySystemFill), in: Capsule())
-        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 

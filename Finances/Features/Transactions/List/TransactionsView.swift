@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
@@ -24,6 +23,9 @@ struct TransactionsView: View {
     @Query
     private var settingsList: [AppSettings]
 
+    @Query(sort: \TrackedExchangeRate.code, order: .forward)
+    private var trackedRates: [TrackedExchangeRate]
+
     @State private var path = NavigationPath()
 
     @State private var selectedFilter: TransactionKindFilter = .all
@@ -44,6 +46,11 @@ struct TransactionsView: View {
 
     private var settings: AppSettings? {
         settingsList.first
+    }
+
+    /// Переход из сводки в аналитику месяца.
+    private struct MonthAnalyticsRoute: Hashable {
+        let month: Date
     }
 
     /// Курсовые разницы, приписанные к своим покупкам: отдельной строкой не показываются.
@@ -69,10 +76,23 @@ struct TransactionsView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
-                    filterChips
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                    // При поиске сводка не нужна — на экране только найденное.
+                    if searchQuery == nil {
+                        monthSummary
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+
+                    CapsuleTabs(
+                        options: TransactionKindFilter.allCases,
+                        selection: $selectedFilter,
+                        fillsWidth: true,
+                        title: \.rawValue
+                    )
+                    .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
 
                 if visible.isEmpty {
@@ -80,66 +100,20 @@ struct TransactionsView: View {
                         emptyState
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
-                            .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                     }
                 } else {
-                    ForEach(TransactionSectionGrouper.groupedByDay(visible), id: \.date) { section in
-                        Section {
-                            ForEach(section.items) { transaction in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TransactionRowView(transaction: transaction)
-                                    ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 18))
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    path.append(transaction.persistentModelID)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        deleteTransaction(transaction)
-                                    } label: {
-                                        Label("Удалить", systemImage: "trash")
-                                    }
-                                }
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                            }
-                        } header: {
-                            HStack {
-                                Text(formattedSectionDate(section.date))
-                                    .font(.title3.weight(.semibold))
-                                    .textCase(nil)
-                                    .foregroundStyle(.secondary)
-                                
-                                Spacer()
-                                
-                                if let (totalText, color) = calculateDailyTotal(section.items, folded: folded) {
-                                    Text(totalText)
-                                        .font(.subheadline.weight(.semibold))
-                                        .textCase(nil)
-                                        .foregroundStyle(color)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(
-                                            color.opacity(0.15),
-                                            in: RoundedRectangle(cornerRadius: 8)
-                                        )
-                                }
-                            }
-                            .padding(.bottom, 4)
-                        }
-                    }
+                    TransactionDaySections(
+                        transactions: visible,
+                        folded: folded,
+                        filter: selectedFilter,
+                        linkStyle: .value,
+                        onDelete: deleteTransaction
+                    )
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             .navigationTitle("Транзакции")
             .navigationDestination(for: PersistentIdentifier.self) { id in
                 if let transaction = transactions.first(where: { $0.persistentModelID == id }) {
@@ -148,27 +122,38 @@ struct TransactionsView: View {
                     Text("Транзакция не найдена")
                 }
             }
+            .navigationDestination(for: MonthAnalyticsRoute.self) { route in
+                AnalyticsView(month: route.month)
+            }
             .searchable(text: $searchText, prompt: "Поиск по деталям, категории, счетам")
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        isShowingQuickTag = true
-                    } label: {
-                        Image(systemName: "tag.fill")
-                    }
-                    
-                    Button {
-                        isShowingImporter = true
-                    } label: {
-                        Image(systemName: "doc.badge.plus")
-                    }
-                    .disabled(importProgress != nil)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            isShowingImporter = true
+                        } label: {
+                            Label("Импорт выписки PDF", systemImage: "doc.badge.plus")
+                        }
+                        .disabled(importProgress != nil)
 
+                        Button {
+                            isShowingQuickTag = true
+                        } label: {
+                            Label("Добавить метку", systemImage: "tag")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Ещё")
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isShowingAddTransaction = true
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Добавить транзакцию")
                 }
             }
             .sheet(isPresented: $isShowingAddTransaction) {
@@ -239,31 +224,31 @@ struct TransactionsView: View {
         }
     }
 
-    private var filterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(TransactionKindFilter.allCases) { filter in
-                    Button {
-                        selectedFilter = filter
-                    } label: {
-                        Text(filter.rawValue)
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(
-                                selectedFilter == filter
-                                ? Color.primary.opacity(0.10)
-                                : Color(.secondarySystemBackground)
-                            )
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(10)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 22))
+    /// Сводка текущего месяца; касание открывает его аналитику.
+    private var monthSummary: some View {
+        let now = Date.now
+        let previousMonth = Calendar.current.date(byAdding: .month, value: -1, to: now) ?? now
+        let current = monthSnapshot(anchor: now)
+
+        return Button {
+            path.append(MonthAnalyticsRoute(month: current.page.startDate))
+        } label: {
+            TransactionsMonthSummary(
+                current: current,
+                previous: monthSnapshot(anchor: previousMonth)
+            )
         }
+        .buttonStyle(.plain)
+    }
+
+    private func monthSnapshot(anchor: Date) -> AnalyticsSnapshot {
+        AnalyticsSnapshotBuilder.build(
+            transactions: transactions,
+            scale: .month,
+            anchorDate: anchor,
+            settings: settings,
+            trackedRates: trackedRates
+        )
     }
 
     private var emptyState: some View {
@@ -333,94 +318,6 @@ struct TransactionsView: View {
         .lowercased()
 
         return haystack.contains(query)
-    }
-
-    // Форматтеры — по одному на экран: заголовок и сумма есть у каждого дня
-    // в списке, а создавать DateFormatter и NumberFormatter заново дорого.
-    private static let sectionDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "d MMMM yyyy"
-        return formatter
-    }()
-
-    private static let rubFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 2
-        formatter.groupingSeparator = " "
-        formatter.decimalSeparator = ","
-        return formatter
-    }()
-
-    private func formattedSectionDate(_ date: Date) -> String {
-        Self.sectionDateFormatter.string(from: date)
-    }
-    
-    /// Подсчет суммы за день в рублях с учетом фильтра
-    private func calculateDailyTotal(_ transactions: [Transaction], folded: FoldedExchangeRateDifferences) -> (String, Color)? {
-        var totalRub: Double = 0
-
-        // Курсовые разницы спрятаны под своими покупками — их сумма идёт в день покупки.
-        let expenseRub: (Transaction) -> Double = { folded.finalRubAmount(for: $0) ?? $0.rubAmount ?? 0 }
-
-        // Подсчитываем сумму в зависимости от выбранного фильтра
-        switch selectedFilter {
-        case .all:
-            // Показываем чистый баланс: доходы минус расходы
-            let expenses = transactions.filter { $0.kind == .expense }
-                .reduce(0.0) { sum, tx in sum + expenseRub(tx) }
-            
-            let income = transactions.filter { $0.kind == .income }
-                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
-            
-            totalRub = income - expenses
-            
-        case .expenses:
-            // Только расходы (делаем отрицательными)
-            totalRub = -transactions.filter { $0.kind == .expense }
-                .reduce(0.0) { sum, tx in sum + expenseRub(tx) }
-            
-        case .income:
-            // Только доходы (положительные)
-            totalRub = transactions.filter { $0.kind == .income }
-                .reduce(0.0) { sum, tx in sum + (tx.rubAmount ?? 0) }
-            
-        case .transfers:
-            // Для переводов не показываем сумму
-            return nil
-        }
-        
-        guard totalRub != 0 else { return nil }
-        
-        // Определяем цвет и формат в зависимости от типа операций и суммы
-        if selectedFilter == .all {
-            // Для "Все": зеленый если положительный, красный если отрицательный
-            let color: Color = totalRub > 0 ? .green : .red
-            return (signedFormattedRubAmount(totalRub), color)
-        } else if selectedFilter == .expenses {
-            // Для расходов: всегда красный цвет и со знаком минус
-            return (signedFormattedRubAmount(totalRub), .red)
-        } else if selectedFilter == .income {
-            // Для доходов: всегда зеленый цвет и со знаком плюс
-            return (signedFormattedRubAmount(totalRub), .green)
-        }
-        
-        return nil
-    }
-    
-    /// Форматирование суммы в рублях
-    private func formattedRubAmount(_ value: Double) -> String {
-        let number = Self.rubFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
-        return "\(number) ₽"
-    }
-    
-    /// Форматирование суммы в рублях со знаком
-    private func signedFormattedRubAmount(_ value: Double) -> String {
-        let sign = value < 0 ? "-" : "+"
-        return "\(sign) \(formattedRubAmount(abs(value)))"
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
