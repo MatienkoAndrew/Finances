@@ -4,11 +4,8 @@ import Foundation
 ///
 /// Операция без подкатегории в категории, где они есть, попадает в подкатегорию
 /// по умолчанию («Другое») — так же её предлагает выбор категории. Курсовая разница
-/// «в плюс» уменьшает ту подкатегорию, в которой у мерчанта больше всего покупок
-/// за период: своей подкатегории у неё обычно нет.
-///
-/// Возврат может прийти в другом периоде, чем покупка, — тогда за период сумма
-/// выходит нулевой или отрицательной. Такие категории и подкатегории не показываются.
+/// сюда отдельно не попадает: она уже входит в сумму своей покупки.
+/// Категории и подкатегории с нулевой суммой не показываются.
 struct CategoryTotalsAccumulator {
     static let uncategorized = "Без категории"
 
@@ -21,9 +18,6 @@ struct CategoryTotalsAccumulator {
     private var counts: [String: Int] = [:]
     private var subcategoryTotals: [String: [String: Double]] = [:]
     private var subcategoryCounts: [String: [String: Int]] = [:]
-    /// Категория → мерчант → подкатегория → число покупок.
-    private var merchantSubcategories: [String: [String: [String: Int]]] = [:]
-    private var pendingRefunds: [(category: String, merchant: String, rub: Double)] = []
 
     static func categoryName(of transaction: Transaction) -> String {
         transaction.categoryName ?? uncategorized
@@ -42,36 +36,10 @@ struct CategoryTotalsAccumulator {
         guard let subcategory = Self.subcategoryName(of: transaction) else { return }
         subcategoryTotals[category, default: [:]][subcategory, default: 0] += rub
         subcategoryCounts[category, default: [:]][subcategory, default: 0] += 1
-
-        let merchant = StatementDeduplicator.normalizedDetails(transaction.details)
-        merchantSubcategories[category, default: [:]][merchant, default: [:]][subcategory, default: 0] += 1
-    }
-
-    /// Возврат части покупки (курсовая разница «в плюс»): уменьшает расходы, в счётчик не идёт.
-    mutating func addRefund(_ transaction: Transaction, rub: Double) {
-        let category = Self.categoryName(of: transaction)
-        totals[category, default: 0] -= rub
-
-        if let subcategory = transaction.subcategoryName {
-            subcategoryTotals[category, default: [:]][subcategory, default: 0] -= rub
-        } else if Self.subcategoryName(of: transaction) != nil {
-            let merchant = StatementDeduplicator.normalizedDetails(transaction.details)
-            pendingRefunds.append((category, merchant, rub))
-        }
     }
 
     func result() -> [AnalyticsCategoryTotal] {
-        var subcategoryTotals = subcategoryTotals
-
-        for refund in pendingRefunds {
-            let subcategory = merchantSubcategories[refund.category]?[refund.merchant]?
-                .max { ($0.value, $1.key) < ($1.value, $0.key) }?.key
-                ?? DefaultSubcategoryDefinitions.defaultSubcategory(for: refund.category)
-                ?? DefaultSubcategoryDefinitions.defaultName
-            subcategoryTotals[refund.category, default: [:]][subcategory, default: 0] -= refund.rub
-        }
-
-        return totals
+        totals
             .filter { Self.isPositive($0.value) }
             .map { category, total in
                 AnalyticsCategoryTotal(

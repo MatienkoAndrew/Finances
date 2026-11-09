@@ -95,8 +95,10 @@ struct ExpenseTimelineData {
         scale: AnalyticsTimeScale,
         pageStart: Date,
         settings: AppSettings?,
-        trackedRates: [TrackedExchangeRate]
+        trackedRates: [TrackedExchangeRate],
+        folded: FoldedExchangeRateDifferences? = nil
     ) -> ExpenseTimelineData {
+        let folded = folded ?? ExchangeRateDifferenceMatcher.fold(transactions)
         let calendar = Calendar.current
         let unit = scale.barUnit
         let now = Date()
@@ -104,18 +106,10 @@ struct ExpenseTimelineData {
         var earliest = now
 
         for transaction in transactions {
-            let sign: Double
-            switch transaction.kind {
-            case .expense:
-                sign = 1
-            case .income where transaction.reducesExpensesInAnalytics:
-                // Курсовая разница «в плюс» уменьшает расходы, как и в снапшоте.
-                sign = -1
-            default:
-                continue
-            }
+            // Курсовая разница считается внутри своей покупки, как и в снапшоте.
+            guard transaction.kind == .expense, !transaction.isExchangeRateDifference else { continue }
 
-            guard let rub = TransactionRubConverter.displayRubAmount(
+            guard var rub = TransactionRubConverter.displayRubAmount(
                 for: transaction,
                 settings: settings,
                 trackedRates: trackedRates
@@ -123,7 +117,8 @@ struct ExpenseTimelineData {
                 continue
             }
 
-            totals[interval.start, default: 0] += sign * rub
+            rub += folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
+            totals[interval.start, default: 0] += rub
             earliest = min(earliest, transaction.date)
         }
 

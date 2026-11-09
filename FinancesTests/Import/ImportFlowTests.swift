@@ -195,7 +195,7 @@ struct ImportFlowTests {
     func exchangeRateDifferenceInAnalytics() throws {
         let env = try ImportTestEnvironment()
         var fixture = StatementFixture(from: "01.09.26", to: "29.09.26")
-        fixture.purchase("20.09.26", 1000, "GS25")
+        fixture.purchase("20.09.26", 1000, "GS25", fx: (2_900, "KRW"))
         fixture.exchangeRateDifference("22.09.26", 10, "GS25")
         fixture.row("25.09.26", 5000, .topUp, "С карты другого банка")
         try env.importStatement(fixture)

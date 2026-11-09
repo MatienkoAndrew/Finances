@@ -25,14 +25,18 @@ struct CategoryTotalsTests {
         _ subcategory: String? = nil,
         details: String = "SHOP",
         kind: TransactionKind = .expense,
-        note: String? = nil
+        note: String? = nil,
+        date: Date? = nil,
+        foreign: Double? = nil
     ) -> Transaction {
         let transaction = Transaction(
-            date: day,
+            date: date ?? day,
             kindRaw: kind.rawValue,
             amount: rub * 5,
             currencyCode: "KZT",
             details: details,
+            foreignAmount: foreign,
+            foreignCurrencyCode: foreign == nil ? nil : "KRW",
             rubAmount: rub,
             categoryName: category,
             subcategoryName: subcategory,
@@ -42,15 +46,23 @@ struct CategoryTotalsTests {
         return transaction
     }
 
-    private func categoryTotals() -> [AnalyticsCategoryTotal] {
+    private func snapshot(month: Date? = nil) -> AnalyticsSnapshot {
         let transactions = (try? context.fetch(FetchDescriptor<Transaction>())) ?? []
         return AnalyticsSnapshotBuilder.build(
             transactions: transactions,
             scale: .month,
-            anchorDate: day,
+            anchorDate: month ?? day,
             settings: nil,
             trackedRates: []
-        ).categoryTotals
+        )
+    }
+
+    private func categoryTotals(month: Date? = nil) -> [AnalyticsCategoryTotal] {
+        snapshot(month: month).categoryTotals
+    }
+
+    private func addDifference(_ rub: Double, _ category: String?, details: String, kind: TransactionKind = .income, date: Date) {
+        add(rub, category, details: details, kind: kind, note: Transaction.exchangeRateDifferenceNote, date: date)
     }
 
     @Test("Категория — сумма подкатегорий; без подкатегории — в «Другое»")
@@ -81,11 +93,11 @@ struct CategoryTotalsTests {
         #expect(totals.map(\.category) == ["Еда", "Развлечения", CategoryTotalsAccumulator.uncategorized])
     }
 
-    @Test("Курсовая разница «в плюс» уменьшает подкатегорию покупок того же мерчанта")
-    func refundGoesToMerchantSubcategory() throws {
-        add(100, "Еда", "Кафе и кофейни", details: "GS25")
+    @Test("Курсовая разница считается внутри своей покупки: её подкатегория, без отдельной операции")
+    func differenceGoesToItsPurchase() throws {
+        add(100, "Еда", "Кафе и кофейни", details: "GS25", foreign: 2_900)
         add(60, "Еда", "Продукты", details: "CU")
-        add(1, "Еда", details: "GS25", kind: .income, note: Transaction.exchangeRateDifferenceNote)
+        addDifference(1, "Еда", details: "GS25", date: kaspiDay("17.04.26"))
 
         let food = try #require(categoryTotals().first { $0.category == "Еда" })
         #expect(food.total == 159)
@@ -95,14 +107,42 @@ struct CategoryTotalsTests {
         #expect(!food.subcategories.contains { $0.name == "Другое" })
     }
 
+    @Test("Курсовая разница из следующего месяца уходит в месяц покупки — без минусов")
+    func differenceFromNextMonth() throws {
+        add(100, "Покупки", "Одежда и обувь", details: "UNIQLO", date: kaspiDay("29.03.26"), foreign: 2_900)
+        addDifference(2, "Покупки", details: "UNIQLO", date: kaspiDay("02.04.26"))
+
+        let april = snapshot(month: kaspiDay("15.04.26"))
+        #expect(april.categoryTotals.isEmpty)
+        #expect(april.merchantTotals.isEmpty)
+        #expect(april.totalExpensesRub == 0)
+        #expect(april.expenseCount == 0)
+
+        let march = snapshot(month: kaspiDay("15.03.26"))
+        let shopping = try #require(march.categoryTotals.first { $0.category == "Покупки" })
+        #expect(shopping.total == 98)
+        #expect(shopping.count == 1)
+        #expect(march.totalExpensesRub == 98)
+    }
+
+    @Test("Курсовая разница без своей покупки в аналитике не учитывается")
+    func unmatchedDifferenceIgnored() {
+        add(100, "Еда", details: "CU")
+        addDifference(3, "Здоровье и красота", details: "PHARMACY", date: day)
+
+        let totals = categoryTotals()
+        #expect(totals.map(\.category) == ["Еда"])
+        #expect(snapshot().totalExpensesRub == 100)
+    }
+
     @Test("Список операций подкатегории совпадает с плиткой")
     func drillDownMatchesTile() {
         let cafe = add(100, "Еда", "Кафе и кофейни")
         let other = add(20, "Еда")
-        let fun = add(40, "Развлечения")
+        let cash = add(40, "Снятие наличных")
 
         #expect(CategoryTotalsAccumulator.subcategoryName(of: cafe) == "Кафе и кофейни")
         #expect(CategoryTotalsAccumulator.subcategoryName(of: other) == "Другое")
-        #expect(CategoryTotalsAccumulator.subcategoryName(of: fun) == nil)
+        #expect(CategoryTotalsAccumulator.subcategoryName(of: cash) == nil)
     }
 }
