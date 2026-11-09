@@ -182,7 +182,7 @@ struct TagTransactionsView: View {
             }
 
             // В режиме выбора плашка категории не открывается — касание отмечает операцию.
-            TransactionRowView(transaction: transaction, showsDate: true)
+            TransactionRowView(transaction: transaction, showsDate: true, hiddenTagNames: [tag.name])
                 .allowsHitTesting(!isSelecting)
 
             if !isSelecting {

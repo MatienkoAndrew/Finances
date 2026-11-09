@@ -20,6 +20,9 @@ struct RootTabView: View {
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
 
+    @Query(sort: \TransactionTag.createdAt, order: .reverse)
+    private var tags: [TransactionTag]
+
     @State private var selectedTab: RootTab = .transactions
     /// PDF, отправленный в приложение через «Поделиться» (например, выписка из Kaspi).
     @State private var sharedStatementURL: URL?
@@ -60,7 +63,8 @@ struct RootTabView: View {
         .environment(\.transactionRowLookup, TransactionRowLookup(
             categories: categories,
             settings: settingsList.first,
-            trackedRates: trackedRates
+            trackedRates: trackedRates,
+            tags: tags
         ))
         .onOpenURL { url in
             // Импорт и его итог показывает экран транзакций.

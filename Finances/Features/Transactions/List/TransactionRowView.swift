@@ -11,6 +11,12 @@ struct TransactionRowLookup: Equatable {
     var categories: [ExpenseCategoryItem] = []
     var settings: AppSettings?
     var trackedRates: [TrackedExchangeRate] = []
+    /// Метки — для капсул в строках и заголовках дней.
+    var tags: [TransactionTag] = []
+
+    func tag(named name: String) -> TransactionTag? {
+        tags.first { $0.name == name }
+    }
 
     /// Сравнение по составу: правки самих категорий и курсов строки и так
     /// получают через наблюдение за моделями, а лишние перерисовки всех строк
@@ -19,6 +25,7 @@ struct TransactionRowLookup: Equatable {
         lhs.categories.map(\.persistentModelID) == rhs.categories.map(\.persistentModelID)
             && lhs.settings?.persistentModelID == rhs.settings?.persistentModelID
             && lhs.trackedRates.map(\.persistentModelID) == rhs.trackedRates.map(\.persistentModelID)
+            && lhs.tags.map(\.persistentModelID) == rhs.tags.map(\.persistentModelID)
     }
 }
 
@@ -33,6 +40,8 @@ struct TransactionRowView: View {
     let transaction: Transaction
     /// Дата в подписи — для списков без разбивки по дням.
     var showsDate = false
+    /// Метки, которые уже видны выше (в заголовке дня, на экране метки), — в строке не повторяются.
+    var hiddenTagNames: Set<String> = []
 
     @State private var isShowingCategoryPicker = false
     @State private var pickedCategory: CategoryMatch?
@@ -80,6 +89,19 @@ struct TransactionRowView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+
+                    if let tagName = visibleTagNames.first {
+                        HStack(spacing: 4) {
+                            TagChip(name: tagName, tag: lookup.tag(named: tagName), isCompact: true)
+
+                            if visibleTagNames.count > 1 {
+                                Text("+\(visibleTagNames.count - 1)")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .fixedSize()
+                    }
 
                     Spacer(minLength: 8)
 
@@ -180,6 +202,11 @@ struct TransactionRowView: View {
         updateCategory(picked.category, subcategory: picked.subcategory)
     }
 
+    /// Метки операции, кроме уже показанных выше.
+    private var visibleTagNames: [String] {
+        (transaction.tagNames ?? []).filter { !hiddenTagNames.contains($0) }
+    }
+
     /// Подкатегория точнее категории, а сама категория и так видна по иконке.
     private var categoryTitle: String {
         transaction.subcategoryName ?? transaction.categoryName ?? "Другое"
@@ -190,10 +217,10 @@ struct TransactionRowView: View {
         var parts: [String] = []
 
         if showsDate {
+            // Даты в приложении — по-русски, как бы ни был настроен телефон.
             let isThisYear = Calendar.current.isDate(transaction.date, equalTo: .now, toGranularity: .year)
-            parts.append(isThisYear
-                ? transaction.date.formatted(.dateTime.day().month(.abbreviated))
-                : transaction.date.formatted(.dateTime.day().month(.abbreviated).year()))
+            let style = Date.FormatStyle(locale: Locale(identifier: "ru_RU")).day().month(.abbreviated)
+            parts.append(transaction.date.formatted(isThisYear ? style : style.year()))
         }
 
         switch transaction.kind {
