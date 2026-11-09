@@ -27,6 +27,73 @@ struct DeduplicationTests {
 
     // MARK: - StatementDeduplicator
 
+    // MARK: - Оплаты из Apple Pay
+
+    /// Оплата из Wallet, ещё не сверенная с выпиской: время настоящее, название из Wallet.
+    private func walletPayment(_ day: String, _ amount: Double, fx: (Double, String)) -> TransactionSnapshot {
+        var payment = snapshot(
+            kaspiDay(day).addingTimeInterval(3 * 3600),
+            amount,
+            "FamilyMart",
+            fx: fx,
+            imported: false
+        )
+        payment.isFromWallet = true
+        return payment
+    }
+
+    @Test("Оплата Apple Pay, записанная в USD, совпадает со строкой выписки в TWD с той же суммой")
+    func walletDollarMatchesStatementTWD() {
+        var fixture = StatementFixture(from: "09.10.26", to: "09.11.26")
+        fixture.purchase("09.11.26", 1092.91, "TAIWAN FAMILYMART CO LTD", fx: (79, "TWD"))
+        let rows = fixture.statement.rows
+
+        let existing = [walletPayment("09.11.26", 35697.70, fx: (79, "USD"))]
+        let result = StatementDeduplicator.match(rows: rows, existing: existing)
+        #expect(result.matches.count == 1)
+        #expect(result.unmatchedRowIndices.isEmpty)
+    }
+
+    @Test("Иена из Wallet совпадает с юанем в выписке с той же суммой")
+    func walletYenMatchesStatementCNY() {
+        var fixture = StatementFixture(from: "09.10.26", to: "09.11.26")
+        fixture.purchase("08.11.26", 5505.37, "TRIP.COM", fx: (81, "CNY"))
+        let rows = fixture.statement.rows
+
+        let existing = [walletPayment("08.11.26", 260.0, fx: (81, "JPY"))]
+        let result = StatementDeduplicator.match(rows: rows, existing: existing)
+        #expect(result.matches.count == 1)
+    }
+
+    @Test("Валюта с другим значком или другая сумма — не та же оплата", arguments: [
+        (79.0, "EUR"),
+        (80.0, "USD")
+    ])
+    func walletDifferentCurrencyFamilyOrAmountDoesNotMatch(amount: Double, currency: String) {
+        var fixture = StatementFixture(from: "09.10.26", to: "09.11.26")
+        fixture.purchase("09.11.26", 1092.91, "TAIWAN FAMILYMART CO LTD", fx: (79, "TWD"))
+        let rows = fixture.statement.rows
+
+        let existing = [walletPayment("09.11.26", 40000, fx: (amount, currency))]
+        let result = StatementDeduplicator.match(rows: rows, existing: existing)
+        #expect(result.matches.isEmpty)
+        #expect(result.unmatchedRowIndices == [0])
+    }
+
+    @Test("Точное совпадение валюты важнее совпадения по значку")
+    func walletExactCurrencyWinsOverSameSymbol() {
+        var fixture = StatementFixture(from: "09.10.26", to: "09.11.26")
+        fixture.purchase("09.11.26", 1092.91, "TAIWAN FAMILYMART CO LTD", fx: (79, "TWD"))
+        let rows = fixture.statement.rows
+
+        let existing = [
+            walletPayment("09.11.26", 35697.70, fx: (79, "USD")),
+            walletPayment("09.11.26", 1092.91, fx: (79, "TWD"))
+        ]
+        let result = StatementDeduplicator.match(rows: rows, existing: existing)
+        #expect(result.matches.map(\.existingIndex) == [1])
+    }
+
     @Test("Повторный импорт той же выписки ничего не добавляет")
     func sameStatementTwice() {
         var fixture = StatementFixture(from: "01.03.26", to: "19.03.26")
