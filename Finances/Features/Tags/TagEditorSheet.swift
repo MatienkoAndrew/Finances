@@ -21,6 +21,9 @@ struct TagEditorSheet: View {
     @State private var hasPeriod = false
     @State private var startDate = Calendar.current.startOfDay(for: .now)
     @State private var endDate = Calendar.current.startOfDay(for: .now)
+    /// Валюты поездки; пусто — метка встаёт на все операции за даты.
+    @State private var currencyCodes: [String] = []
+    @State private var isPickingCurrency = false
     @State private var isPickingEmoji = false
     @State private var errorMessage: String?
     @State private var didLoad = false
@@ -32,9 +35,43 @@ struct TagEditorSheet: View {
     private var color: Color { Color(hex: colorHex) ?? .accentColor }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    private var periodTransactions: [Transaction] {
+        guard let days = TransactionTagSync.days(from: startDate, to: endDate) else { return [] }
+        return transactions.filter { days.contains($0.date) }
+    }
+
     private var periodTransactionCount: Int {
-        guard let days = TransactionTagSync.days(from: startDate, to: endDate) else { return 0 }
-        return transactions.filter { days.contains($0.date) }.count
+        periodTransactions.count
+    }
+
+    /// Валюты расходов за эти дни, чаще встречающиеся — первыми: подсказки для выбора.
+    private var suggestedCurrencies: [(code: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for transaction in periodTransactions where transaction.kind == .expense {
+            for code in TransactionTagSync.paymentCurrencies(of: transaction) {
+                counts[code, default: 0] += 1
+            }
+        }
+        return counts
+            .filter { !currencyCodes.contains($0.key) }
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .prefix(4)
+            .map { (code: $0.key, count: $0.value) }
+    }
+
+    /// Сколько операций за даты сразу получат метку и сколько встанут на рассмотрение.
+    private var currencySplit: (tagged: Int, review: Int) {
+        let currencies = Set(currencyCodes)
+        var tagged = 0
+        var review = 0
+        for transaction in periodTransactions {
+            switch TransactionTagSync.decision(for: transaction, currencies: currencies) {
+            case .tag: tagged += 1
+            case .review: review += 1
+            case .skip: break
+            }
+        }
+        return (tagged, review)
     }
 
     var body: some View {
@@ -160,6 +197,10 @@ struct TagEditorSheet: View {
                     }
 
                     DateRangeCalendar(start: $startDate, end: $endDate, tint: color)
+
+                    Divider()
+
+                    currencySection
                 }
 
                 Text(periodHint)
@@ -176,11 +217,108 @@ struct TagEditorSheet: View {
     }
 
     private var periodHint: String {
-        // Текст не меняется между касаниями: иначе карточка меняет высоту
-        // и календарь съезжает под пальцем.
-        hasPeriod
-            ? "Нажми на первый день, потом на последний. Метка встанет на все операции за эти дни — и на новые, добавленные потом."
-            : "Без дат метку ставишь на операции сам, а период в аналитике берётся по ним."
+        // Текст не меняется между касаниями по календарю: иначе карточка меняет
+        // высоту и календарь съезжает под пальцем.
+        if !hasPeriod {
+            return "Без дат метку ставишь на операции сам, а период в аналитике берётся по ним."
+        }
+        if currencyCodes.isEmpty {
+            return "Нажми на первый день, потом на последний. Метка встанет на все операции за эти дни — и на новые, добавленные потом."
+        }
+        return "Операции в выбранных валютах за эти дни получат метку сами. Остальные расходы — например, в долларах или тенге — попадут на рассмотрение: разберёшь их на экране метки. Доходы и переводы в других валютах метку не получат."
+    }
+
+    /// Валюты поездки: выбранные — цветом, частые за эти дни — подсказками.
+    private var currencySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Валюты поездки")
+                    .font(.subheadline.weight(.semibold))
+
+                Spacer(minLength: 8)
+
+                Button {
+                    isPickingCurrency = true
+                } label: {
+                    Label("Добавить", systemImage: "plus")
+                        .font(.subheadline.weight(.medium))
+                }
+                .tint(color)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(currencyCodes, id: \.self) { code in
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                currencyCodes.removeAll { $0 == code }
+                            }
+                        } label: {
+                            currencyChip(code, trailing: "xmark", isSelected: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Убрать \(code)")
+                    }
+
+                    ForEach(suggestedCurrencies, id: \.code) { item in
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                currencyCodes.append(item.code)
+                            }
+                        } label: {
+                            currencyChip(item.code, trailing: "plus", detail: "\(item.count)", isSelected: false)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Добавить \(item.code)")
+                    }
+                }
+            }
+
+            if currencyCodes.isEmpty {
+                Text("Не выбраны — метка встанет на все операции за даты.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                let split = currencySplit
+                Text("\(TagFormatting.operations(split.tagged)) в метку · на рассмотрение: \(split.review)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+        }
+        .sheet(isPresented: $isPickingCurrency) {
+            CurrencyPickerView(selectedCode: "") { code in
+                let normalized = CurrencyDisplay.normalizedCode(from: code)
+                guard !currencyCodes.contains(normalized) else { return }
+                currencyCodes.append(normalized)
+            }
+        }
+    }
+
+    private func currencyChip(_ code: String, trailing: String, detail: String? = nil, isSelected: Bool) -> some View {
+        HStack(spacing: 5) {
+            Text(CurrencyDisplay.flag(for: code))
+            Text(code)
+                .fontWeight(.semibold)
+            if let detail {
+                Text(detail)
+                    .foregroundStyle(.secondary)
+            }
+            Image(systemName: trailing)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(isSelected ? color : .secondary)
+        }
+        .font(.subheadline)
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background {
+            if isSelected {
+                Capsule().fill(color.opacity(0.15))
+            } else {
+                Capsule().strokeBorder(Color(.separator), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            }
+        }
     }
 
     private func card<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -214,6 +352,7 @@ struct TagEditorSheet: View {
             startDate = start
             endDate = end
         }
+        currencyCodes = (tag.currencyCodes ?? []).map { CurrencyDisplay.normalizedCode(from: $0) }
     }
 
     private func save() {
@@ -235,11 +374,8 @@ struct TagEditorSheet: View {
         let target: TransactionTag
         if let tag {
             if tag.name != newName {
-                for transaction in transactions where transaction.hasTag(tag.name) {
-                    transaction.tagNames = transaction.tagNames?.map { $0 == tag.name ? newName : $0 }
-                }
-                for transaction in transactions where transaction.isTagManuallyExcluded(tag.name) {
-                    transaction.manuallyExcludedTagNames = transaction.manuallyExcludedTagNames?.map { $0 == tag.name ? newName : $0 }
+                for transaction in transactions {
+                    transaction.renameTag(tag.name, to: newName)
                 }
             }
             target = tag
@@ -253,6 +389,7 @@ struct TagEditorSheet: View {
         target.colorHex = colorHex
         target.startDate = hasPeriod ? startDate : nil
         target.endDate = hasPeriod ? endDate : nil
+        target.currencyCodes = hasPeriod && !currencyCodes.isEmpty ? currencyCodes : nil
 
         TransactionTagSync.applyPeriod(
             of: target,

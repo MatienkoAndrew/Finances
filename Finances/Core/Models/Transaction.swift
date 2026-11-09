@@ -54,6 +54,14 @@ final class Transaction {
     /// Optional — чтобы старые транзакции в SwiftData не сломались при миграции.
     var manuallyExcludedTagNames: [String]?
 
+    /// Метки, на которые операция ждёт решения пользователя: день поездки,
+    /// но заплачено не в её валюте (доллары в Японии). Optional — для миграции.
+    var pendingTagNames: [String]?
+
+    /// Метки, которые пользователь подтвердил вручную: правило валюты их не снимает.
+    /// Optional — для миграции.
+    var manuallyIncludedTagNames: [String]?
+
     var fingerprint: String?
     var sourceFileName: String?
     var importedAt: Date?
@@ -89,6 +97,8 @@ final class Transaction {
         note: String? = nil,
         tagNames: [String]? = nil,
         manuallyExcludedTagNames: [String]? = nil,
+        pendingTagNames: [String]? = nil,
+        manuallyIncludedTagNames: [String]? = nil,
         fingerprint: String? = nil,
         sourceFileName: String? = nil,
         importedAt: Date? = nil,
@@ -114,6 +124,8 @@ final class Transaction {
         self.note = note
         self.tagNames = tagNames
         self.manuallyExcludedTagNames = manuallyExcludedTagNames
+        self.pendingTagNames = pendingTagNames
+        self.manuallyIncludedTagNames = manuallyIncludedTagNames
         self.fingerprint = fingerprint
         self.sourceFileName = sourceFileName
         self.importedAt = importedAt
@@ -188,19 +200,14 @@ extension Transaction {
     /// Добавить метку к транзакции.
     /// Если пользователь явно проставляет метку вручную (`manual: true`),
     /// мы дополнительно убираем её из «чёрного списка» авто-исключений,
-    /// так как явное добавление = повторное согласие с этой меткой.
+    /// так как явное добавление = повторное согласие с этой меткой,
+    /// и запоминаем выбор: правило валюты такую метку уже не снимет.
     func addTag(_ tagName: String, manual: Bool = false) {
-        if tagNames == nil {
-            tagNames = []
-        }
-        if !tagNames!.contains(tagName) {
-            tagNames!.append(tagName)
-        }
+        Self.insert(tagName, into: &tagNames)
         if manual {
-            manuallyExcludedTagNames?.removeAll { $0 == tagName }
-            if manuallyExcludedTagNames?.isEmpty == true {
-                manuallyExcludedTagNames = nil
-            }
+            Self.remove(tagName, from: &manuallyExcludedTagNames)
+            Self.remove(tagName, from: &pendingTagNames)
+            Self.insert(tagName, into: &manuallyIncludedTagNames)
         }
     }
 
@@ -209,17 +216,60 @@ extension Transaction {
     /// запоминаем имя метки в `manuallyExcludedTagNames`, чтобы авто-теггер
     /// больше не возвращал её на эту транзакцию.
     func removeTag(_ tagName: String, manual: Bool = false) {
-        tagNames?.removeAll { $0 == tagName }
-        if tagNames?.isEmpty == true {
-            tagNames = nil
-        }
+        Self.remove(tagName, from: &tagNames)
         if manual {
-            if manuallyExcludedTagNames == nil {
-                manuallyExcludedTagNames = []
-            }
-            if !manuallyExcludedTagNames!.contains(tagName) {
-                manuallyExcludedTagNames!.append(tagName)
-            }
+            Self.insert(tagName, into: &manuallyExcludedTagNames)
+            Self.remove(tagName, from: &pendingTagNames)
+            Self.remove(tagName, from: &manuallyIncludedTagNames)
+        }
+    }
+
+    /// Операция ждёт решения: относится ли она к этой метке.
+    func isTagPending(_ tagName: String) -> Bool {
+        pendingTagNames?.contains(tagName) == true
+    }
+
+    func setTagPending(_ tagName: String, _ isPending: Bool) {
+        if isPending {
+            Self.insert(tagName, into: &pendingTagNames)
+        } else {
+            Self.remove(tagName, from: &pendingTagNames)
+        }
+    }
+
+    /// Пользователь сам подтвердил эту метку.
+    func isTagManuallyIncluded(_ tagName: String) -> Bool {
+        manuallyIncludedTagNames?.contains(tagName) == true
+    }
+
+    /// Метку переименовали — меняем имя во всех списках операции.
+    func renameTag(_ oldName: String, to newName: String) {
+        for keyPath in Self.tagLists {
+            self[keyPath: keyPath] = self[keyPath: keyPath]?.map { $0 == oldName ? newName : $0 }
+        }
+    }
+
+    /// Метку удалили — убираем её отовсюду.
+    func forgetTag(_ tagName: String) {
+        for keyPath in Self.tagLists {
+            Self.remove(tagName, from: &self[keyPath: keyPath])
+        }
+    }
+
+    private static let tagLists: [ReferenceWritableKeyPath<Transaction, [String]?>] = [
+        \.tagNames, \.manuallyExcludedTagNames, \.pendingTagNames, \.manuallyIncludedTagNames
+    ]
+
+    private static func insert(_ name: String, into list: inout [String]?) {
+        if list?.contains(name) == true { return }
+        list = (list ?? []) + [name]
+    }
+
+    /// Пустой список хранится как nil — как у старых операций.
+    private static func remove(_ name: String, from list: inout [String]?) {
+        list?.removeAll { $0 == name }
+        if list?.isEmpty == true {
+            list = nil
         }
     }
 

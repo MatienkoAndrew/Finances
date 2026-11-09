@@ -272,7 +272,8 @@ final class DataExportImportManager {
                 icon: exported.icon,
                 colorHex: exported.colorHex,
                 createdAt: exported.createdAt,
-                autoCurrencyCode: exported.autoCurrencyCode
+                autoCurrencyCode: exported.autoCurrencyCode,
+                currencyCodes: exported.currencyCodes
             ))
         }
     }
@@ -295,6 +296,8 @@ final class DataExportImportManager {
             note: exported.note,
             tagNames: exported.tagNames,
             manuallyExcludedTagNames: exported.manuallyExcludedTagNames,
+            pendingTagNames: exported.pendingTagNames,
+            manuallyIncludedTagNames: exported.manuallyIncludedTagNames,
             fingerprint: exported.fingerprint,
             sourceFileName: exported.sourceFileName,
             importedAt: exported.importedAt,
@@ -453,6 +456,8 @@ struct ExportableTag: Codable {
     let colorHex: String?
     let createdAt: Date
     let autoCurrencyCode: String?
+    /// Валюты поездки. Optional — старые копии декодируются.
+    let currencyCodes: [String]?
 
     init(from tag: TransactionTag) {
         self.name = tag.name
@@ -462,6 +467,7 @@ struct ExportableTag: Codable {
         self.colorHex = tag.colorHex
         self.createdAt = tag.createdAt
         self.autoCurrencyCode = tag.autoCurrencyCode
+        self.currencyCodes = tag.currencyCodes
     }
 }
 
@@ -538,6 +544,9 @@ struct ExportableTransaction: Codable {
     let tagNames: [String]?
     /// С версии 3: снятые вручную метки, чтобы авто-метки не вернули их после импорта.
     let manuallyExcludedTagNames: [String]?
+    /// Метки, ждущие решения, и подтверждённые вручную. Optional — старые копии декодируются.
+    let pendingTagNames: [String]?
+    let manuallyIncludedTagNames: [String]?
     /// С версии 3: счета списания и зачисления (id из `ExportData.accounts`).
     let fromAccountID: String?
     let toAccountID: String?
@@ -568,6 +577,8 @@ struct ExportableTransaction: Codable {
         self.note = transaction.note
         self.tagNames = transaction.tagNames
         self.manuallyExcludedTagNames = transaction.manuallyExcludedTagNames
+        self.pendingTagNames = transaction.pendingTagNames
+        self.manuallyIncludedTagNames = transaction.manuallyIncludedTagNames
         self.fromAccountID = transaction.fromAccount.flatMap { accountIDs[$0.persistentModelID] }
         self.toAccountID = transaction.toAccount.flatMap { accountIDs[$0.persistentModelID] }
         self.fingerprint = transaction.fingerprint
