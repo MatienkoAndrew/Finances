@@ -47,6 +47,66 @@ struct ExchangeRateDifferenceMatcherTests {
         #expect(ExchangeRateDifferenceMatcher.pair(items).isEmpty)
     }
 
+    @Test("Название мерчанта: обрезка, японская латиница, «Банкомат» — из реальной выписки")
+    func merchantKeyVariants() {
+        let key = ExchangeRateDifferenceMatcher.merchantKey
+        #expect(key("ROTSUKOUOMIYAGEKAN/NFC") == key("ROTSUKOOMIYAGEKAN/NFC"))
+        #expect(key("TABIBENTOKYOTOICHIGO/NF").hasPrefix(key("TABIBENTOUKIYOUTOICHIGOU/")))
+        #expect(key("MANEKENJIEIARUKYOTOEKITEN").hasPrefix(key("MANEKENJIEIA-RUKIYOUTOEKI")))
+        #expect(key("Банкомат CHINA TRUST BANK/04957696") == key("CHINA TRUST BANK/04957696"))
+        #expect(key("MCDONALD'S") == key("MCDONALD S"))
+    }
+
+    @Test("Название обрезано по-разному: пара находится в обе стороны")
+    func truncatedMerchant() {
+        let key = ExchangeRateDifferenceMatcher.merchantKey
+        let items = [
+            purchase(6, 3716.56, key("WEI TAI LANG YU HSIEN")),
+            purchase(6, 2280.10, key("WEI TING CHIEN PU YU")),
+            purchase(5, 9000, key("AGODA.COM FUN INN TA")),
+            difference(9, 20.62, key("WEI TAI LANG YU HSIEN T")),
+            difference(9, 12.65, key("WEI TING CHIEN PU YU T")),
+            difference(7, 40, key("AGODA.COM"))
+        ]
+        #expect(ExchangeRateDifferenceMatcher.pair(items) == [3: 0, 4: 1, 5: 2])
+    }
+
+    @Test("Точное название важнее совпадения по началу, даже при худшем сроке")
+    func exactMerchantWins() {
+        let items = [
+            purchase(7, 1000, "JREASTSHOPPINGCENTER"),  // 0: начало совпадает, за 3 дня
+            purchase(2, 1000, "JREAST"),                // 1: точное название, за 8 дней
+            difference(10, 5, "JREAST")
+        ]
+        #expect(ExchangeRateDifferenceMatcher.pair(items) == [2: 1])
+    }
+
+    @Test("Короткое начало названия не считается совпадением")
+    func shortPrefixRejected() {
+        let items = [purchase(7, 1000, "CUSHOP"), difference(10, 5, "CU")]
+        #expect(ExchangeRateDifferenceMatcher.pair(items).isEmpty)
+    }
+
+    @Test("Импорт: разница по снятию в банкомате и по обрезанному названию прячется под своей операцией")
+    func foldWithdrawalAndTruncatedAfterImport() throws {
+        let env = try ImportTestEnvironment()
+        var fixture = StatementFixture(from: "01.11.26", to: "09.11.26")
+        fixture.purchase("06.11.26", 3716.56, "WEI TAI LANG YU HSIEN", fx: (269, "TWD"))
+        fixture.row("06.11.26", -42824.84, .withdrawal, "Банкомат CHINA TRUST BANK/04957696", fx: (-3100, "TWD"))
+        fixture.exchangeRateDifference("07.11.26", 237.59, "CHINA TRUST BANK/04957696")
+        fixture.exchangeRateDifference("09.11.26", 20.62, "WEI TAI LANG YU HSIEN T")
+        try env.importStatement(fixture)
+
+        let folded = ExchangeRateDifferenceMatcher.fold(env.transactions)
+        #expect(folded.foldedIDs.count == 2)
+
+        let cafe = try #require(env.transactions.first { $0.details == "WEI TAI LANG YU HSIEN" })
+        #expect(abs(folded.finalAmount(for: cafe) - 3695.94) < 0.001)
+
+        let atm = try #require(env.transactions.first { $0.kind == .transfer })
+        #expect(folded.differences(for: atm).count == 1)
+    }
+
     @Test("Импорт выписки: курсовые разницы прячутся под покупками, итог учитывает доплату и возврат")
     func foldAfterImport() throws {
         let env = try ImportTestEnvironment()
