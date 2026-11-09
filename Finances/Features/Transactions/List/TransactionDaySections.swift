@@ -108,7 +108,7 @@ struct TransactionDaySections: View {
 
     @ViewBuilder
     private func link(for transaction: Transaction, hiddenTagNames: Set<String>) -> some View {
-        let row = TransactionListRow(transaction: transaction, folded: folded, hiddenTagNames: hiddenTagNames)
+        let row = TransactionRowView(transaction: transaction, hiddenTagNames: hiddenTagNames)
 
         switch linkStyle {
         case .destination:
@@ -122,22 +122,6 @@ struct TransactionDaySections: View {
             NavigationLink(value: transaction.persistentModelID) {
                 row
             }
-        }
-    }
-}
-
-/// Строка списка: операция и, если есть, её курсовая разница под ней.
-struct TransactionListRow: View {
-    let transaction: Transaction
-    let folded: FoldedExchangeRateDifferences
-    var hiddenTagNames: Set<String> = []
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            TransactionRowView(transaction: transaction, hiddenTagNames: hiddenTagNames)
-            ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
-                // Вровень с текстом строки, а не с иконкой.
-                .padding(.leading, 50)
         }
     }
 }
@@ -231,7 +215,7 @@ struct TransactionDayTotal {
         folded: FoldedExchangeRateDifferences,
         filter: TransactionKindFilter
     ) -> TransactionDayTotal? {
-        // Курсовые разницы спрятаны под своими покупками — их сумма идёт в день покупки.
+        // Курсовые разницы спрятаны — их сумма идёт в день своей покупки.
         let expenses = transactions
             .filter { $0.kind == .expense }
             .reduce(0.0) { $0 + (folded.finalRubAmount(for: $1) ?? $1.rubAmount ?? 0) }
