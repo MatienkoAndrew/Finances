@@ -18,7 +18,7 @@ struct TransactionListByCategoryView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
-    /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.
+    /// Курсовые разницы, привязанные к своим покупкам, отдельной строкой не показываются.
     private var foldedDifferences: FoldedExchangeRateDifferences {
         ExchangeRateDifferenceMatcher.fold(transactions)
     }
