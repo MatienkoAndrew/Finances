@@ -53,7 +53,7 @@ struct AccountDetailView: View {
                         NavigationLink {
                             TransactionDetailView(transaction: transaction)
                         } label: {
-                            TransactionRowView(transaction: transaction)
+                            TransactionRowView(transaction: transaction, showsDate: true)
                         }
                     }
                 }

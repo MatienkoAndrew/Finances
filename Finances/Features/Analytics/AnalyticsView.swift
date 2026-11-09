@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftUI
 import SwiftData
 import Charts
 
@@ -41,11 +40,24 @@ struct AnalyticsView: View {
     /// Аналитика одной метки — открыта из её экрана: без ленты меток и
     /// переключателя режимов, внутри уже существующей навигации.
     private let focusedTag: TransactionTag?
+    /// Открыт внутри чужой навигации (из метки или из сводки на экране
+    /// транзакций): без своего NavigationStack и без переключателя меток.
+    private let isEmbedded: Bool
 
     init(focusedTag: TransactionTag? = nil) {
         self.focusedTag = focusedTag
+        isEmbedded = focusedTag != nil
         _selectedMode = State(initialValue: focusedTag == nil ? .time : .tags)
         _selectedTag = State(initialValue: focusedTag)
+    }
+
+    /// Аналитика месяца — открыта из сводки на экране транзакций.
+    init(month: Date) {
+        focusedTag = nil
+        isEmbedded = true
+        _selectedScale = State(initialValue: .month)
+        _pageAnchorDate = State(initialValue: AnalyticsSnapshotBuilder.makePage(for: .month, anchorDate: month).startDate)
+        _didInitializeAnchor = State(initialValue: true)
     }
 
     private var settings: AppSettings? {
@@ -209,7 +221,7 @@ struct AnalyticsView: View {
     var body: some View {
         let report = makeReport()
 
-        if focusedTag != nil {
+        if isEmbedded {
             content(report)
                 .navigationTitle("Аналитика")
         } else {
@@ -250,7 +262,7 @@ struct AnalyticsView: View {
                     AnalyticsScaleTabs(selection: $selectedScale)
                 }
             }
-            if focusedTag == nil {
+            if !isEmbedded {
                 ToolbarItem(placement: .topBarTrailing) {
                     tagToggleButton
                 }
@@ -658,19 +670,8 @@ struct AnalyticsView: View {
         .contentShape(Rectangle())
     }
 
-    /// Подложка шапки: карточка с мягким цветным отсветом в углу.
     private func heroBackground(_ color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(Color(.secondarySystemGroupedBackground))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(RadialGradient(
-                        colors: [color.opacity(0.20), color.opacity(0)],
-                        center: .topLeading,
-                        startRadius: 0,
-                        endRadius: 320
-                    ))
-            }
+        AnalyticsHeroBackground(color: color)
     }
 
     private var trendCaption: String {

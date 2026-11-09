@@ -37,20 +37,13 @@ struct TransactionListByCategoryView: View {
         let folded = foldedDifferences
 
         List {
-            ForEach(filteredTransactions(hiding: folded.foldedIDs)) { transaction in
-                NavigationLink {
-                    TransactionDetailView(transaction: transaction)
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        TransactionRowView(transaction: transaction)
-                        ExchangeRateDifferenceCaption(purchase: transaction, folded: folded)
-                    }
-                }
-                .buttonStyle(.plain)
-                .listRowSeparator(.hidden)
-            }
+            TransactionDaySections(
+                transactions: filteredTransactions(hiding: folded.foldedIDs),
+                folded: folded
+            )
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
         .navigationTitle(subcategoryTitle.map { "\(categoryTitle) · \($0)" } ?? categoryTitle)
         .navigationBarTitleDisplayMode(.inline)
     }
