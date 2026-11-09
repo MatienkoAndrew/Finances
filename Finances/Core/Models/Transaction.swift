@@ -63,6 +63,10 @@ final class Transaction {
     /// Optional — чтобы старые транзакции в SwiftData не сломались при миграции.
     var walletMerchant: String?
 
+    /// Сумма оплаты текстом, как её передал Wallet («NT$79,00»). Нужна, чтобы было
+    /// видно, по чему определилась валюта. Optional — старые транзакции не ломаются.
+    var walletAmountText: String?
+
     var createdAt: Date
 
     var fromAccount: Account?
@@ -89,6 +93,7 @@ final class Transaction {
         sourceFileName: String? = nil,
         importedAt: Date? = nil,
         walletMerchant: String? = nil,
+        walletAmountText: String? = nil,
         createdAt: Date = Date(),
         fromAccount: Account? = nil,
         toAccount: Account? = nil
@@ -113,6 +118,7 @@ final class Transaction {
         self.sourceFileName = sourceFileName
         self.importedAt = importedAt
         self.walletMerchant = walletMerchant
+        self.walletAmountText = walletAmountText
         self.createdAt = createdAt
         self.fromAccount = fromAccount
         self.toAccount = toAccount

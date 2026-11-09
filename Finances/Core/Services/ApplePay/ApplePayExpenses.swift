@@ -104,6 +104,7 @@ enum ApplePayExpenses {
             categoryName: category?.category,
             subcategoryName: category?.subcategory,
             walletMerchant: merchantName,
+            walletAmountText: amountText.trimmingCharacters(in: .whitespacesAndNewlines),
             fromAccount: fromAccount
         )
 
