@@ -13,7 +13,7 @@ struct TransactionListByMerchantView: View {
     let merchantTitle: String
     let scope: AnalyticsScope
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.

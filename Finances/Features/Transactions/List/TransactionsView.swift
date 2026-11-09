@@ -8,7 +8,7 @@ struct TransactionsView: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     @Query(sort: \Account.createdAt, order: .forward)

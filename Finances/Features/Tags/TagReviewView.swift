@@ -15,7 +15,7 @@ struct TagReviewView: View {
 
     let tag: TransactionTag
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     /// Решения, ещё не записанные в базу: true — «к метке», false — «не к метке».

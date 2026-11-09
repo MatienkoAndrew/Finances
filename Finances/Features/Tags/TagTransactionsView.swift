@@ -15,7 +15,7 @@ struct TagTransactionsView: View {
 
     let tag: TransactionTag
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     @State private var isSelecting = false

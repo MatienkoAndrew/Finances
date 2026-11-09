@@ -12,7 +12,7 @@ import SwiftData
 struct TransactionListByDateView: View {
     let date: Date
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.

@@ -14,7 +14,7 @@ struct AccountDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var allTransactions: [Transaction]
 
     private var relatedTransactions: [Transaction] {
