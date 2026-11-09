@@ -11,14 +11,23 @@ import SwiftData
 
 struct TagReviewView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
 
     let tag: TransactionTag
 
     @Query(sort: \Transaction.date, order: .reverse)
     private var transactions: [Transaction]
 
+    /// Решения, ещё не записанные в базу: true — «к метке», false — «не к метке».
+    ///
+    /// Каждая запись в базу перерисовывает все вкладки приложения (список операций,
+    /// аналитику, экран метки) — на телефоне до ~2 с на одно касание. Поэтому
+    /// касание только убирает строку, а в базу решения уходят разом: при уходе
+    /// с экрана, при сворачивании приложения и по кнопке «Все».
+    @State private var decisions: [PersistentIdentifier: Bool] = [:]
+
     private var pending: [Transaction] {
-        transactions.filter { $0.isTagPending(tag.name) }
+        transactions.filter { $0.isTagPending(tag.name) && decisions[$0.persistentModelID] == nil }
     }
 
     private var currenciesText: String {
@@ -69,6 +78,10 @@ struct TagReviewView: View {
             }
         }
         .sensoryFeedback(.success, trigger: pending.count)
+        .onDisappear(perform: saveDecisions)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { saveDecisions() }
+        }
     }
 
     private func row(for transaction: Transaction) -> some View {
@@ -123,28 +136,35 @@ struct TagReviewView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Решение пользователя — ручное: правило валюты его уже не перетрёт.
+    /// Касание: строка сразу уходит, в базу решение запишется позже — вместе с остальными.
     private func decide(_ transaction: Transaction, include: Bool) {
         withAnimation(.snappy(duration: 0.25)) {
-            apply(include, to: transaction)
+            decisions[transaction.persistentModelID] = include
         }
-        try? modelContext.save()
     }
 
+    /// «Все» — решение для всех оставшихся сразу, и одна запись в базу.
     private func decideAll(_ transactions: [Transaction], include: Bool) {
-        withAnimation(.snappy(duration: 0.25)) {
-            for transaction in transactions {
-                apply(include, to: transaction)
+        for transaction in transactions {
+            decisions[transaction.persistentModelID] = include
+        }
+        saveDecisions()
+    }
+
+    /// Решения пользователя — ручные: правило валюты их уже не перетрёт.
+    /// Без анимации: иначе каждый список в приложении анимирует свою перестройку.
+    private func saveDecisions() {
+        guard !decisions.isEmpty else { return }
+        let byID = Dictionary(uniqueKeysWithValues: transactions.map { ($0.persistentModelID, $0) })
+        for (id, include) in decisions {
+            guard let transaction = byID[id] else { continue }
+            if include {
+                transaction.addTag(tag.name, manual: true)
+            } else {
+                transaction.removeTag(tag.name, manual: true)
             }
         }
+        decisions = [:]
         try? modelContext.save()
-    }
-
-    private func apply(_ include: Bool, to transaction: Transaction) {
-        if include {
-            transaction.addTag(tag.name, manual: true)
-        } else {
-            transaction.removeTag(tag.name, manual: true)
-        }
     }
 }
