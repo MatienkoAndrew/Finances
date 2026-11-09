@@ -15,7 +15,7 @@ struct TransactionListByCategoryView: View {
     var subcategoryTitle: String? = nil
     let scope: AnalyticsScope
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     /// Курсовые разницы показываются под своими покупками, а не отдельной строкой.

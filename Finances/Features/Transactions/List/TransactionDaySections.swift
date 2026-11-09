@@ -19,16 +19,44 @@ struct TransactionDaySections: View {
         case value
     }
 
-    let transactions: [Transaction]
+    /// Операции без `Equatable`: SwiftUI сравнивает обёртку по ссылке на массив,
+    /// а не перебирает тысячу операций при каждой перерисовке родителя.
+    private struct Items {
+        let all: [Transaction]
+    }
+
+    private let items: Items
     let folded: FoldedExchangeRateDifferences
     /// Что считать в итоге дня: у «Расходов» — только расходы и т. д.
-    var filter: TransactionKindFilter = .all
-    var linkStyle: LinkStyle = .destination
+    var filter: TransactionKindFilter
+    var linkStyle: LinkStyle
     /// Удаление свайпом; nil — без удаления.
     var onDelete: ((Transaction) -> Void)?
 
+    /// Сколько дней показано. Строим не всю историю, а последние дни —
+    /// остальные подгружаются, когда список долистали до конца.
+    @State private var dayLimit = Self.pageSize
+    private static let pageSize = 40
+
+    /// `transactions` — новые сверху, как их отдаёт общий запрос.
+    init(
+        transactions: [Transaction],
+        folded: FoldedExchangeRateDifferences,
+        filter: TransactionKindFilter = .all,
+        linkStyle: LinkStyle = .destination,
+        onDelete: ((Transaction) -> Void)? = nil
+    ) {
+        items = Items(all: transactions)
+        self.folded = folded
+        self.filter = filter
+        self.linkStyle = linkStyle
+        self.onDelete = onDelete
+    }
+
     var body: some View {
-        ForEach(TransactionSectionGrouper.groupedByDay(transactions), id: \.date) { section in
+        let page = TransactionSectionGrouper.groupedByDay(items.all, limit: dayLimit)
+
+        ForEach(page.sections, id: \.date) { section in
             let dayTags = Self.commonTagNames(of: section.items)
 
             Section {
@@ -50,6 +78,17 @@ struct TransactionDaySections: View {
                     total: TransactionDayTotal.make(for: section.items, folded: folded, filter: filter),
                     tagNames: dayTags
                 )
+            }
+        }
+
+        if page.hasMore {
+            Section {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                    .onAppear {
+                        dayLimit += Self.pageSize
+                    }
             }
         }
     }

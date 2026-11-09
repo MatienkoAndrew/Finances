@@ -18,7 +18,7 @@ struct AccountsView: View {
     @Query(sort: \Account.createdAt, order: .forward)
     private var accounts: [Account]
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     @State private var isShowingAddAccount = false

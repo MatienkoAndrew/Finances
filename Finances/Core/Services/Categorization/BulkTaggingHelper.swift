@@ -62,7 +62,7 @@ struct QuickTagView: View {
     @Query(sort: \TransactionTag.createdAt, order: .reverse)
     private var allTags: [TransactionTag]
     
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
     
     @State private var selectedTag: TransactionTag?

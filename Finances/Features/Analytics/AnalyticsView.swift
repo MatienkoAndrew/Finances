@@ -3,7 +3,7 @@ import SwiftData
 import Charts
 
 struct AnalyticsView: View {
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
@@ -175,6 +175,26 @@ struct AnalyticsView: View {
         }
     }
 
+    /// Последний посчитанный отчёт — для скрытой вкладки.
+    private final class ReportCache {
+        var report: Report?
+    }
+
+    @State private var reportCache = ReportCache()
+    @Environment(\.isTabVisible) private var isTabVisible
+
+    /// Пока вкладка скрыта, после сохранений в базу отчёт не пересчитывается:
+    /// это несколько проходов по всем операциям, а экрана всё равно не видно.
+    /// Открыли вкладку — отчёт строится заново по свежим данным.
+    private func currentReport() -> Report {
+        if !isTabVisible, let cached = reportCache.report {
+            return cached
+        }
+        let report = makeReport()
+        reportCache.report = report
+        return report
+    }
+
     /// Начало периода того же масштаба, но раньше — для сравнения в шапке.
     private var previousAnchorDate: Date {
         let calendar = Calendar.current
@@ -219,7 +239,7 @@ struct AnalyticsView: View {
     }
 
     var body: some View {
-        let report = makeReport()
+        let report = currentReport()
 
         if isEmbedded {
             content(report)

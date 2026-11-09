@@ -23,6 +23,9 @@ struct RootTabView: View {
     @Query(sort: \TransactionTag.createdAt, order: .reverse)
     private var tags: [TransactionTag]
 
+    /// Все операции — один список на приложение, экраны берут его из окружения.
+    @State private var transactionsStore = TransactionsStore(context: AppModelContainer.shared.mainContext)
+
     @State private var selectedTab: RootTab = .transactions
     /// PDF, отправленный в приложение через «Поделиться» (например, выписка из Kaspi).
     @State private var sharedStatementURL: URL?
@@ -48,6 +51,7 @@ struct RootTabView: View {
 //                }
 
             AnalyticsView()
+                .environment(\.isTabVisible, selectedTab == .analytics)
                 .tabItem {
                     Label("Аналитика", systemImage: "chart.bar")
                 }
@@ -66,6 +70,7 @@ struct RootTabView: View {
             trackedRates: trackedRates,
             tags: tags
         ))
+        .environment(\.allTransactionsSnapshot, AllTransactionsSnapshot(items: transactionsStore.items))
         .onOpenURL { url in
             // Импорт и его итог показывает экран транзакций.
             guard url.isFileURL else { return }

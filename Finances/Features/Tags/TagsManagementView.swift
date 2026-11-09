@@ -8,7 +8,7 @@ struct TagsManagementView: View {
     @Query(sort: \TransactionTag.createdAt, order: .reverse)
     private var tags: [TransactionTag]
 
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     @Query private var settings: [AppSettings]

@@ -8,7 +8,7 @@ struct TagEditorSheet: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query private var allTags: [TransactionTag]
-    @Query(sort: \Transaction.date, order: .reverse)
+    @AllTransactions
     private var transactions: [Transaction]
 
     /// nil — новая метка.
