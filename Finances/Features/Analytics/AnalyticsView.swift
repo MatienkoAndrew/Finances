@@ -19,7 +19,7 @@ struct AnalyticsView: View {
     private var settingsList: [AppSettings]
 
     @State private var selectedMode: AnalyticsViewMode = .time
-    @State private var selectedScale: AnalyticsTimeScale = .week
+    @State private var selectedScale: AnalyticsTimeScale = .month
     @State private var pageAnchorDate: Date = .now
     
     // Для режима Tags
