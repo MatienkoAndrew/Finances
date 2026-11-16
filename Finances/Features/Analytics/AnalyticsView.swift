@@ -177,7 +177,7 @@ struct AnalyticsView: View {
                 timeline: nil,
                 tagGranularity: granularity,
                 availableTagGranularities: available,
-                scope: tagScope(for: tag)
+                scope: tagScope(for: tag, taggedTransactions: tagged)
             )
         }
     }
@@ -219,23 +219,29 @@ struct AnalyticsView: View {
     /// В режиме меток drill-down должен показывать ТОЛЬКО транзакции
     /// с этим тегом — иначе после ручного снятия метки транзакция
     /// продолжала бы всплывать в детализации по диапазону дат.
-    private func tagScope(for tag: TransactionTag) -> AnalyticsScope {
+    private func tagScope(for tag: TransactionTag, taggedTransactions: [Transaction]) -> AnalyticsScope {
         let tagName = tag.name
-        if let start = tag.startDate, let end = tag.endDate {
-            return AnalyticsScope(
-                title: tag.name,
-                matches: { tx in
-                    tx.hasTag(tagName) && tx.date >= start && tx.date <= end
-                },
-                containsDate: { date in date >= start && date <= end }
-            )
-        } else {
+        // Тот же период, что и у снапшота: даты метки, расширенные до дат
+        // помеченных транзакций (билет, купленный до поездки, тоже виден).
+        guard let period = TagAnalyticsBuilder.effectivePeriod(
+            for: tag,
+            taggedTransactions: taggedTransactions
+        ) else {
             return AnalyticsScope(
                 title: tag.name,
                 matches: { tx in tx.hasTag(tagName) },
                 containsDate: { _ in true }
             )
         }
+        let start = period.start
+        let endExclusive = period.endExclusive
+        return AnalyticsScope(
+            title: tag.name,
+            matches: { tx in
+                tx.hasTag(tagName) && tx.date >= start && tx.date < endExclusive
+            },
+            containsDate: { date in date >= start && date < endExclusive }
+        )
     }
 
     /// Смена метки или интервала пересоздаёт график (сбрасывает выбор столбика).
