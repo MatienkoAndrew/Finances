@@ -11,6 +11,8 @@ import SwiftUI
 struct AccountRowView: View {
     let account: Account
     let balance: Double
+    /// Баланс в рублях по последнему курсу; nil — счёт в рублях или курса нет.
+    var rubEquivalent: Double? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -43,9 +45,15 @@ struct AccountRowView: View {
                     .font(.headline)
                     .foregroundStyle(balanceColor(balance))
 
-                Text(account.currencyCode)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let rubEquivalent {
+                    Text("≈ \(formattedAmount(rubEquivalent, currency: "₽"))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(account.currencyCode)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding()

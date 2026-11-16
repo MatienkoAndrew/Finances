@@ -21,6 +21,10 @@ struct AccountsView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    // Курсы обновляются в фоне — подписка, чтобы рублёвый эквивалент пересчитался.
+    @Query private var trackedRates: [TrackedExchangeRate]
+    @Query private var dailyRates: [DailyExchangeRate]
+
     @State private var isShowingAddAccount = false
 
     private var activeAccounts: [Account] {
@@ -33,6 +37,7 @@ struct AccountsView: View {
 
     var body: some View {
         let balances = AccountBalanceCalculator.balances(transactions: transactions)
+        let rubRates = RubRateTable.load(context: modelContext)
 
         NavigationStack {
             ScrollView {
@@ -40,10 +45,10 @@ struct AccountsView: View {
                     if activeAccounts.isEmpty {
                         emptyState
                     } else {
-                        activeSection(balances)
+                        activeSection(balances, rubRates: rubRates)
 
                         if !archivedAccounts.isEmpty {
-                            archivedSection(balances)
+                            archivedSection(balances, rubRates: rubRates)
                         }
                     }
                 }
@@ -78,7 +83,7 @@ struct AccountsView: View {
         }
     }
 
-    private func activeSection(_ balances: [PersistentIdentifier: Double]) -> some View {
+    private func activeSection(_ balances: [PersistentIdentifier: Double], rubRates: RubRateTable) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Активные")
                 .font(.title3.bold())
@@ -89,7 +94,12 @@ struct AccountsView: View {
                 } label: {
                     AccountRowView(
                         account: account,
-                        balance: balances[account.persistentModelID] ?? 0
+                        balance: balances[account.persistentModelID] ?? 0,
+                        rubEquivalent: rubEquivalent(
+                            of: balances[account.persistentModelID] ?? 0,
+                            account: account,
+                            rubRates: rubRates
+                        )
                     )
                 }
                 .buttonStyle(.plain)
@@ -97,7 +107,7 @@ struct AccountsView: View {
         }
     }
 
-    private func archivedSection(_ balances: [PersistentIdentifier: Double]) -> some View {
+    private func archivedSection(_ balances: [PersistentIdentifier: Double], rubRates: RubRateTable) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Архив")
                 .font(.title3.bold())
@@ -108,13 +118,27 @@ struct AccountsView: View {
                 } label: {
                     AccountRowView(
                         account: account,
-                        balance: balances[account.persistentModelID] ?? 0
+                        balance: balances[account.persistentModelID] ?? 0,
+                        rubEquivalent: rubEquivalent(
+                            of: balances[account.persistentModelID] ?? 0,
+                            account: account,
+                            rubRates: rubRates
+                        )
                     )
                     .opacity(0.7)
                 }
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// Баланс в рублях по последнему известному курсу (знак сохраняется).
+    private func rubEquivalent(of balance: Double, account: Account, rubRates: RubRateTable) -> Double? {
+        let code = CurrencyDisplay.normalizedCode(from: account.currencyCode)
+        guard code != "RUB", let rate = rubRates.latest(code)?.rubPerUnit, rate > 0 else {
+            return nil
+        }
+        return balance * rate
     }
 
     private var emptyState: some View {
