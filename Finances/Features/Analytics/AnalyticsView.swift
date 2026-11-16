@@ -838,8 +838,14 @@ struct AnalyticsView: View {
                         // Неделя — одна строка той же сетки, что и у месяца.
                         dailyCalendar(snapshot)
                             .analyticsCard(padding: 12)
+                    } else if selectedMode == .tags,
+                              report.tagGranularity == .daily,
+                              let tag = selectedTag {
+                        // Метка по дням — тот же календарь, но только траты с меткой.
+                        dailyCalendar(snapshot, tag: tag)
+                            .analyticsCard(padding: 12)
                     } else {
-                        // Год и режим меток — список строк.
+                        // Год, недели и месяцы метки — список строк.
                         timeTotalsList(report)
                     }
                 }
@@ -849,7 +855,9 @@ struct AnalyticsView: View {
     }
 
     // Неделя и месяц: сетка-календарь с суммой по дням и подсветкой по интенсивности трат.
-    private func dailyCalendar(_ snapshot: AnalyticsSnapshot) -> some View {
+    /// `tag` задан в режиме меток: клетка открывает только траты с меткой,
+    /// а если период захватывает несколько месяцев, первое число подписано месяцем.
+    private func dailyCalendar(_ snapshot: AnalyticsSnapshot, tag: TransactionTag? = nil) -> some View {
         var calendar = Calendar.current
         calendar.locale = Locale(identifier: "ru_RU")
 
@@ -859,6 +867,10 @@ struct AnalyticsView: View {
             (calendar.component(.weekday, from: first.date) - calendar.firstWeekday + 7) % 7
         } ?? 0
         let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
+        let spansMonths: Bool = {
+            guard tag != nil, let first = points.first, let last = points.last else { return false }
+            return !calendar.isDate(first.date, equalTo: last.date, toGranularity: .month)
+        }()
 
         return VStack(spacing: 8) {
             HStack(spacing: 5) {
@@ -876,7 +888,16 @@ struct AnalyticsView: View {
                 }
 
                 ForEach(points) { point in
-                    monthDayCell(point, maxTotal: maxTotal, calendar: calendar)
+                    monthDayCell(
+                        point,
+                        maxTotal: maxTotal,
+                        calendar: calendar,
+                        tag: tag,
+                        showsMonth: spansMonths && (
+                            point.id == points.first?.id ||
+                            calendar.component(.day, from: point.date) == 1
+                        )
+                    )
                 }
             }
         }
@@ -885,9 +906,17 @@ struct AnalyticsView: View {
     private func monthDayCell(
         _ point: AnalyticsChartPoint,
         maxTotal: Double,
-        calendar: Calendar
+        calendar: Calendar,
+        tag: TransactionTag? = nil,
+        showsMonth: Bool = false
     ) -> some View {
         let day = calendar.component(.day, from: point.date)
+        let dayLabel: String = {
+            guard showsMonth else { return "\(day)" }
+            let month = AnalyticsDateFormat.monthShort.string(from: point.date)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return "\(day) \(month)"
+        }()
         let hasSpend = point.total > 0
         let intensity = hasSpend ? min(point.total / maxTotal, 1) : 0
         let isToday = calendar.isDateInToday(point.date)
@@ -897,12 +926,25 @@ struct AnalyticsView: View {
             : Color(.tertiarySystemFill).opacity(0.5)
 
         return NavigationLink {
-            TransactionListByDateView(date: point.date)
+            if let tag {
+                TransactionListByKindView(
+                    kind: .expense,
+                    scope: tagBinScope(
+                        for: AnalyticsTimeTotal(id: point.id, date: point.date, title: point.title, total: point.total),
+                        tag: tag,
+                        granularity: .daily
+                    )
+                )
+            } else {
+                TransactionListByDateView(date: point.date)
+            }
         } label: {
             VStack(spacing: 2) {
-                Text("\(day)")
+                Text(dayLabel)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(intensity > 0.6 ? Color.white : Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
 
                 Text(hasSpend ? dayCellAmount(point.total) : " ")
                     .font(.system(size: 10, weight: .medium))
