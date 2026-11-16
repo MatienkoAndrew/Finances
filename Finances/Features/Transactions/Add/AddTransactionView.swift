@@ -49,6 +49,10 @@ struct AddTransactionView: View {
     @State private var isShowingToCurrencyPicker = false
 
     @State private var didApplyInitialDefaults = false
+
+    /// Валюты последней сохранённой вручную операции — с них начинается следующая.
+    @AppStorage("addTransaction.lastCurrencyCode") private var lastCurrencyCode = ""
+    @AppStorage("addTransaction.lastToCurrencyCode") private var lastToCurrencyCode = ""
     @State private var isShowingCategoryPicker = false
 
     private var categorySelectionLabel: String {
@@ -290,10 +294,37 @@ struct AddTransactionView: View {
         guard !didApplyInitialDefaults else { return }
         didApplyInitialDefaults = true
 
-        currencyCode = "VND"
-        toCurrencyCode = "VND"
+        currencyCode = initialCurrencyCode()
+        toCurrencyCode = lastToCurrencyCode.isEmpty ? currencyCode : lastToCurrencyCode
 
         applyDefaultAccountsIfNeeded(force: true)
+    }
+
+    /// Валюта новой операции:
+    /// 1. Идёт поездка (метка с периодом на сегодня и валютами) — её валюта;
+    ///    если последняя использованная — одна из валют поездки, то она.
+    /// 2. Иначе — валюта последней операции, добавленной вручную.
+    /// 3. Иначе — VND.
+    private func initialCurrencyCode() -> String {
+        let last = lastCurrencyCode.isEmpty ? nil : CurrencyDisplay.normalizedCode(from: lastCurrencyCode)
+
+        if let tripCodes = currentTripCurrencyCodes(), !tripCodes.isEmpty {
+            if let last, tripCodes.contains(last) { return last }
+            return tripCodes.sorted().first!
+        }
+        return last ?? "VND"
+    }
+
+    /// Валюты метки-поездки, в период которой попадает сегодняшний день.
+    private func currentTripCurrencyCodes() -> Set<String>? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        return allTags.first { tag in
+            guard let start = tag.startDate, let end = tag.endDate, !tag.tripCurrencyCodes.isEmpty else {
+                return false
+            }
+            return calendar.startOfDay(for: start) <= today && today <= calendar.startOfDay(for: end)
+        }?.tripCurrencyCodes
     }
 
     private func applyDefaultAccountsIfNeeded(force: Bool = false) {
@@ -407,6 +438,10 @@ struct AddTransactionView: View {
 
         do {
             try modelContext.save()
+            lastCurrencyCode = normalizedCurrencyCode
+            if selectedKind == .transfer {
+                lastToCurrencyCode = CurrencyDisplay.normalizedCode(from: toCurrencyCode)
+            }
             Task { await ExchangeRateSync.shared.run(context: modelContext) }
             dismiss()
         } catch {
