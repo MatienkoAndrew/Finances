@@ -45,6 +45,8 @@ struct AccountsView: View {
                     if activeAccounts.isEmpty {
                         emptyState
                     } else {
+                        totalCard(balances, rubRates: rubRates)
+
                         activeSection(balances, rubRates: rubRates)
 
                         if !archivedAccounts.isEmpty {
@@ -139,6 +141,60 @@ struct AccountsView: View {
             return nil
         }
         return balance * rate
+    }
+
+    /// Сумма активных счетов в рублях. Счета без курса в сумму не входят.
+    private func totalCard(_ balances: [PersistentIdentifier: Double], rubRates: RubRateTable) -> some View {
+        var total = 0.0
+        var skipped: [String] = []
+        for account in activeAccounts {
+            let balance = balances[account.persistentModelID] ?? 0
+            let code = CurrencyDisplay.normalizedCode(from: account.currencyCode)
+            if code == "RUB" {
+                total += balance
+            } else if let rub = rubEquivalent(of: balance, account: account, rubRates: rubRates) {
+                total += rub
+            } else if balance != 0 {
+                skipped.append(account.name)
+            }
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Всего в рублях")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Text("≈ \(Self.formattedRub(total))")
+                .font(.title.bold())
+                .foregroundStyle(total < 0 ? .red : .primary)
+
+            if !skipped.isEmpty {
+                Text("Без курса, не учтены: \(skipped.joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private static let rubFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = " "
+        formatter.decimalSeparator = ","
+        return formatter
+    }()
+
+    private static func formattedRub(_ value: Double) -> String {
+        let sign = value < 0 ? "-" : ""
+        let number = rubFormatter.string(from: NSNumber(value: abs(value))) ?? "\(abs(value))"
+        return "\(sign)\(number) ₽"
     }
 
     private var emptyState: some View {
