@@ -86,6 +86,8 @@ struct AnalyticsView: View {
         let availableTagGranularities: [TagBinGranularity]
         /// Какие операции показывают списки по ссылкам: все расходы, категория, место.
         let scope: AnalyticsScope
+        /// Траты метки по дням (начало дня → ₽) — для клеток в строках недель.
+        var tagDailyTotals: [Date: Double] = [:]
     }
 
     private func makeReport() -> Report {
@@ -158,8 +160,27 @@ struct AnalyticsView: View {
             let granularity: TagBinGranularity?
             if let tagGranularityOverride, available.contains(tagGranularityOverride) {
                 granularity = tagGranularityOverride
+            } else if available.contains(.daily) {
+                // По умолчанию — дни (календарь), если период не слишком длинный.
+                granularity = .daily
             } else {
                 granularity = TagAnalyticsBuilder.granularity(for: tag, taggedTransactions: tagged)
+            }
+
+            // Для недель нужны ещё и траты по дням — клетки Пн–Вс в каждой строке.
+            var dailyTotals: [Date: Double] = [:]
+            if granularity == .weekly {
+                let daily = TagAnalyticsBuilder.buildSnapshot(
+                    tag: tag,
+                    transactions: tagged,
+                    settings: settings,
+                    trackedRates: trackedRates,
+                    granularity: .daily,
+                    folded: folded
+                )
+                for point in daily.chartPoints {
+                    dailyTotals[Calendar.current.startOfDay(for: point.date)] = point.total
+                }
             }
 
             // В режиме Tags строим снапшот по эффективному периоду метки
@@ -177,7 +198,8 @@ struct AnalyticsView: View {
                 timeline: nil,
                 tagGranularity: granularity,
                 availableTagGranularities: available,
-                scope: tagScope(for: tag, taggedTransactions: tagged)
+                scope: tagScope(for: tag, taggedTransactions: tagged),
+                tagDailyTotals: dailyTotals
             )
         }
     }
@@ -844,6 +866,15 @@ struct AnalyticsView: View {
                         // Метка по дням — тот же календарь, но только траты с меткой.
                         dailyCalendar(snapshot, tag: tag)
                             .analyticsCard(padding: 12)
+                    } else if selectedMode == .tags,
+                              report.tagGranularity == .weekly,
+                              let tag = selectedTag {
+                        weekRows(report, tag: tag)
+                            .analyticsCard(padding: 12)
+                    } else if (selectedMode == .tags && report.tagGranularity == .monthly)
+                                || (selectedMode == .time && selectedScale == .year) {
+                        monthTiles(snapshot, tag: selectedMode == .tags ? selectedTag : nil)
+                            .analyticsCard(padding: 12)
                     } else {
                         // Год, недели и месяцы метки — список строк.
                         timeTotalsList(report)
@@ -967,6 +998,223 @@ struct AnalyticsView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Weeks & months
+
+    private static let weekLabelWidth: CGFloat = 78
+    private static let weekAmountWidth: CGFloat = 64
+
+    /// Недели метки: строка на неделю — даты, семь клеток Пн–Вс
+    /// с подсветкой по тратам дня и сумма за неделю.
+    private func weekRows(_ report: Report, tag: TransactionTag) -> some View {
+        let calendar = TagAnalyticsBuilder.weekCalendar
+        let weeks = report.snapshot.chartPoints
+        let page = report.snapshot.page
+        let maxDay = max(report.tagDailyTotals.values.max() ?? 0, 1)
+        let maxWeek = weeks.map(\.total).max() ?? 0
+
+        return VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Color.clear.frame(width: Self.weekLabelWidth, height: 1)
+                HStack(spacing: 3) {
+                    ForEach(orderedWeekdaySymbols(calendar), id: \.self) { symbol in
+                        Text(symbol)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                Color.clear.frame(width: Self.weekAmountWidth, height: 1)
+            }
+
+            ForEach(weeks) { week in
+                NavigationLink {
+                    TransactionListByKindView(
+                        kind: .expense,
+                        scope: tagBinScope(
+                            for: AnalyticsTimeTotal(id: week.id, date: week.date, title: week.title, total: week.total),
+                            tag: tag,
+                            granularity: .weekly
+                        )
+                    )
+                } label: {
+                    weekRow(
+                        week,
+                        page: page,
+                        dailyTotals: report.tagDailyTotals,
+                        maxDay: maxDay,
+                        isPeak: week.total > 0 && week.total == maxWeek,
+                        calendar: calendar
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func weekRow(
+        _ week: AnalyticsChartPoint,
+        page: AnalyticsPeriodPage,
+        dailyTotals: [Date: Double],
+        maxDay: Double,
+        isPeak: Bool,
+        calendar: Calendar
+    ) -> some View {
+        let weekInterval = calendar.dateInterval(of: .weekOfYear, for: week.date)
+        let weekStart = weekInterval?.start ?? week.date
+        let weekEnd = min(weekInterval?.end ?? week.date, page.endDateExclusive)
+        let lastDay = calendar.date(byAdding: .day, value: -1, to: weekEnd) ?? week.date
+        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
+
+        return HStack(spacing: 8) {
+            Text(weekRangeLabel(from: week.date, to: lastDay, calendar: calendar))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(week.total > 0 ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: Self.weekLabelWidth, alignment: .leading)
+
+            HStack(spacing: 3) {
+                ForEach(days, id: \.self) { day in
+                    let inPeriod = day >= page.startDate && day < page.endDateExclusive
+                    let total = dailyTotals[calendar.startOfDay(for: day)] ?? 0
+                    let intensity = total > 0 ? min(total / maxDay, 1) : 0
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(
+                            !inPeriod ? Color.clear
+                                : total > 0 ? Color.red.opacity(0.12 + 0.6 * intensity)
+                                : Color(.tertiarySystemFill).opacity(0.6)
+                        )
+                        .overlay {
+                            if !inPeriod {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .strokeBorder(Color(.tertiarySystemFill), lineWidth: 1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
+                }
+            }
+
+            Text(week.total > 0 ? weekAmount(week.total) : "—")
+                .font(.footnote.weight(isPeak ? .bold : .semibold))
+                .monospacedDigit()
+                .foregroundStyle(week.total > 0 ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: Self.weekAmountWidth, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    /// «3–9 нояб» или «27 окт – 2 нояб».
+    private func weekRangeLabel(from start: Date, to end: Date, calendar: Calendar) -> String {
+        let startDay = calendar.component(.day, from: start)
+        let endDay = calendar.component(.day, from: end)
+        let endMonth = shortMonth(end)
+        if calendar.isDate(start, inSameDayAs: end) {
+            return "\(startDay) \(endMonth)"
+        }
+        if calendar.isDate(start, equalTo: end, toGranularity: .month) {
+            return "\(startDay)–\(endDay) \(endMonth)"
+        }
+        return "\(startDay) \(shortMonth(start)) – \(endDay) \(endMonth)"
+    }
+
+    private func shortMonth(_ date: Date) -> String {
+        AnalyticsDateFormat.monthShort.string(from: date)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    private func weekAmount(_ value: Double) -> String {
+        value < 1_000 ? "\(Int(value.rounded())) ₽" : "\(ExpenseChartFormat.compact(value)) ₽"
+    }
+
+    private static let standaloneMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "LLLL"
+        return formatter
+    }()
+
+    /// Месяцы (метка или год): плитки по три в ряд, цвет — доля от самого дорогого.
+    /// `tag` задан — плитка открывает траты метки за месяц, иначе все расходы месяца.
+    private func monthTiles(_ snapshot: AnalyticsSnapshot, tag: TransactionTag?) -> some View {
+        let calendar = Calendar.current
+        let points = snapshot.chartPoints
+        let maxTotal = max(points.map(\.total).max() ?? 0, 1)
+        let years = Set(points.map { calendar.component(.year, from: $0.date) })
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
+
+        return LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(points) { point in
+                NavigationLink {
+                    if let tag {
+                        TransactionListByKindView(
+                            kind: .expense,
+                            scope: tagBinScope(
+                                for: AnalyticsTimeTotal(id: point.id, date: point.date, title: point.title, total: point.total),
+                                tag: tag,
+                                granularity: .monthly
+                            )
+                        )
+                    } else {
+                        TransactionListByKindView(kind: .expense, scope: monthScope(for: point.date))
+                    }
+                } label: {
+                    monthTile(point, maxTotal: maxTotal, showsYear: years.count > 1, calendar: calendar)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func monthTile(
+        _ point: AnalyticsChartPoint,
+        maxTotal: Double,
+        showsYear: Bool,
+        calendar: Calendar
+    ) -> some View {
+        let hasSpend = point.total > 0
+        let intensity = hasSpend ? min(point.total / maxTotal, 1) : 0
+        let isCurrent = calendar.isDate(point.date, equalTo: .now, toGranularity: .month)
+        let isFuture = point.date > .now
+        let onDark = intensity > 0.6
+        var name = Self.standaloneMonthFormatter.string(from: point.date).capitalized
+        if showsYear {
+            name += " ’\(calendar.component(.year, from: point.date) % 100)"
+        }
+        let background = hasSpend
+            ? Color.red.opacity(0.10 + 0.45 * intensity)
+            : Color(.tertiarySystemFill).opacity(0.5)
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(name)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(onDark ? Color.white : Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(hasSpend ? weekAmount(point.total) : " ")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(onDark ? Color.white.opacity(0.9) : Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .frame(height: 58)
+        .background(background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.red, lineWidth: 1.5)
+            }
+        }
+        .opacity(isFuture ? 0.4 : 1)
+    }
+
     /// Сумма в клетке: до тысячи — целым числом, дальше — «12,5к».
     private func dayCellAmount(_ value: Double) -> String {
         value < 1_000 ? "\(Int(value.rounded()))" : ExpenseChartFormat.compact(value)
@@ -1057,9 +1305,13 @@ struct AnalyticsView: View {
         case .daily, nil:
             binEndExclusive = calendar.date(byAdding: .day, value: 1, to: binStart) ?? binStart
         case .weekly:
-            binEndExclusive = calendar.date(byAdding: .day, value: 7, to: binStart) ?? binStart
+            binEndExclusive = TagAnalyticsBuilder.weekCalendar.dateInterval(of: .weekOfYear, for: binStart)?.end
+                ?? calendar.date(byAdding: .day, value: 7, to: binStart)
+                ?? binStart
         case .monthly:
-            binEndExclusive = calendar.date(byAdding: .month, value: 1, to: binStart) ?? binStart
+            binEndExclusive = calendar.dateInterval(of: .month, for: binStart)?.end
+                ?? calendar.date(byAdding: .month, value: 1, to: binStart)
+                ?? binStart
         }
 
         return AnalyticsScope(

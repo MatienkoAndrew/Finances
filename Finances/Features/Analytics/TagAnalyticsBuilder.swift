@@ -9,7 +9,7 @@
 //   • Caps the period at "today" so ongoing trips don't show empty future bars.
 //   • Picks bin granularity automatically based on the duration:
 //        ≤ 14 days → daily
-//        15…77 days (~ 2.5 months) → weekly
+//        15…77 days (~ 2.5 months) → weekly (calendar weeks Mon–Sun)
 //        78+ days → monthly
 //   • Produces only the bins that actually fall inside the tag period —
 //     no padding to a calendar week / month / year.
@@ -326,9 +326,12 @@ enum TagAnalyticsBuilder {
             }
 
         case .weekly:
+            // Календарные недели Пн–Вс; первая и последняя — по границам периода.
             var current = start
             while current < endExclusive {
-                let nextRaw = calendar.date(byAdding: .day, value: 7, to: current) ?? endExclusive
+                let nextRaw = weekCalendar.dateInterval(of: .weekOfYear, for: current)?.end
+                    ?? calendar.date(byAdding: .day, value: 7, to: current)
+                    ?? endExclusive
                 let next = min(nextRaw, endExclusive)
                 let lastDayInBin = calendar.date(byAdding: .day, value: -1, to: next) ?? current
 
@@ -363,6 +366,14 @@ enum TagAnalyticsBuilder {
         }
 
         return bins
+    }
+
+    /// Календарь с неделей Пн–Вс — для недельных интервалов метки.
+    static var weekCalendar: Calendar {
+        var calendar = Calendar.current
+        calendar.locale = Locale(identifier: "ru_RU")
+        calendar.firstWeekday = 2
+        return calendar
     }
 
     // MARK: - Helpers
