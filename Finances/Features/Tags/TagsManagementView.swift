@@ -13,6 +13,7 @@ struct TagsManagementView: View {
 
     @Query private var settings: [AppSettings]
     @Query private var trackedRates: [TrackedExchangeRate]
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
 
     @State private var editorTarget: EditorTarget?
     @State private var tagForTransactions: TransactionTag?
@@ -31,7 +32,12 @@ struct TagsManagementView: View {
     }
 
     var body: some View {
-        let stats = TagStats.make(tags: tags, transactions: transactions, settings: settings.first, trackedRates: trackedRates)
+        let stats = TagStats.make(
+            tags: tags,
+            index: AnalyticsIndex.current(transactionsSnapshot, settings: settings.first, trackedRates: trackedRates),
+            settings: settings.first,
+            trackedRates: trackedRates
+        )
 
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -175,7 +181,7 @@ struct TagStats {
 
     static func make(
         tags: [TransactionTag],
-        transactions: [Transaction],
+        index: AnalyticsIndex,
         settings: AppSettings?,
         trackedRates: [TrackedExchangeRate]
     ) -> [PersistentIdentifier: TagStats] {
@@ -184,15 +190,15 @@ struct TagStats {
         // Сумма и число покупок — из того же расчёта, что и карточка метки в аналитике:
         // период метки, курсовые разницы и возвраты внутри покупок, без снятий и разниц
         // отдельными строками.
-        let folded = ExchangeRateDifferenceMatcher.fold(transactions)
+        // Пары и операции метки берутся из общего индекса — без прохода по всей истории.
         var result: [PersistentIdentifier: TagStats] = [:]
         for tag in tags {
             guard let trip = TripStats.make(
                 tag: tag,
-                transactions: transactions,
+                transactions: index.tagged(tag.name),
                 settings: settings,
                 trackedRates: trackedRates,
-                folded: folded
+                folded: index.folded
             ) else { continue }
             result[tag.persistentModelID] = TagStats(count: trip.purchaseCount, spentRub: trip.totalRub)
         }

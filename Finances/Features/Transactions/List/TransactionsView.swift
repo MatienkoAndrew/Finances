@@ -11,6 +11,14 @@ struct TransactionsView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    /// Операции и их ревизия — ключ общего индекса аналитики.
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
+    /// Общий индекс: пары курсовых разниц и возвратов, суммы операций — готовые.
+    private var analyticsIndex: AnalyticsIndex {
+        AnalyticsIndex.current(transactionsSnapshot, settings: settings, trackedRates: trackedRates)
+    }
+
     @Query(sort: \Account.createdAt, order: .forward)
     private var accounts: [Account]
 
@@ -68,7 +76,7 @@ struct TransactionsView: View {
 
     /// По какой день сверены выписки и что ждёт проверки.
     private var reconciliationStatus: ReconciliationStatus {
-        ReconciliationStatus.cached(transactions: transactions)
+        ReconciliationStatus.cached(transactionsSnapshot)
     }
 
     /// Поиск или фильтр сужают список — тогда вместо сводки месяца итог выборки.
@@ -79,7 +87,7 @@ struct TransactionsView: View {
     /// Курсовые разницы, приписанные к своим покупкам: отдельной строкой не показываются.
     /// Считаются по всем операциям, чтобы пары не зависели от фильтра и поиска.
     private var foldedDifferences: FoldedExchangeRateDifferences {
-        ExchangeRateDifferenceMatcher.fold(transactions)
+        analyticsIndex.folded
     }
 
     private func filteredTransactions(folded: FoldedExchangeRateDifferences) -> [Transaction] {
@@ -87,12 +95,40 @@ struct TransactionsView: View {
         let query = searchQuery
         let filter = filter
         let interval = filter.dateInterval()
-        return transactions.filter { transaction in
-            !hidden.contains(transaction.persistentModelID)
-                && selectedFilter.matches(transaction)
-                && filter.matches(transaction, interval: interval)
-                && matchesSearch(transaction, query: query)
+        // Текст для поиска готовится один раз на ревизию, а не на каждый символ.
+        let haystacks = query == nil ? [] : searchHaystacks()
+        return transactions.enumerated().compactMap { offset, transaction in
+            if let query, !haystacks[offset].contains(query) { return nil }
+            guard !hidden.contains(transaction.persistentModelID),
+                  selectedFilter.matches(transaction),
+                  filter.matches(transaction, interval: interval) else { return nil }
+            return transaction
         }
+    }
+
+    private static var haystackCache: (key: String, texts: [String])?
+
+    /// Текст каждой операции для поиска, в нижнем регистре, — в порядке `transactions`.
+    /// Перестраивается при любом сохранении операций (ревизия) и при переименовании счетов.
+    private func searchHaystacks() -> [String] {
+        let accountsKey = accounts.map(\.name).joined(separator: "\u{1}")
+        let key = "\(transactionsSnapshot.revision)|\(transactions.count)|\(accountsKey)"
+        if let cached = Self.haystackCache, cached.key == key { return cached.texts }
+        let texts = transactions.map(Self.searchText(of:))
+        Self.haystackCache = (key, texts)
+        return texts
+    }
+
+    private static func searchText(of transaction: Transaction) -> String {
+        [
+            transaction.details,
+            transaction.categoryName ?? "",
+            transaction.note ?? "",
+            transaction.fromAccount?.name ?? "",
+            transaction.toAccount?.name ?? ""
+        ]
+        .joined(separator: " ")
+        .lowercased()
     }
 
     var body: some View {
@@ -345,14 +381,7 @@ struct TransactionsView: View {
     }
 
     private func monthSnapshot(anchor: Date, folded: FoldedExchangeRateDifferences) -> AnalyticsSnapshot {
-        AnalyticsSnapshotBuilder.build(
-            transactions: transactions,
-            scale: .month,
-            anchorDate: anchor,
-            settings: settings,
-            trackedRates: trackedRates,
-            folded: folded
-        )
+        AnalyticsSnapshotBuilder.build(index: analyticsIndex, scale: .month, anchorDate: anchor)
     }
 
     private var emptyState: some View {
@@ -406,22 +435,6 @@ struct TransactionsView: View {
     private var searchQuery: String? {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed.lowercased()
-    }
-
-    private func matchesSearch(_ transaction: Transaction, query: String?) -> Bool {
-        guard let query else { return true }
-
-        let haystack = [
-            transaction.details,
-            transaction.categoryName ?? "",
-            transaction.note ?? "",
-            transaction.fromAccount?.name ?? "",
-            transaction.toAccount?.name ?? ""
-        ]
-        .joined(separator: " ")
-        .lowercased()
-
-        return haystack.contains(query)
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -511,7 +524,7 @@ struct TransactionsView: View {
                 accounts: accounts,
                 rules: categoryRules,
                 categories: categories,
-                rubRates: RubRateTable.load(context: modelContext)
+                rubRates: RubRateTableStore.shared.table
             )
 
             if let coverage = StatementCoverage(statement: statement, fileName: fileName, importedAt: importResult.importedAt) {
@@ -595,7 +608,7 @@ struct TransactionsView: View {
 
     private func balanceCheck(for statement: KaspiStatement) -> BalanceCheck? {
         guard let kaspi = AccountLookup.kaspi(in: accounts),
-              let current = try? modelContext.fetch(FetchDescriptor<Transaction>()) else { return nil }
+              let current = try? AllTransactionsFetch.all(in: modelContext) else { return nil }
         return BalanceReconciliation.check(statement: statement, transactions: current, kaspi: kaspi)
     }
 

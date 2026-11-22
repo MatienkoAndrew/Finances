@@ -166,7 +166,7 @@ struct CategoriesView: View {
         guard let category = categoryToDelete else { return }
         let name = category.name
 
-        let transactions = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+        let transactions = (try? AllTransactionsFetch.all(in: modelContext)) ?? []
         let expenses = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? []
         let rules = (try? modelContext.fetch(FetchDescriptor<CategoryRule>())) ?? []
 

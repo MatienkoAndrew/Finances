@@ -30,12 +30,25 @@ struct CategoryTotalsAccumulator {
 
     /// - Parameter isPurchase: false — возврат: уменьшает сумму, но не число покупок.
     mutating func addExpense(_ transaction: Transaction, rub: Double, isPurchase: Bool = true) {
-        let category = Self.categoryName(of: transaction)
-        let count = isPurchase ? 1 : 0
+        add(
+            category: Self.categoryName(of: transaction),
+            subcategory: Self.subcategoryName(of: transaction),
+            rub: rub,
+            isPurchase: isPurchase
+        )
+    }
+
+    /// То же по готовым названиям — из `AnalyticsIndex`, без чтения полей модели.
+    mutating func add(category: String, subcategory: String?, rub: Double, isPurchase: Bool) {
+        add(category: category, subcategory: subcategory, rub: rub, count: isPurchase ? 1 : 0)
+    }
+
+    /// Уже сложенные суммы и число покупок пары «категория + подкатегория».
+    mutating func add(category: String, subcategory: String?, rub: Double, count: Int) {
         totals[category, default: 0] += rub
         counts[category, default: 0] += count
 
-        guard let subcategory = Self.subcategoryName(of: transaction) else { return }
+        guard let subcategory else { return }
         subcategoryTotals[category, default: [:]][subcategory, default: 0] += rub
         subcategoryCounts[category, default: [:]][subcategory, default: 0] += count
     }

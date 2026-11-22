@@ -103,32 +103,46 @@ enum AnalyticsPeriodComparisonBuilder {
         folded: FoldedExchangeRateDifferences,
         restrict: ((Transaction) -> Bool)? = nil
     ) -> AnalyticsPeriodComparison? {
+        let index = AnalyticsIndex(
+            transactions: AnalyticsSnapshotBuilder.newestFirst(transactions),
+            folded: folded,
+            settings: settings,
+            trackedRates: trackedRates
+        )
+        return build(index: index, scale: scale, page: page, now: now, restrict: restrict)
+    }
+
+    /// Сравнение по готовому индексу: проходит только операции двух отрезков.
+    static func build(
+        index: AnalyticsIndex,
+        scale: AnalyticsTimeScale,
+        page: AnalyticsPeriodPage,
+        now: Date = .now,
+        restrict: ((Transaction) -> Bool)? = nil
+    ) -> AnalyticsPeriodComparison? {
         guard let ranges = ranges(scale: scale, page: page, now: now) else { return nil }
 
-        var currentTotals: [String: AnalyticsCategoryPeriodTotal] = [:]
-        var previousTotals: [String: AnalyticsCategoryPeriodTotal] = [:]
-
-        for transaction in transactions {
-            let inCurrent = ranges.current.contains(transaction.date)
-            let inPrevious = ranges.previous.contains(transaction.date)
-            guard inCurrent || inPrevious else { continue }
-            guard let rub = AnalyticsSnapshotBuilder.expenseRub(
-                for: transaction,
-                settings: settings,
-                trackedRates: trackedRates,
-                folded: folded
-            ) else { continue }
-
-            let category = CategoryTotalsAccumulator.categoryName(of: transaction)
-            let count = transaction.countsAsPurchaseInAnalytics ? 1 : 0
-            if inCurrent {
-                currentTotals[category, default: .init()].total += rub
-                currentTotals[category, default: .init()].count += count
-            } else {
-                previousTotals[category, default: .init()].total += rub
-                previousTotals[category, default: .init()].count += count
+        func totals(in range: AnalyticsComparisonRange) -> [String: AnalyticsCategoryPeriodTotal] {
+            // По номерам категорий из индекса, а не по строкам на каждой операции.
+            var byID = Array(repeating: AnalyticsCategoryPeriodTotal(), count: index.categoryNames.count)
+            var touched = Array(repeating: false, count: index.categoryNames.count)
+            for i in index.range(from: range.start, to: range.endExclusive) {
+                guard let rub = index.expenseRub[i] else { continue }
+                if let restrict, !restrict(index.transactions[i]) { continue }
+                let id = index.categoryID[i]
+                byID[id].total += rub
+                byID[id].count += index.isPurchase[i] ? 1 : 0
+                touched[id] = true
             }
+            var result: [String: AnalyticsCategoryPeriodTotal] = [:]
+            for id in byID.indices where touched[id] {
+                result[index.categoryNames[id]] = byID[id]
+            }
+            return result
         }
+
+        let currentTotals = totals(in: ranges.current)
+        let previousTotals = totals(in: ranges.previous)
 
         let categories = Set(currentTotals.keys).union(previousTotals.keys)
         let changes = categories

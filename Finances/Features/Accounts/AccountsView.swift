@@ -23,7 +23,9 @@ struct AccountsView: View {
 
     // Курсы обновляются в фоне — подписка, чтобы рублёвый эквивалент пересчитался.
     @Query private var trackedRates: [TrackedExchangeRate]
-    @Query private var dailyRates: [DailyExchangeRate]
+    /// Курсы — общим снимком: он обновляется сам, когда сохраняются курсы.
+    private var rateStore = RubRateTableStore.shared
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
 
     @State private var isShowingAddAccount = false
 
@@ -36,8 +38,8 @@ struct AccountsView: View {
     }
 
     var body: some View {
-        let balances = AccountBalanceCalculator.balances(transactions: transactions)
-        let rubRates = RubRateTable.load(context: modelContext)
+        let balances = AccountBalanceCalculator.cachedBalances(transactionsSnapshot)
+        let rubRates = rateStore.table
 
         NavigationStack {
             ScrollView {

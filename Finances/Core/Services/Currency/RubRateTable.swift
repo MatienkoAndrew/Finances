@@ -88,3 +88,51 @@ struct RubRateTable {
         rates[CurrencyDisplay.normalizedCode(from: code)]?.isEmpty == false
     }
 }
+
+/// Общий снимок курсов для экранов основного контекста.
+///
+/// `RubRateTable.load` читает и сортирует всю историю курсов (тысячи строк) —
+/// раньше это происходило на каждой перерисовке «Счетов» и при каждом сохранении
+/// ручной операции. Снимок загружается один раз и перечитывается, только когда
+/// сохранились курсы, отслеживаемые валюты или настройки.
+@MainActor
+@Observable
+final class RubRateTableStore {
+    static let shared = RubRateTableStore()
+
+    private(set) var table: RubRateTable
+
+    @ObservationIgnored private var observer: NSObjectProtocol?
+    @ObservationIgnored private let context: ModelContext
+    @ObservationIgnored private let watchedEntities: Set<String> = [
+        String(describing: DailyExchangeRate.self),
+        String(describing: TrackedExchangeRate.self),
+        String(describing: AppSettings.self)
+    ]
+
+    private init() {
+        context = AppModelContainer.shared.mainContext
+        table = RubRateTable.load(context: context)
+        // object: nil — курсы сохраняет и фоновая синхронизация в своём контексте.
+        observer = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let info = notification.userInfo ?? [:]
+            MainActor.assumeIsolated {
+                self?.handleSave(info)
+            }
+        }
+    }
+
+    private func handleSave(_ info: [AnyHashable: Any]) {
+        let keys: [ModelContext.NotificationKey] = [.insertedIdentifiers, .updatedIdentifiers, .deletedIdentifiers]
+        let touched = keys.contains { key in
+            (info[key.rawValue] as? [PersistentIdentifier] ?? []).contains { watchedEntities.contains($0.entityName) }
+        }
+        if touched || info[ModelContext.NotificationKey.invalidatedAllIdentifiers.rawValue] != nil {
+            table = RubRateTable.load(context: context)
+        }
+    }
+}

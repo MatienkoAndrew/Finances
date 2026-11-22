@@ -99,25 +99,31 @@ struct ExpenseTimelineData {
         folded: FoldedExchangeRateDifferences? = nil
     ) -> ExpenseTimelineData {
         let folded = folded ?? ExchangeRateDifferenceMatcher.fold(transactions)
+        let index = AnalyticsIndex(
+            transactions: AnalyticsSnapshotBuilder.newestFirst(transactions),
+            folded: folded,
+            settings: settings,
+            trackedRates: trackedRates
+        )
+        return build(index: index, scale: scale, pageStart: pageStart)
+    }
+
+    /// Лента из готовых итогов по дням — без прохода по всем операциям.
+    static func build(
+        index: AnalyticsIndex,
+        scale: AnalyticsTimeScale,
+        pageStart: Date
+    ) -> ExpenseTimelineData {
         let calendar = Calendar.current
         let unit = scale.barUnit
         let now = Date()
         var totals: [Date: Double] = [:]
-        var earliest = now
+        let earliest = min(index.earliestExpenseDate ?? now, now)
 
-        for transaction in transactions {
-            // Те же правила, что и в снапшоте: разницы и возвраты — внутри своих покупок.
-            guard let rub = AnalyticsSnapshotBuilder.expenseRub(
-                for: transaction,
-                settings: settings,
-                trackedRates: trackedRates,
-                folded: folded
-            ), let interval = calendar.dateInterval(of: unit, for: transaction.date) else {
-                continue
-            }
-
+        // День целиком лежит в одном столбике (день, неделя, месяц).
+        for (day, rub) in index.dailyExpense {
+            guard let interval = calendar.dateInterval(of: unit, for: day) else { continue }
             totals[interval.start, default: 0] += rub
-            earliest = min(earliest, transaction.date)
         }
 
         let first = min(calendar.dateInterval(of: scale.pageUnit, for: earliest)?.start ?? earliest, pageStart)

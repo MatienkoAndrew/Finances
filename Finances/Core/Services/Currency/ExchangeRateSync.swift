@@ -66,7 +66,7 @@ final class ExchangeRateSync {
     private func syncOnce(context: ModelContext) async {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        guard let transactions = try? context.fetch(FetchDescriptor<Transaction>()) else { return }
+        guard let transactions = try? AllTransactionsFetch.all(in: context) else { return }
 
         addMissingCurrencies(from: transactions, context: context)
         let tracked = (try? context.fetch(FetchDescriptor<TrackedExchangeRate>())) ?? []
