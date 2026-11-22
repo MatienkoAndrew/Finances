@@ -473,6 +473,8 @@ enum AnalyticsDateFormat {
     static let day = formatter("d")
     static let dayMonth = formatter("d MMM")
     static let dayMonthYear = formatter("d MMM yyyy")
+    /// «18 ноября».
+    static let dayMonthLong = formatter("d MMMM")
     static let weekdayShort = formatter("EEE")
     static let monthShort = formatter("MMM")
     static let monthFull = formatter("MMMM")

@@ -274,6 +274,7 @@ enum ImportHistory {
         try context.save()
 
         removeRecord(importedAt: importedAt)
+        StatementCoverageStore.remove(importedAt: importedAt)
         DuplicateRemovalLog.remove(restoredEntries)
 
         return summary
