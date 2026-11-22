@@ -512,7 +512,7 @@ struct TransactionsView: View {
                 accounts: accounts,
                 rules: categoryRules,
                 categories: categories,
-                rubRates: RubRateTable.load(context: modelContext)
+                rubRates: RubRateTableStore.shared.table
             )
 
             if let coverage = StatementCoverage(statement: statement, fileName: fileName, importedAt: importResult.importedAt) {

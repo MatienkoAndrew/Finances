@@ -376,7 +376,7 @@ struct AddTransactionView: View {
 
         // По курсу на дату операции; если такого курса ещё нет — по последнему
         // известному, точный подтянет синхронизация курсов.
-        let rubAmount = RubRateTable.load(context: modelContext)
+        let rubAmount = RubRateTableStore.shared.table
             .rubAmount(amount: parsedAmount, currencyCode: normalizedCurrencyCode, on: date)
 
         let transaction: Transaction

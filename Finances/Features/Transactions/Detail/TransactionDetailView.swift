@@ -254,7 +254,7 @@ struct TransactionDetailView: View {
         }
 
         if needsRubAmount {
-            transaction.rubAmount = RubRateTable.load(context: modelContext)
+            transaction.rubAmount = RubRateTableStore.shared.table
                 .rubAmount(amount: transaction.amount, currencyCode: transaction.currencyCode, on: transaction.date)
         }
 
