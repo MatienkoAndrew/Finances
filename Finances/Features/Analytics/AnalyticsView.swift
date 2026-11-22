@@ -121,11 +121,9 @@ struct AnalyticsView: View {
     }
 
     private func coverageNote(for page: AnalyticsPeriodPage) -> String? {
-        let status = ReconciliationStatus.make(
-            coverages: StatementCoverageStore.load(),
-            legacyBatches: ImportHistory.batches(in: allTransactions),
-            transactions: allTransactions
-        )
+        // Скрытый статус не считаем вовсе.
+        guard isReconciliationVisible else { return nil }
+        let status = ReconciliationStatus.cached(transactions: allTransactions)
         let awaiting = status.awaitingStatement.filter { page.contains($0.date) }.count
         guard !status.isFullyCovered(start: page.startDate, endExclusive: page.endDateExclusive) || awaiting > 0 else {
             return nil
@@ -368,8 +366,13 @@ struct AnalyticsView: View {
                             if section == .daily, isDailySectionCollapsed {
                                 isDailySectionCollapsed = false
                             }
-                            withAnimation(.snappy(duration: 0.35)) {
-                                proxy.scrollTo(section, anchor: .top)
+                            // Ленивый стек не знает высот непостроенных разделов: первый
+                            // переход их строит и встаёт примерно, второй — точно на раздел.
+                            proxy.scrollTo(section, anchor: .top)
+                            DispatchQueue.main.async {
+                                withAnimation(.snappy(duration: 0.25)) {
+                                    proxy.scrollTo(section, anchor: .top)
+                                }
                             }
                         }
                     }
@@ -379,9 +382,8 @@ struct AnalyticsView: View {
 
     private func reportScroll(_ report: Report) -> some View {
         ScrollView {
-            // Обычный VStack: разделов немного, а переход кнопками по ленивому
-            // стеку останавливался не на разделе — высоты непостроенных частей неизвестны.
-            VStack(alignment: .leading, spacing: 24) {
+            // Ленивый стек: при смене масштаба строятся только видимые разделы.
+            LazyVStack(alignment: .leading, spacing: 24) {
                 if selectedMode == .time {
                     periodHeroCard(report)
                         .id(AnalyticsReportSection.overview)
@@ -410,7 +412,10 @@ struct AnalyticsView: View {
         .toolbar {
             if selectedMode == .time {
                 ToolbarItem(placement: .principal) {
-                    AnalyticsScaleTabs(selection: $selectedScale)
+                    AnalyticsScaleTabs(selection: Binding(
+                        get: { selectedScale },
+                        set: { selectScale($0) }
+                    ))
                 }
             }
             if !isEmbedded {
@@ -442,12 +447,6 @@ struct AnalyticsView: View {
             guard !didInitializeAnchor else { return }
             didInitializeAnchor = true
             pageAnchorDate = latestAllowedAnchorDate
-        }
-        .onChange(of: selectedScale) { _, _ in
-            pageAnchorDate = snappedAnchorDate(
-                min(pageAnchorDate, latestAllowedAnchorDate),
-                scale: selectedScale
-            )
         }
         .onChange(of: selectedMode) { _, newMode in
             // При переключении в режим Tags, автоматически выбираем первую метку
@@ -1933,6 +1932,15 @@ struct AnalyticsView: View {
 
     private var latestAllowedAnchorDate: Date {
         AnalyticsSnapshotBuilder.makePage(for: selectedScale, anchorDate: .now).startDate
+    }
+
+    /// Смена масштаба: масштаб и дата страницы меняются вместе — отчёт строится
+    /// один раз, а не дважды (раньше дату подгонял отдельный onChange).
+    private func selectScale(_ scale: AnalyticsTimeScale) {
+        guard scale != selectedScale else { return }
+        let latest = AnalyticsSnapshotBuilder.makePage(for: scale, anchorDate: .now).startDate
+        selectedScale = scale
+        pageAnchorDate = snappedAnchorDate(min(pageAnchorDate, latest), scale: scale)
     }
 
     /// График долистали до другой страницы — переключаем на неё весь экран.

@@ -170,3 +170,35 @@ struct ReconciliationStatus {
         )
     }
 }
+
+@MainActor
+extension ReconciliationStatus {
+    private static var cache: (key: [Int], status: ReconciliationStatus)?
+
+    /// Статус, посчитанный один раз, пока операции и выписки не поменялись.
+    ///
+    /// Экраны перерисовываются часто (смена масштаба аналитики — дважды подряд),
+    /// а статус группирует все операции по импортам. Ключ — счётчики, которые
+    /// меняются вместе со статусом: операции, импорты, ждущие выписку и решения.
+    static func cached(transactions: [Transaction]) -> ReconciliationStatus {
+        let coverages = StatementCoverageStore.load()
+        var awaiting = 0
+        var pending = 0
+        var imported = 0
+        for transaction in transactions {
+            if transaction.isAwaitingStatement { awaiting += 1 }
+            if transaction.pendingTagNames?.isEmpty == false { pending += 1 }
+            if transaction.importedAt != nil { imported += 1 }
+        }
+        let key = [transactions.count, awaiting, pending, imported, coverages.count, ImportHistory.loadRecords().count]
+        if let cache, cache.key == key { return cache.status }
+
+        let status = make(
+            coverages: coverages,
+            legacyBatches: ImportHistory.batches(in: transactions),
+            transactions: transactions
+        )
+        cache = (key, status)
+        return status
+    }
+}
