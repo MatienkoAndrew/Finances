@@ -279,7 +279,7 @@ final class DataExportImportManager {
     }
 
     private static func makeTransaction(_ exported: ExportableTransaction, accounts: [String: Account]) -> Transaction {
-        Transaction(
+        let transaction = Transaction(
             date: exported.date,
             kindRaw: exported.kindRaw,
             amount: exported.amount,
@@ -307,6 +307,11 @@ final class DataExportImportManager {
             fromAccount: exported.fromAccountID.flatMap { accounts[$0] },
             toAccount: exported.toAccountID.flatMap { accounts[$0] }
         )
+        transaction.purposeRaw = exported.purposeRaw
+        transaction.linkKey = exported.linkKey
+        transaction.refundOfLinkKey = exported.refundOfLinkKey
+        transaction.recurringPeriodRaw = exported.recurringPeriodRaw
+        return transaction
     }
 
     private static func importAllData(_ data: ExportData, accounts: [String: Account], modelContext: ModelContext, replaceExisting: Bool = false) throws {
@@ -557,6 +562,11 @@ struct ExportableTransaction: Codable {
     let walletMerchant: String?
     /// Сумма оплаты текстом из Wallet. Optional — старые копии декодируются.
     let walletAmountText: String?
+    /// Назначение, связь возврата с покупкой и регулярный платёж. Optional — старые копии декодируются.
+    let purposeRaw: String?
+    let linkKey: String?
+    let refundOfLinkKey: String?
+    let recurringPeriodRaw: String?
     let createdAt: Date
     
     init(from transaction: Transaction, accountIDs: [PersistentIdentifier: String]) {
@@ -586,6 +596,10 @@ struct ExportableTransaction: Codable {
         self.importedAt = transaction.importedAt
         self.walletMerchant = transaction.walletMerchant
         self.walletAmountText = transaction.walletAmountText
+        self.purposeRaw = transaction.purposeRaw
+        self.linkKey = transaction.linkKey
+        self.refundOfLinkKey = transaction.refundOfLinkKey
+        self.recurringPeriodRaw = transaction.recurringPeriodRaw
         self.createdAt = transaction.createdAt
     }
 }

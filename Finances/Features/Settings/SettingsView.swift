@@ -214,6 +214,15 @@ struct SettingsView: View {
                 SettingsDivider()
 
                 NavigationLink {
+                    RecurringPaymentsView()
+                } label: {
+                    SettingsRow(title: "Регулярные платежи", systemImage: "repeat.circle.fill", color: .purple)
+                }
+                .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                NavigationLink {
                     LearnedMerchantsView()
                 } label: {
                     SettingsRow(title: "Запомненные мерчанты", systemImage: "storefront.fill", color: .green)
