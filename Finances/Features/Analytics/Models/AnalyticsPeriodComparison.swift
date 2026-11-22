@@ -65,6 +65,20 @@ struct AnalyticsPeriodComparison {
     /// Все категории с изменением, по убыванию влияния на разницу.
     let changes: [AnalyticsCategoryChange]
 
+    /// Дополнительное условие выборки (фильтр списка операций); nil — все операции.
+    var restrict: ((Transaction) -> Bool)? = nil
+
+    /// Операции отрезка для перехода к списку — с учётом фильтра выборки.
+    func scope(for range: AnalyticsComparisonRange) -> AnalyticsScope {
+        let base = range.scope
+        guard let restrict else { return base }
+        return AnalyticsScope(
+            title: base.title,
+            matches: { base.matches($0) && restrict($0) },
+            containsDate: base.containsDate
+        )
+    }
+
     var delta: Double { currentTotal - previousTotal }
 
     /// Изменение в долях; nil — в прошлом отрезке трат не было.
@@ -86,7 +100,8 @@ enum AnalyticsPeriodComparisonBuilder {
         now: Date = .now,
         settings: AppSettings?,
         trackedRates: [TrackedExchangeRate],
-        folded: FoldedExchangeRateDifferences
+        folded: FoldedExchangeRateDifferences,
+        restrict: ((Transaction) -> Bool)? = nil
     ) -> AnalyticsPeriodComparison? {
         guard let ranges = ranges(scale: scale, page: page, now: now) else { return nil }
 
@@ -141,7 +156,8 @@ enum AnalyticsPeriodComparisonBuilder {
             previousTotal: previousTotal,
             currentCount: currentTotals.values.reduce(0) { $0 + $1.count },
             previousCount: previousTotals.values.reduce(0) { $0 + $1.count },
-            changes: changes
+            changes: changes,
+            restrict: restrict
         )
     }
 
