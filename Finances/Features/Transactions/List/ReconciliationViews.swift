@@ -10,6 +10,10 @@ import SwiftUI
 import SwiftData
 
 extension ReconciliationStatus {
+    /// Показывать ли статус сверки в сводке месяца и в шапке аналитики.
+    /// Скрывается крестиком, возвращается в настройках.
+    static let visibilityKey = "reconciliation.isStatusVisible"
+
     /// «Kaspi сверена по 18 ноября».
     var coverageLine: String {
         guard let coveredThrough else { return "Выписок Kaspi ещё нет" }
@@ -60,6 +64,7 @@ extension ReconciliationStatus {
 /// Строка под сводкой месяца: по какой день сверено и что ждёт проверки.
 struct ReconciliationStatusRow: View {
     let status: ReconciliationStatus
+    var onHide: (() -> Void)? = nil
 
     private var iconName: String {
         if status.needsAttention { return "exclamationmark.circle.fill" }
@@ -93,6 +98,19 @@ struct ReconciliationStatusRow: View {
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
+
+            if let onHide {
+                Button(action: onHide) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color(.tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(.borderless)
+                .tint(.secondary)
+                .accessibilityLabel("Скрыть статус сверки")
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -46,6 +46,7 @@ struct AnalyticsView: View {
     @State private var collapsedCategories: Set<String> = []
 
     @State private var didInitializeAnchor = false
+    @AppStorage(ReconciliationStatus.visibilityKey) private var isReconciliationVisible = true
 
     /// Аналитика одной метки — открыта из её экрана: без ленты меток и
     /// переключателя режимов, внутри уже существующей навигации.
@@ -736,10 +737,22 @@ struct AnalyticsView: View {
                 )
             }
 
-            if let note = report.coverageNote {
-                Label(note, systemImage: "exclamationmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if isReconciliationVisible, let note = report.coverageNote {
+                HStack(alignment: .top, spacing: 8) {
+                    Label(note, systemImage: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Button {
+                        withAnimation { isReconciliationVisible = false }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Скрыть статус сверки")
+                }
             }
 
             NavigationLink {

@@ -32,6 +32,7 @@ struct TransactionsView: View {
     /// Период, счёт, категория, метка и валюта покупки.
     @State private var filter = TransactionFilter()
     @State private var isShowingFilter = false
+    @AppStorage(ReconciliationStatus.visibilityKey) private var isReconciliationVisible = true
 
     @Query(sort: \TransactionTag.createdAt, order: .reverse)
     private var tags: [TransactionTag]
@@ -112,18 +113,22 @@ struct TransactionsView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
 
-                        let status = reconciliationStatus
-                        // Ссылка спрятана под строкой: у видимой List дорисовывает вторую стрелку.
-                        ReconciliationStatusRow(status: status)
+                        if isReconciliationVisible {
+                            let status = reconciliationStatus
+                            // Ссылка спрятана под строкой: у видимой List дорисовывает вторую стрелку.
+                            ReconciliationStatusRow(status: status) {
+                                withAnimation { isReconciliationVisible = false }
+                            }
                             .background {
                                 NavigationLink("") {
                                     ReconciliationDetailView(status: status)
                                 }
                                 .opacity(0)
                             }
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
                     }
 
                     if filter.isActive {

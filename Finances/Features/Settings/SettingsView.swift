@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    /// «Kaspi сверена по …» в сводке месяца и аналитике — можно скрыть и вернуть здесь.
+    @AppStorage(ReconciliationStatus.visibilityKey) private var isReconciliationVisible = true
 
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
@@ -247,6 +249,15 @@ struct SettingsView: View {
                     SettingsRow(title: "Траты из Apple Pay", systemImage: "wave.3.right", color: .cyan, value: awaitingStatementCount > 0 ? "\(awaitingStatementCount)" : nil)
                 }
                 .buttonStyle(SettingsPressStyle())
+
+                SettingsDivider()
+
+                HStack(spacing: 14) {
+                    SettingsIcon(systemImage: "checkmark.seal.fill", color: .green)
+                    Toggle("Статус сверки выписок", isOn: $isReconciliationVisible)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
 
                 SettingsDivider()
 
