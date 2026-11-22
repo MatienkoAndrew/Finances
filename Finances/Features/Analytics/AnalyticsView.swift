@@ -42,6 +42,16 @@ struct AnalyticsView: View {
     @AppStorage("analytics.dailySectionCollapsed") private var isDailySectionCollapsed = false
     /// Вид графика по категориям (выбор запоминается между запусками).
     @AppStorage("analytics.categoryChartStyle") private var categoryChartStyle: CategoryChartStyle = .bars
+    /// Порядок строк в списке категорий (запоминается).
+    @AppStorage(CategoryListSort.storageKey) private var categorySort: CategoryListSort = .amount
+    @State private var isShowingPeriodPicker = false
+
+    /// Самый ранний год с операциями — граница выбора месяца.
+    private var earliestYear: Int {
+        let calendar = Calendar.current
+        let current = calendar.component(.year, from: .now)
+        return allTransactions.map(\.date).min().map { calendar.component(.year, from: $0) } ?? current
+    }
     /// Категории с подкатегориями раскрыты сразу, как в Alipay; здесь — свёрнутые вручную.
     @State private var collapsedCategories: Set<String> = []
 
@@ -344,11 +354,37 @@ struct AnalyticsView: View {
         }
     }
 
+    /// Кнопки разделов закреплены, когда есть отчёт: в режиме меток — при выбранной метке.
+    private var showsSectionBar: Bool {
+        selectedMode == .time || selectedTag != nil
+    }
+
     private func content(_ report: Report) -> some View {
+        ScrollViewReader { proxy in
+            reportScroll(report)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if showsSectionBar {
+                        AnalyticsSectionBar(dailyTitle: dailySectionTitle(report)) { section in
+                            if section == .daily, isDailySectionCollapsed {
+                                isDailySectionCollapsed = false
+                            }
+                            withAnimation(.snappy(duration: 0.35)) {
+                                proxy.scrollTo(section, anchor: .top)
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    private func reportScroll(_ report: Report) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
+            // Обычный VStack: разделов немного, а переход кнопками по ленивому
+            // стеку останавливался не на разделе — высоты непостроенных частей неизвестны.
+            VStack(alignment: .leading, spacing: 24) {
                 if selectedMode == .time {
                     periodHeroCard(report)
+                        .id(AnalyticsReportSection.overview)
                     breakdownSections(report)
                     comparisonSection(report)
                 } else {
@@ -360,6 +396,7 @@ struct AnalyticsView: View {
                     }
                     if let tag = selectedTag {
                         tagHeroCard(tag, report: report)
+                            .id(AnalyticsReportSection.overview)
                         breakdownSections(report)
                     }
                 }
@@ -384,6 +421,17 @@ struct AnalyticsView: View {
         }
         // Переход из графика и легенды категорий. Скрытая NavigationLink(isActive:)
         // при быстром «назад» и новом касании оставляла пустую страницу.
+        .sheet(isPresented: $isShowingPeriodPicker) {
+            AnalyticsPeriodPickerSheet(
+                scale: selectedScale,
+                current: report.snapshot.page.startDate,
+                earliestYear: earliestYear
+            ) { date in
+                withAnimation(.snappy(duration: 0.3)) {
+                    pageAnchorDate = snappedAnchorDate(clampAnchorDate(date), scale: selectedScale)
+                }
+            }
+        }
         .navigationDestination(item: $categoryNavigationTarget) { categoryTitle in
             TransactionListByCategoryView(
                 categoryTitle: categoryTitle,
@@ -445,7 +493,9 @@ struct AnalyticsView: View {
 
         // Разбивки идут одна за другой, без переключателя.
         dailySection(report)
+            .id(AnalyticsReportSection.daily)
         categorySection(report)
+            .id(AnalyticsReportSection.categories)
         merchantSection(report)
     }
 
@@ -690,11 +740,27 @@ struct AnalyticsView: View {
 
                 Spacer(minLength: 0)
 
-                Text(snapshot.page.displayTitle)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .contentTransition(.opacity)
+                // Название периода — кнопка выбора месяца (или года).
+                Button {
+                    isShowingPeriodPicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(snapshot.page.displayTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .contentTransition(.opacity)
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Выбрать месяц и год")
 
                 Spacer(minLength: 0)
 
@@ -1472,6 +1538,15 @@ struct AnalyticsView: View {
             HStack {
                 sectionHeader("Категории")
 
+                if !snapshot.categoryTotals.isEmpty {
+                    SortMenu(
+                        options: CategoryListSort.allCases,
+                        selection: $categorySort,
+                        title: \.title,
+                        systemImage: \.systemImage
+                    )
+                }
+
                 Spacer()
 
                 // Вид графика: полосы, кольцо или лента — запоминается.
@@ -1515,7 +1590,7 @@ struct AnalyticsView: View {
         let maxTotal = snapshot.categoryTotals.map(\.total).max() ?? 0
 
         return SettingsCard {
-            ForEach(Array(snapshot.categoryTotals.enumerated()), id: \.element.id) { index, item in
+            ForEach(Array(categorySort.sorted(snapshot.categoryTotals).enumerated()), id: \.element.id) { index, item in
                 if index > 0 {
                     SettingsDivider()
                 }
