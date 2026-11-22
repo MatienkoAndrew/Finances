@@ -66,7 +66,7 @@ enum BalanceReconciliation {
 
     /// Доводит начальный остаток так, чтобы баланс на дату сверки совпал с выпиской.
     static func align(_ check: BalanceCheck, kaspi: Account, context: ModelContext) throws {
-        let transactions = try context.fetch(FetchDescriptor<Transaction>())
+        let transactions = try AllTransactionsFetch.all(in: context)
         let kaspiID = kaspi.persistentModelID
 
         func touchesKaspi(_ transaction: Transaction) -> Bool {

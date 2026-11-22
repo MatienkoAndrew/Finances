@@ -63,8 +63,12 @@ final class TransactionsStore {
     /// Имя сущности в базе — по умолчанию это имя класса модели.
     @ObservationIgnored private let entityName = String(describing: Transaction.self)
 
+    /// Хранилище приложения — чтобы службы брали готовый список, а не читали таблицу.
+    @ObservationIgnored static weak var current: TransactionsStore?
+
     init(context: ModelContext) {
         self.context = context
+        Self.current = self
         refetch()
         // queue: nil — уведомление обрабатывается сразу внутри save(), до следующей
         // перерисовки: экраны не увидят удалённую операцию.
@@ -195,11 +199,32 @@ final class TransactionsStore {
         ids.insert(transaction.persistentModelID, at: low)
     }
 
+    func isBacked(by other: ModelContext) -> Bool {
+        context === other
+    }
+
     private func refetch() {
         let descriptor = FetchDescriptor<Transaction>(sortBy: [SortDescriptor(\.date, order: .reverse)])
         let fetched = (try? context.fetch(descriptor)) ?? []
         items = fetched
         dates = fetched.map(\.date)
         ids = fetched.map(\.persistentModelID)
+    }
+}
+
+/// Все операции контекста — из памяти хранилища, если это его контекст и
+/// несохранённых изменений нет; иначе — чтением из базы.
+///
+/// Полное чтение таблицы — сотни миллисекунд на большой истории, а после импорта
+/// его по очереди делали замена оплат Apple Pay, чистка дублей, сверка баланса,
+/// синхронизация курсов и категоризация. Хранилище после сохранения уже
+/// актуально (обновляется внутри `save()`).
+@MainActor
+enum AllTransactionsFetch {
+    static func all(in context: ModelContext) throws -> [Transaction] {
+        if let store = TransactionsStore.current, store.isBacked(by: context), !context.hasChanges {
+            return store.items
+        }
+        return try context.fetch(FetchDescriptor<Transaction>())
     }
 }

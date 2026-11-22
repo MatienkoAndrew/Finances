@@ -228,7 +228,10 @@ enum PDFImporter {
             return []
         }
 
-        return transactions.filter { transaction in
+        // Окно дат — двоичным поиском по списку «новые сверху», без чтения даты
+        // у каждой операции истории.
+        let window = dateWindow(transactions, from: lowerBound, through: upperBound)
+        return window.filter { transaction in
             guard transaction.date >= lowerBound, transaction.date < upperBound else { return false }
             // Оплата из Apple Pay в чужой валюте могла записаться без счёта.
             return transaction.fingerprint != nil
@@ -441,13 +444,40 @@ enum PDFImporter {
     /// тот же магазин и валюта, сумма не меньше возврата, за полгода до него.
     private static func linkRefunds(_ newTransactions: [Transaction], existing: [Transaction]) {
         let refunds = newTransactions.filter { $0.isRefund && $0.refundOfLinkKey == nil }
-        guard !refunds.isEmpty else { return }
-        let pool = existing + newTransactions
+        guard let earliestRefund = refunds.map(\.date).min(),
+              let latestRefund = refunds.map(\.date).max() else { return }
+        // Покупки отбираются один раз — только из окна дат возвратов, а не по всей
+        // истории на каждый возврат.
+        let windowStart = Calendar.current.date(byAdding: .day, value: -RefundLinker.maxDaysBeforeRefund, to: earliestRefund) ?? .distantPast
+        let pool = RefundLinker.candidates(
+            from: dateWindow(existing, from: windowStart, through: latestRefund) + newTransactions
+        )
         for refund in refunds {
             if let purchase = RefundLinker.automaticPurchase(for: refund, among: pool) {
                 refund.linkRefund(to: purchase)
             }
         }
+    }
+
+    /// Операции в [start, end] из списка «новые сверху» — двоичным поиском,
+    /// не читая дату каждой. Неотсортированный список проходится целиком.
+    static func dateWindow(_ transactions: [Transaction], from start: Date, through end: Date) -> [Transaction] {
+        func firstIndex(where predicate: (Date) -> Bool) -> Int {
+            var low = 0
+            var high = transactions.count
+            while low < high {
+                let mid = (low + high) / 2
+                if predicate(transactions[mid].date) { high = mid } else { low = mid + 1 }
+            }
+            return low
+        }
+        let isNewestFirst = transactions.count < 2 || transactions[0].date >= transactions[transactions.count - 1].date
+        guard isNewestFirst else {
+            return transactions.filter { $0.date >= start && $0.date <= end }
+        }
+        let lower = firstIndex { $0 <= end }
+        let upper = firstIndex { $0 < start }
+        return lower < upper ? Array(transactions[lower..<upper]) : []
     }
 
     private static func matchCategory(for row: ParsedStatementRow, context: ImportContext) -> CategoryMatch? {

@@ -130,7 +130,7 @@ enum AICategorizer {
     #if canImport(FoundationModels)
     @available(iOS 26.0, *)
     private static func categorize(context: ModelContext) async -> Int {
-        guard let transactions = try? context.fetch(FetchDescriptor<Transaction>()),
+        guard let transactions = try? AllTransactionsFetch.all(in: context),
               let categories = try? context.fetch(FetchDescriptor<ExpenseCategoryItem>()) else { return 0 }
 
         let options = CategoryOption.options(for: categories)

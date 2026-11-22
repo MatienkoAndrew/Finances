@@ -218,7 +218,7 @@ enum ImportHistory {
         var summary = ImportUndoSummary()
         let record = loadRecords().first { $0.importedAt == importedAt }
 
-        let transactions = try context.fetch(FetchDescriptor<Transaction>())
+        let transactions = try AllTransactionsFetch.all(in: context)
         let accounts = try context.fetch(FetchDescriptor<Account>())
         let accountsByKey = Dictionary(accounts.map { (key(of: $0), $0) }, uniquingKeysWith: { first, _ in first })
 

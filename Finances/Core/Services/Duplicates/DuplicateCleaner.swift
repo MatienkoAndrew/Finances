@@ -87,7 +87,7 @@ enum DuplicateCleaner {
     static func autoCleanupIfEnabled(context: ModelContext) -> [RemovedDuplicate] {
         guard isAutoCleanupEnabled else { return [] }
 
-        let transactions = (try? context.fetch(FetchDescriptor<Transaction>())) ?? []
+        let transactions = (try? AllTransactionsFetch.all(in: context)) ?? []
         let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
         let groups = findGroups(in: transactions, accounts: accounts)
         guard !groups.isEmpty else { return [] }

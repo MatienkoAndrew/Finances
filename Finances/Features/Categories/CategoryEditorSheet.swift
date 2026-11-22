@@ -372,7 +372,7 @@ struct CategoryEditorSheet: View {
             return
         }
 
-        let transactions = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+        let transactions = (try? AllTransactionsFetch.all(in: modelContext)) ?? []
         let rules = (try? modelContext.fetch(FetchDescriptor<CategoryRule>())) ?? []
         let oldName = category?.name ?? newName
         let existingItems = category.map { subcategoryItems(of: $0.name) } ?? []

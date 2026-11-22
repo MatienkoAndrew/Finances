@@ -126,21 +126,51 @@ enum RefundLinker {
         return (sameMerchant ? 0 : 10_000) + (coversRefund ? 0 : 1_000) + days
     }
 
+    /// Покупка с заранее прочитанными полями — для подбора к нескольким возвратам.
+    struct Candidate {
+        let transaction: Transaction
+        let date: Date
+        let amount: Double
+        let currency: String
+        let merchantKey: String
+    }
+
+    /// Покупки, к которым вообще можно привязать возврат, с полями, прочитанными один раз.
+    static func candidates(from transactions: [Transaction]) -> [Candidate] {
+        transactions.compactMap { transaction in
+            guard transaction.countsAsPurchaseInAnalytics, !transaction.isAwaitingStatement else { return nil }
+            return Candidate(
+                transaction: transaction,
+                date: transaction.date,
+                amount: transaction.amount,
+                currency: CurrencyDisplay.normalizedCode(from: transaction.currencyCode),
+                merchantKey: ExchangeRateDifferenceMatcher.merchantKey(transaction.details)
+            )
+        }
+    }
+
     /// Покупка, к которой возврат можно привязать без вопросов: тот же магазин и
     /// валюта, сумма не меньше возврата, за полгода до него. Из нескольких — ближайшая.
     static func automaticPurchase(for refund: Transaction, among transactions: [Transaction]) -> Transaction? {
+        automaticPurchase(for: refund, among: candidates(from: transactions))
+    }
+
+    static func automaticPurchase(for refund: Transaction, among candidates: [Candidate]) -> Transaction? {
         let key = ExchangeRateDifferenceMatcher.merchantKey(refund.details)
         guard !key.isEmpty else { return nil }
-        let earliest = Calendar.current.date(byAdding: .day, value: -maxDaysBeforeRefund, to: refund.date) ?? .distantPast
+        let refundDate = refund.date
+        let refundAmount = refund.amount
+        let refundCurrency = CurrencyDisplay.normalizedCode(from: refund.currencyCode)
+        let earliest = Calendar.current.date(byAdding: .day, value: -maxDaysBeforeRefund, to: refundDate) ?? .distantPast
 
-        return transactions
+        return candidates
             .filter {
-                $0.countsAsPurchaseInAnalytics && !$0.isAwaitingStatement &&
-                $0.date >= earliest && $0.date <= refund.date &&
-                sameCurrency($0, refund) && $0.amount + 0.005 >= refund.amount &&
-                ExchangeRateDifferenceMatcher.merchantKey($0.details) == key
+                $0.date >= earliest && $0.date <= refundDate &&
+                $0.currency == refundCurrency && $0.amount + 0.005 >= refundAmount &&
+                $0.merchantKey == key
             }
-            .max { $0.date < $1.date }
+            .max { $0.date < $1.date }?
+            .transaction
     }
 
     static func formattedAmount(_ transaction: Transaction) -> String {

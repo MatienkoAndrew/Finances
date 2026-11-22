@@ -83,7 +83,7 @@ enum ApplePayExpenses {
             }
         }
 
-        let transactions = try context.fetch(FetchDescriptor<Transaction>())
+        let transactions = try AllTransactionsFetch.all(in: context)
         let category = CategoryRuleEngine.match(
             operationType: KaspiOperationType.purchase.rawValue,
             details: merchantName,
