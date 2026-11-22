@@ -18,11 +18,13 @@ struct TransactionListByCategoryView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
     @AppStorage(TransactionListSort.storageKey) private var sort: TransactionListSort = .date
 
     /// Курсовые разницы, привязанные к своим покупкам, отдельной строкой не показываются.
     private var foldedDifferences: FoldedExchangeRateDifferences {
-        ExchangeRateDifferenceMatcher.fold(transactions)
+        FoldedDifferencesCache.current(transactionsSnapshot)
     }
 
     private func filteredTransactions(hiding hidden: Set<PersistentIdentifier>) -> [Transaction] {

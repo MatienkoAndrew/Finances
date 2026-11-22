@@ -6,6 +6,9 @@ struct AnalyticsView: View {
     @AllTransactions
     private var allTransactions: [Transaction]
 
+    /// Операции и их ревизия — ключ общего индекса аналитики.
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
     /// Аналитика по выборке из списка операций: только подходящие под фильтр.
     private let transactionFilter: TransactionFilter?
 
@@ -123,7 +126,7 @@ struct AnalyticsView: View {
     private func coverageNote(for page: AnalyticsPeriodPage) -> String? {
         // Скрытый статус не считаем вовсе.
         guard isReconciliationVisible else { return nil }
-        let status = ReconciliationStatus.cached(transactions: allTransactions)
+        let status = ReconciliationStatus.cached(transactionsSnapshot)
         let awaiting = status.awaitingStatement.filter { page.contains($0.date) }.count
         guard !status.isFullyCovered(start: page.startDate, endExclusive: page.endDateExclusive) || awaiting > 0 else {
             return nil
@@ -137,41 +140,35 @@ struct AnalyticsView: View {
     }
 
     private func makeReport() -> Report {
-        // Курсовые разницы считаются внутри своих покупок — пары ищутся один раз на отчёт.
-        // Пары ищутся по всем операциям: курсовая разница или возврат могут не попасть в фильтр.
-        let folded = ExchangeRateDifferenceMatcher.fold(allTransactions)
+        // Общий индекс: пары «покупка — курсовая разница / возврат», суммы и
+        // категории операций готовы заранее и пересчитываются только при изменении
+        // данных. Пары ищутся по всем операциям: курсовая разница или возврат могут
+        // не попасть в фильтр.
+        let fullIndex = AnalyticsIndex.current(transactionsSnapshot, settings: settings, trackedRates: trackedRates)
+        let folded = fullIndex.folded
         let filterMatches = filterMatches
-        let transactions = transactionFilter == nil ? allTransactions : allTransactions.filter(filterMatches)
+        let index = transactionFilter.map { filteredIndex(fullIndex, filter: $0, matches: filterMatches) } ?? fullIndex
 
         switch selectedMode {
         case .time:
             let snapshot = AnalyticsSnapshotBuilder.build(
-                transactions: transactions,
+                index: index,
                 scale: selectedScale,
-                anchorDate: pageAnchorDate,
-                settings: settings,
-                trackedRates: trackedRates,
-                folded: folded
+                anchorDate: pageAnchorDate
             )
             let page = snapshot.page
 
             return Report(
                 snapshot: snapshot,
                 previousSnapshot: AnalyticsSnapshotBuilder.build(
-                    transactions: transactions,
+                    index: index,
                     scale: selectedScale,
-                    anchorDate: previousAnchorDate,
-                    settings: settings,
-                    trackedRates: trackedRates,
-                    folded: folded
+                    anchorDate: previousAnchorDate
                 ),
                 timeline: ExpenseTimelineData.build(
-                    transactions: transactions,
+                    index: index,
                     scale: selectedScale,
-                    pageStart: page.startDate,
-                    settings: settings,
-                    trackedRates: trackedRates,
-                    folded: folded
+                    pageStart: page.startDate
                 ),
                 tagGranularity: nil,
                 availableTagGranularities: [],
@@ -181,12 +178,9 @@ struct AnalyticsView: View {
                     containsDate: { date in page.contains(date) }
                 ),
                 comparison: AnalyticsPeriodComparisonBuilder.build(
-                    transactions: transactions,
+                    index: index,
                     scale: selectedScale,
                     page: page,
-                    settings: settings,
-                    trackedRates: trackedRates,
-                    folded: folded,
                     restrict: transactionFilter == nil ? nil : filterMatches
                 ),
                 coverageNote: coverageNote(for: page)
@@ -214,7 +208,7 @@ struct AnalyticsView: View {
                 )
             }
 
-            let tagged = transactions.filter { $0.hasTag(tag.name) }
+            let tagged = index.tagged(tag.name)
             let available = TagAnalyticsBuilder.availableGranularities(for: tag, taggedTransactions: tagged)
             let granularity: TagBinGranularity?
             if let tagGranularityOverride, available.contains(tagGranularityOverride) {
@@ -268,6 +262,26 @@ struct AnalyticsView: View {
                 )
             )
         }
+    }
+
+    /// Индекс выборки по фильтру — тоже один на ревизию данных и фильтр.
+    private static var filteredIndexCache: (key: String, index: AnalyticsIndex)?
+
+    private func filteredIndex(
+        _ full: AnalyticsIndex,
+        filter: TransactionFilter,
+        matches: (Transaction) -> Bool
+    ) -> AnalyticsIndex {
+        let key = "\(transactionsSnapshot.revision)|\(full.transactions.count)|\(filter.hashValue)"
+        if let cached = Self.filteredIndexCache, cached.key == key { return cached.index }
+        let index = AnalyticsIndex(
+            transactions: full.transactions.filter(matches),
+            folded: full.folded,
+            settings: settings,
+            trackedRates: trackedRates
+        )
+        Self.filteredIndexCache = (key, index)
+        return index
     }
 
     /// Последний посчитанный отчёт — для скрытой вкладки.

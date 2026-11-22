@@ -22,6 +22,7 @@ struct TagTransactionsView: View {
     @State private var selection: Set<PersistentIdentifier> = []
     @Query private var settings: [AppSettings]
     @Query private var trackedRates: [TrackedExchangeRate]
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
     @State private var isEditingTag = false
     @State private var isConfirmingDelete = false
     @State private var isShowingAnalytics = false
@@ -124,7 +125,12 @@ struct TagTransactionsView: View {
 
     /// Итог по метке: сколько потрачено, сколько операций, период — и вход в аналитику.
     private var summaryCard: some View {
-        let stats = TagStats.make(tags: [tag], transactions: transactions, settings: settings.first, trackedRates: trackedRates)[tag.persistentModelID] ?? .empty
+        let stats = TagStats.make(
+            tags: [tag],
+            index: AnalyticsIndex.current(transactionsSnapshot, settings: settings.first, trackedRates: trackedRates),
+            settings: settings.first,
+            trackedRates: trackedRates
+        )[tag.persistentModelID] ?? .empty
         let color = tag.colorHex.flatMap { Color(hex: $0) } ?? .accentColor
 
         return HStack(spacing: 14) {

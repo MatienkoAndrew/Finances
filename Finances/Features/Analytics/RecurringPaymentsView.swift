@@ -15,6 +15,8 @@ struct RecurringPaymentsView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
 
@@ -29,7 +31,7 @@ struct RecurringPaymentsView: View {
             transactions: transactions,
             settings: settingsList.first,
             trackedRates: trackedRates,
-            folded: ExchangeRateDifferenceMatcher.fold(transactions)
+            folded: FoldedDifferencesCache.current(transactionsSnapshot)
         )
 
         List {
@@ -153,6 +155,8 @@ struct RecurringSeriesView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
     @Query(sort: \TrackedExchangeRate.code, order: .forward)
     private var trackedRates: [TrackedExchangeRate]
 
@@ -164,7 +168,7 @@ struct RecurringSeriesView: View {
             transactions: transactions,
             settings: settingsList.first,
             trackedRates: trackedRates,
-            folded: ExchangeRateDifferenceMatcher.fold(transactions)
+            folded: FoldedDifferencesCache.current(transactionsSnapshot)
         )
 
         if let series = overview.series.first(where: { $0.id == seriesID }) {

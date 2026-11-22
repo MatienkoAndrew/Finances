@@ -70,7 +70,10 @@ struct RootTabView: View {
             trackedRates: trackedRates,
             tags: tags
         ))
-        .environment(\.allTransactionsSnapshot, AllTransactionsSnapshot(items: transactionsStore.items))
+        .environment(\.allTransactionsSnapshot, AllTransactionsSnapshot(
+            items: transactionsStore.items,
+            revision: transactionsStore.revision
+        ))
         .onOpenURL { url in
             // Импорт и его итог показывает экран транзакций.
             guard url.isFileURL else { return }

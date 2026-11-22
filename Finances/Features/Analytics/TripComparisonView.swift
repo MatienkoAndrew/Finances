@@ -13,6 +13,8 @@ struct TripComparisonView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
     @Query(sort: \TransactionTag.createdAt, order: .reverse)
     private var tags: [TransactionTag]
 
@@ -35,7 +37,7 @@ struct TripComparisonView: View {
     private var second: TransactionTag? { tags.first { $0.name == secondName } }
 
     var body: some View {
-        let folded = ExchangeRateDifferenceMatcher.fold(transactions)
+        let folded = FoldedDifferencesCache.current(transactionsSnapshot)
         let firstStats = first.flatMap { stats(for: $0, folded: folded) }
         let secondStats = second.flatMap { stats(for: $0, folded: folded) }
 

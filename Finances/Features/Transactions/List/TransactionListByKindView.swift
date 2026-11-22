@@ -16,11 +16,13 @@ struct TransactionListByKindView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
     @AppStorage(TransactionListSort.storageKey) private var sort: TransactionListSort = .date
 
     /// Курсовые разницы, привязанные к своим покупкам, отдельной строкой не показываются.
     private var foldedDifferences: FoldedExchangeRateDifferences {
-        ExchangeRateDifferenceMatcher.fold(transactions)
+        FoldedDifferencesCache.current(transactionsSnapshot)
     }
 
     /// Как в аналитике: в расходах — и оплаты переводом, и возвраты, в доходах — без них.

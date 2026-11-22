@@ -11,6 +11,14 @@ struct TransactionsView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    /// Операции и их ревизия — ключ общего индекса аналитики.
+    @Environment(\.allTransactionsSnapshot) private var transactionsSnapshot
+
+    /// Общий индекс: пары курсовых разниц и возвратов, суммы операций — готовые.
+    private var analyticsIndex: AnalyticsIndex {
+        AnalyticsIndex.current(transactionsSnapshot, settings: settings, trackedRates: trackedRates)
+    }
+
     @Query(sort: \Account.createdAt, order: .forward)
     private var accounts: [Account]
 
@@ -68,7 +76,7 @@ struct TransactionsView: View {
 
     /// По какой день сверены выписки и что ждёт проверки.
     private var reconciliationStatus: ReconciliationStatus {
-        ReconciliationStatus.cached(transactions: transactions)
+        ReconciliationStatus.cached(transactionsSnapshot)
     }
 
     /// Поиск или фильтр сужают список — тогда вместо сводки месяца итог выборки.
@@ -79,7 +87,7 @@ struct TransactionsView: View {
     /// Курсовые разницы, приписанные к своим покупкам: отдельной строкой не показываются.
     /// Считаются по всем операциям, чтобы пары не зависели от фильтра и поиска.
     private var foldedDifferences: FoldedExchangeRateDifferences {
-        ExchangeRateDifferenceMatcher.fold(transactions)
+        analyticsIndex.folded
     }
 
     private func filteredTransactions(folded: FoldedExchangeRateDifferences) -> [Transaction] {
@@ -345,14 +353,7 @@ struct TransactionsView: View {
     }
 
     private func monthSnapshot(anchor: Date, folded: FoldedExchangeRateDifferences) -> AnalyticsSnapshot {
-        AnalyticsSnapshotBuilder.build(
-            transactions: transactions,
-            scale: .month,
-            anchorDate: anchor,
-            settings: settings,
-            trackedRates: trackedRates,
-            folded: folded
-        )
+        AnalyticsSnapshotBuilder.build(index: analyticsIndex, scale: .month, anchorDate: anchor)
     }
 
     private var emptyState: some View {

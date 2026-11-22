@@ -118,8 +118,29 @@ enum AnalyticsSnapshotBuilder {
         // Пары «покупка — курсовая разница» ищутся по всем операциям: разница
         // часто приходит в следующем периоде.
         let folded = folded ?? ExchangeRateDifferenceMatcher.fold(transactions)
+        let index = AnalyticsIndex(
+            transactions: newestFirst(transactions),
+            folded: folded,
+            settings: settings,
+            trackedRates: trackedRates
+        )
+        return build(index: index, scale: scale, anchorDate: anchorDate)
+    }
+
+    /// Операции новыми сверху — так их ждёт `AnalyticsIndex`.
+    static func newestFirst(_ transactions: [Transaction]) -> [Transaction] {
+        let isSorted = zip(transactions, transactions.dropFirst()).allSatisfy { $0.date >= $1.date }
+        return isSorted ? transactions : transactions.sorted { $0.date > $1.date }
+    }
+
+    /// Отчёт периода по готовому индексу: проходит только операции своего отрезка.
+    static func build(
+        index: AnalyticsIndex,
+        scale: AnalyticsTimeScale,
+        anchorDate: Date
+    ) -> AnalyticsSnapshot {
         let page = makePage(for: scale, anchorDate: anchorDate)
-        let filtered = transactions.filter { page.contains($0.date) }
+        let range = index.range(from: page.startDate, to: page.endDateExclusive)
 
         let bins = makeBins(for: scale, page: page)
 
@@ -129,32 +150,59 @@ enum AnalyticsSnapshotBuilder {
         var expenseCount = 0
         var incomeCount = 0
 
-        var categoryTotals = CategoryTotalsAccumulator()
-        var merchantMap: [String: Double] = [:]
-        var merchantByCategory: [String: [String: Double]] = [:]
+        // Суммы — в массивы по номерам из индекса: без строковых ключей на каждой операции.
+        var subTotals = Array(repeating: 0.0, count: index.subcategoryKeys.count)
+        var subCounts = Array(repeating: 0, count: index.subcategoryKeys.count)
+        var subTouched = Array(repeating: false, count: index.subcategoryKeys.count)
+        var merchantTotalsByID = Array(repeating: 0.0, count: index.merchantNames.count)
+        var merchantByCategoryID: [Int: Double] = [:]
+        let merchantCount = index.merchantNames.count
 
         let calendar = Calendar.current
 
-        for transaction in filtered {
-            if let rub = expenseRub(for: transaction, settings: settings, trackedRates: trackedRates, folded: folded) {
-                let isPurchase = transaction.countsAsPurchaseInAnalytics
+        for i in range {
+            if let rub = index.expenseRub[i] {
+                let isPurchase = index.isPurchase[i]
                 totalExpensesRub += rub
                 if isPurchase { expenseCount += 1 }
 
-                if let binIndex = binIndexForDate(transaction.date, scale: scale, page: page, calendar: calendar) {
+                if let binIndex = binIndexForDate(index.dates[i], scale: scale, page: page, calendar: calendar) {
                     chartTotals[binIndex] += rub
                 }
 
-                categoryTotals.addExpense(transaction, rub: rub, isPurchase: isPurchase)
-                let category = CategoryTotalsAccumulator.categoryName(of: transaction)
+                let sub = index.subcategoryID[i]
+                subTotals[sub] += rub
+                subCounts[sub] += isPurchase ? 1 : 0
+                subTouched[sub] = true
 
-                let merchant = normalizedMerchantName(transaction.details)
-                merchantMap[merchant, default: 0] += rub
-                merchantByCategory[category, default: [:]][merchant, default: 0] += rub
-            } else if let rub = incomeRub(for: transaction, settings: settings, trackedRates: trackedRates) {
+                let merchant = index.merchantID[i]
+                merchantTotalsByID[merchant] += rub
+                merchantByCategoryID[index.categoryID[i] * merchantCount + merchant, default: 0] += rub
+            } else if let rub = index.incomeRub[i] {
                 totalIncomeRub += rub
                 incomeCount += 1
             }
+        }
+
+        var categoryTotals = CategoryTotalsAccumulator()
+        for sub in subTotals.indices where subTouched[sub] {
+            let key = index.subcategoryKeys[sub]
+            categoryTotals.add(
+                category: index.categoryNames[key.category],
+                subcategory: key.name,
+                rub: subTotals[sub],
+                count: subCounts[sub]
+            )
+        }
+
+        var merchantMap: [String: Double] = [:]
+        for (id, total) in merchantTotalsByID.enumerated() where total != 0 {
+            merchantMap[index.merchantNames[id]] = total
+        }
+        var merchantByCategory: [String: [String: Double]] = [:]
+        for (key, total) in merchantByCategoryID {
+            let category = index.categoryNames[key / merchantCount]
+            merchantByCategory[category, default: [:]][index.merchantNames[key % merchantCount]] = total
         }
 
         let chartPoints = bins.enumerated().map { index, bin in
@@ -173,7 +221,8 @@ enum AnalyticsSnapshotBuilder {
         let now = Date()
         let lastRelevantDate: Date
         
-        if let lastTransactionDate = filtered.map({ $0.date }).max() {
+        // Операции идут новыми сверху: первая в отрезке — самая поздняя.
+        if let lastTransactionDate = range.isEmpty ? nil : index.dates[range.lowerBound] {
             // Используем последнюю транзакцию или текущую дату, в зависимости от того, что раньше
             lastRelevantDate = min(lastTransactionDate, now)
         } else {
@@ -413,7 +462,7 @@ enum AnalyticsSnapshotBuilder {
         }
     }
 
-    private static func normalizedMerchantName(_ details: String) -> String {
+    static func normalizedMerchantName(_ details: String) -> String {
         let uppercased = details.uppercased()
 
         if uppercased.hasPrefix("GRAB ") { return "GRAB" }
