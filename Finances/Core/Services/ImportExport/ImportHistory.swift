@@ -139,10 +139,17 @@ enum ImportHistory {
         save(Array(([record] + loadRecords()).prefix(limit)))
     }
 
+    /// Записи в памяти: файл читается один раз, а не на каждой перерисовке экрана.
+    private static var cachedRecords: (url: URL, records: [ImportRecord])?
+
     static func loadRecords() -> [ImportRecord] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [] }
+        let url = fileURL
+        if let cachedRecords, cachedRecords.url == url { return cachedRecords.records }
         // Формат дат по умолчанию: `importedAt` сравнивается с полем транзакции точно.
-        return (try? JSONDecoder().decode([ImportRecord].self, from: data)) ?? []
+        let records = (try? Data(contentsOf: url))
+            .flatMap { try? JSONDecoder().decode([ImportRecord].self, from: $0) } ?? []
+        cachedRecords = (url, records)
+        return records
     }
 
     private static func removeRecord(importedAt: Date) {
@@ -150,6 +157,7 @@ enum ImportHistory {
     }
 
     private static func save(_ records: [ImportRecord]) {
+        cachedRecords = (fileURL, records)
         guard let data = try? JSONEncoder().encode(records) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }

@@ -68,11 +68,7 @@ struct TransactionsView: View {
 
     /// По какой день сверены выписки и что ждёт проверки.
     private var reconciliationStatus: ReconciliationStatus {
-        ReconciliationStatus.make(
-            coverages: StatementCoverageStore.load(),
-            legacyBatches: ImportHistory.batches(in: transactions),
-            transactions: transactions
-        )
+        ReconciliationStatus.cached(transactions: transactions)
     }
 
     /// Поиск или фильтр сужают список — тогда вместо сводки месяца итог выборки.
