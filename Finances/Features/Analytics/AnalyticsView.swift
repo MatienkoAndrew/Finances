@@ -384,11 +384,16 @@ struct AnalyticsView: View {
         ScrollView {
             // Ленивый стек: при смене масштаба строятся только видимые разделы.
             LazyVStack(alignment: .leading, spacing: 24) {
+                // Точка перехода «Обзор» — одна на оба режима. Раньше `.id` стоял
+                // на карточке месяца и на карточке метки сразу, и ленивый стек
+                // принимал их за один вид: в метках оставалась карточка месяца.
+                Color.clear
+                    .frame(height: 0)
+                    .padding(.bottom, -24) // без лишнего отступа стека сверху
+                    .id(AnalyticsReportSection.overview)
+
                 if selectedMode == .time {
                     periodHeroCard(report)
-                        .id(AnalyticsReportSection.overview)
-                    breakdownSections(report)
-                    comparisonSection(report)
                 } else {
                     // В режиме меток период задан самой меткой, поэтому
                     // W/M/Y и стрелки скрыты: сверху лента меток и карточка
@@ -398,9 +403,17 @@ struct AnalyticsView: View {
                     }
                     if let tag = selectedTag {
                         tagHeroCard(tag, report: report)
-                            .id(AnalyticsReportSection.overview)
-                        breakdownSections(report)
                     }
+                }
+
+                // Разбивки — общие для обоих режимов и стоят в одном месте:
+                // у разделов с `.id` не должно быть двойников в разных ветках.
+                if selectedMode == .time || selectedTag != nil {
+                    breakdownSections(report)
+                }
+
+                if selectedMode == .time {
+                    comparisonSection(report)
                 }
             }
             .padding(.horizontal, 16)
@@ -529,6 +542,21 @@ struct AnalyticsView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Управление метками")
+
+                        // Сравнение двух меток — рядом с лентой, чтобы не искать его в карточке.
+                        if tags.count > 1 {
+                            NavigationLink {
+                                TripComparisonView(initialTagName: selectedTag?.name)
+                            } label: {
+                                Label("Сравнить", systemImage: "rectangle.split.2x1")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 34)
+                                    .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .scrollClipDisabled()
