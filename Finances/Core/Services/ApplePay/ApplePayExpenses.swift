@@ -202,11 +202,14 @@ enum ApplePayExpenses {
         return CategoryNameNormalizer.normalize(category) != "другое"
     }
 
-    /// «−2 450 KZT · Magnum · Еда»; у валютной оплаты — сумма в валюте и примерно в тенге.
+    /// «−350 NT$ (≈ 870 ₽) · Magnum · Еда»: сумма в валюте оплаты и примерно в рублях.
+    /// Рубли не дублируются, если платили в рублях или курса ещё нет.
     private static func summary(of transaction: Transaction) -> String {
-        var amount = "−\(format(transaction.amount, transaction.currencyCode))"
-        if let foreignAmount = transaction.foreignAmount, let foreignCurrency = transaction.foreignCurrencyCode {
-            amount = "−\(format(foreignAmount, foreignCurrency)) (≈ \(format(transaction.amount, transaction.currencyCode)))"
+        let paidValue = transaction.foreignAmount ?? transaction.amount
+        let paidCurrency = transaction.foreignCurrencyCode ?? transaction.currencyCode
+        var amount = "−\(format(paidValue, paidCurrency))"
+        if CurrencyDisplay.normalizedCode(from: paidCurrency) != "RUB", let rubAmount = transaction.rubAmount {
+            amount += " (≈ \(format(rubAmount, "RUB")))"
         }
         return [amount, transaction.details, transaction.categoryName]
             .compactMap { $0 }
