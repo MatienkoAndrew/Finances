@@ -1922,38 +1922,48 @@ struct AnalyticsView: View {
     }
 
     /// Легенда в две колонки: цвет, категория, доля. Тап — операции категории.
+    /// Легенда в два столбца, читается сверху вниз: сначала левый столбец,
+    /// потом правый (а не строками-зигзагом).
     private func categoryLegend(_ items: [AnalyticsCategoryTotal], total: Double) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-            alignment: .leading,
-            spacing: 10
-        ) {
-            ForEach(items) { item in
-                Button {
-                    categoryNavigationTarget = item.category
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(categoryColor(item.category))
-                            .frame(width: 8, height: 8)
+        let leftCount = (items.count + 1) / 2
+        let columns = [Array(items.prefix(leftCount)), Array(items.dropFirst(leftCount))]
 
-                        Text(item.category)
-                            .font(.caption)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 4)
-
-                        Text(formattedPercent(total > 0 ? item.total / total : 0))
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
+        return HStack(alignment: .top, spacing: 12) {
+            ForEach(columns.indices, id: \.self) { index in
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(columns[index]) { item in
+                        legendRow(item, total: total)
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
+    }
+
+    private func legendRow(_ item: AnalyticsCategoryTotal, total: Double) -> some View {
+        Button {
+            categoryNavigationTarget = item.category
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(categoryColor(item.category))
+                    .frame(width: 8, height: 8)
+
+                Text(item.category)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text(formattedPercent(total > 0 ? item.total / total : 0))
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Chart paging
