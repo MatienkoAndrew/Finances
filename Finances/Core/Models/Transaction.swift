@@ -86,6 +86,11 @@ final class Transaction {
     /// У возврата — `linkKey` покупки, к которой он относится.
     var refundOfLinkKey: String? = nil
 
+    /// Пользователь отметил покупку регулярным платежом (`RecurringPeriod`):
+    /// все списания того же магазина в той же валюте — одна подписка.
+    /// Optional — для миграции.
+    var recurringPeriodRaw: String? = nil
+
     var createdAt: Date
 
     var fromAccount: Account?
@@ -343,6 +348,48 @@ extension Transaction {
     /// Снимал ли пользователь эту метку вручную раньше.
     func isTagManuallyExcluded(_ tagName: String) -> Bool {
         manuallyExcludedTagNames?.contains(tagName) == true
+    }
+}
+
+/// Как часто повторяется регулярный платёж.
+enum RecurringPeriod: String, CaseIterable, Identifiable {
+    case weekly
+    case monthly
+    case yearly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .weekly: return "Каждую неделю"
+        case .monthly: return "Каждый месяц"
+        case .yearly: return "Каждый год"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .weekly: return "в неделю"
+        case .monthly: return "в месяц"
+        case .yearly: return "в год"
+        }
+    }
+
+    /// Во сколько раз платёж больше или меньше месячного.
+    var monthlyFactor: Double {
+        switch self {
+        case .weekly: return 52.0 / 12.0
+        case .monthly: return 1
+        case .yearly: return 1.0 / 12.0
+        }
+    }
+
+    var calendarStep: (component: Calendar.Component, value: Int) {
+        switch self {
+        case .weekly: return (.weekOfYear, 1)
+        case .monthly: return (.month, 1)
+        case .yearly: return (.year, 1)
+        }
     }
 }
 

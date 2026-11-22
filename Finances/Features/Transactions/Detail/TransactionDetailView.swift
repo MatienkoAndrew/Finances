@@ -631,6 +631,11 @@ struct TransactionDetailView: View {
                 tagsValue
             }
 
+            if transaction.countsAsPurchaseInAnalytics {
+                Divider().padding(.leading, 16)
+                recurringRow
+            }
+
             Divider().padding(.leading, 16)
 
             managementRow("Заметка") {
@@ -648,6 +653,47 @@ struct TransactionDetailView: View {
             }
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    /// Регулярный платёж: отметка относится ко всем покупкам того же магазина в той же валюте.
+    private var recurringRow: some View {
+        Menu {
+            Picker(
+                "Регулярный платёж",
+                selection: Binding(
+                    get: { transaction.recurringPeriodRaw.flatMap(RecurringPeriod.init(rawValue:)) },
+                    set: { newValue in
+                        RecurringPaymentsOverview.setPeriod(newValue, forSeriesOf: transaction, in: allTransactions)
+                        try? modelContext.save()
+                    }
+                )
+            ) {
+                Text("Нет").tag(nil as RecurringPeriod?)
+                ForEach(RecurringPeriod.allCases) { period in
+                    Text(period.title).tag(Optional(period))
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Text("Регулярный платёж")
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 12)
+
+                Text(transaction.recurringPeriodRaw.flatMap(RecurringPeriod.init(rawValue:))?.title ?? "Нет")
+                    .font(.subheadline)
+                    .foregroundStyle(transaction.recurringPeriodRaw == nil ? .tertiary : .primary)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Назначение: возврат, оплата, перемещение между своими счетами.
