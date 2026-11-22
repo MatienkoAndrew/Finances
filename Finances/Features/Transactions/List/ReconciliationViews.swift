@@ -61,11 +61,21 @@ extension ReconciliationStatus {
 struct ReconciliationStatusRow: View {
     let status: ReconciliationStatus
 
+    private var iconName: String {
+        if status.needsAttention { return "exclamationmark.circle.fill" }
+        return status.coveredThrough == nil ? "doc.text.magnifyingglass" : "checkmark.seal.fill"
+    }
+
+    private var iconColor: Color {
+        if status.needsAttention { return .orange }
+        return status.coveredThrough == nil ? .secondary : .green
+    }
+
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: status.needsAttention ? "exclamationmark.circle.fill" : "checkmark.seal.fill")
+            Image(systemName: iconName)
                 .font(.title3)
-                .foregroundStyle(status.needsAttention ? Color.orange : Color.green)
+                .foregroundStyle(iconColor)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(status.coverageLine)

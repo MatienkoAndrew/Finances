@@ -113,12 +113,14 @@ struct TransactionsView: View {
                             .listRowSeparator(.hidden)
 
                         let status = reconciliationStatus
-                        NavigationLink {
-                            ReconciliationDetailView(status: status)
-                        } label: {
-                            ReconciliationStatusRow(status: status)
-                        }
-                        .buttonStyle(.plain)
+                        // Ссылка спрятана под строкой: у видимой List дорисовывает вторую стрелку.
+                        ReconciliationStatusRow(status: status)
+                            .background {
+                                NavigationLink("") {
+                                    ReconciliationDetailView(status: status)
+                                }
+                                .opacity(0)
+                            }
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -187,7 +189,8 @@ struct TransactionsView: View {
                     accounts: accounts,
                     categories: categories,
                     tags: tags,
-                    currencies: purchaseCurrencies
+                    currencies: purchaseCurrencies,
+                    activeDays: Set(transactions.map { Calendar.current.startOfDay(for: $0.date) })
                 )
             }
             .searchable(text: $searchText, prompt: "Поиск по деталям, категории, счетам")
