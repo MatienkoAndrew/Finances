@@ -124,7 +124,7 @@ struct TagTransactionsView: View {
 
     /// Итог по метке: сколько потрачено, сколько операций, период — и вход в аналитику.
     private var summaryCard: some View {
-        let stats = TagStats.make(tags: [tag], transactions: taggedTransactions, settings: settings.first, trackedRates: trackedRates)[tag.persistentModelID] ?? .empty
+        let stats = TagStats.make(tags: [tag], transactions: transactions, settings: settings.first, trackedRates: trackedRates)[tag.persistentModelID] ?? .empty
         let color = tag.colorHex.flatMap { Color(hex: $0) } ?? .accentColor
 
         return HStack(spacing: 14) {

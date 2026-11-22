@@ -165,7 +165,8 @@ struct TagsManagementView: View {
 
 // MARK: - Stats
 
-/// Сколько операций у метки и сколько по ним потрачено в рублях.
+/// Сколько покупок у метки и сколько по ним потрачено в рублях —
+/// ровно те же цифры, что в аналитике метки.
 struct TagStats {
     var count = 0
     var spentRub = 0.0
@@ -178,23 +179,22 @@ struct TagStats {
         settings: AppSettings?,
         trackedRates: [TrackedExchangeRate]
     ) -> [PersistentIdentifier: TagStats] {
-        let idsByName = Dictionary(tags.map { ($0.name, $0.persistentModelID) }, uniquingKeysWith: { first, _ in first })
-        var result: [PersistentIdentifier: TagStats] = [:]
+        // `transactions` — все операции, а не только отмеченные: курсовая разница
+        // или покупка без метки иначе не находят пару, и сумма расходится с аналитикой.
+        // Сумма и число покупок — из того же расчёта, что и карточка метки в аналитике:
+        // период метки, курсовые разницы и возвраты внутри покупок, без снятий и разниц
+        // отдельными строками.
         let folded = ExchangeRateDifferenceMatcher.fold(transactions)
-        for transaction in transactions {
-            for name in transaction.tagNames ?? [] {
-                guard let id = idsByName[name] else { continue }
-                result[id, default: .empty].count += 1
-                // Как в аналитике: оплаты переводом — расход, возвраты уменьшают покупки.
-                if let rub = AnalyticsSnapshotBuilder.expenseRub(
-                    for: transaction,
-                    settings: settings,
-                    trackedRates: trackedRates,
-                    folded: folded
-                ) {
-                    result[id, default: .empty].spentRub += rub
-                }
-            }
+        var result: [PersistentIdentifier: TagStats] = [:]
+        for tag in tags {
+            guard let trip = TripStats.make(
+                tag: tag,
+                transactions: transactions,
+                settings: settings,
+                trackedRates: trackedRates,
+                folded: folded
+            ) else { continue }
+            result[tag.persistentModelID] = TagStats(count: trip.purchaseCount, spentRub: trip.totalRub)
         }
         return result
     }
