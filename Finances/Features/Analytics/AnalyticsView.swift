@@ -368,11 +368,11 @@ struct AnalyticsView: View {
                             }
                             // Ленивый стек не знает высот непостроенных разделов: первый
                             // переход их строит и встаёт примерно, второй — точно на раздел.
+                            // Без анимации: во время анимированной прокрутки ленивый
+                            // стек достраивает разделы и останавливается мимо цели.
                             proxy.scrollTo(section, anchor: .top)
-                            DispatchQueue.main.async {
-                                withAnimation(.snappy(duration: 0.25)) {
-                                    proxy.scrollTo(section, anchor: .top)
-                                }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                proxy.scrollTo(section, anchor: .top)
                             }
                         }
                     }
