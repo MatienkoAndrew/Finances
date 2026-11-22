@@ -242,7 +242,7 @@ struct AnalyticsCategoryComparisonView: View {
                 NavigationLink("Операции") {
                     TransactionListByCategoryView(
                         categoryTitle: change.category,
-                        scope: range.scope
+                        scope: comparison.scope(for: range)
                     )
                 }
             }

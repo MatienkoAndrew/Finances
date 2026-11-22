@@ -4,7 +4,17 @@ import Charts
 
 struct AnalyticsView: View {
     @AllTransactions
-    private var transactions: [Transaction]
+    private var allTransactions: [Transaction]
+
+    /// Аналитика по выборке из списка операций: только подходящие под фильтр.
+    private let transactionFilter: TransactionFilter?
+
+    /// Подходит ли операция под фильтр выборки (без фильтра — любая).
+    private var filterMatches: (Transaction) -> Bool {
+        guard let transactionFilter else { return { _ in true } }
+        let interval = transactionFilter.dateInterval()
+        return { transactionFilter.matches($0, interval: interval) }
+    }
 
     @Query(sort: \ExpenseCategoryItem.name, order: .forward)
     private var categories: [ExpenseCategoryItem]
@@ -46,14 +56,16 @@ struct AnalyticsView: View {
 
     init(focusedTag: TransactionTag? = nil) {
         self.focusedTag = focusedTag
+        transactionFilter = nil
         isEmbedded = focusedTag != nil
         _selectedMode = State(initialValue: focusedTag == nil ? .time : .tags)
         _selectedTag = State(initialValue: focusedTag)
     }
 
     /// Аналитика месяца — открыта из сводки на экране транзакций.
-    init(month: Date) {
+    init(month: Date, filter: TransactionFilter? = nil) {
         focusedTag = nil
+        transactionFilter = filter
         isEmbedded = true
         _selectedScale = State(initialValue: .month)
         _pageAnchorDate = State(initialValue: AnalyticsSnapshotBuilder.makePage(for: .month, anchorDate: month).startDate)
@@ -94,7 +106,10 @@ struct AnalyticsView: View {
 
     private func makeReport() -> Report {
         // Курсовые разницы считаются внутри своих покупок — пары ищутся один раз на отчёт.
-        let folded = ExchangeRateDifferenceMatcher.fold(transactions)
+        // Пары ищутся по всем операциям: курсовая разница или возврат могут не попасть в фильтр.
+        let folded = ExchangeRateDifferenceMatcher.fold(allTransactions)
+        let filterMatches = filterMatches
+        let transactions = transactionFilter == nil ? allTransactions : allTransactions.filter(filterMatches)
 
         switch selectedMode {
         case .time:
@@ -130,7 +145,7 @@ struct AnalyticsView: View {
                 availableTagGranularities: [],
                 scope: AnalyticsScope(
                     title: page.displayTitle,
-                    matches: { tx in page.contains(tx.date) },
+                    matches: { tx in page.contains(tx.date) && filterMatches(tx) },
                     containsDate: { date in page.contains(date) }
                 ),
                 comparison: AnalyticsPeriodComparisonBuilder.build(
@@ -139,7 +154,8 @@ struct AnalyticsView: View {
                     page: page,
                     settings: settings,
                     trackedRates: trackedRates,
-                    folded: folded
+                    folded: folded,
+                    restrict: transactionFilter == nil ? nil : filterMatches
                 )
             )
 
@@ -288,7 +304,7 @@ struct AnalyticsView: View {
 
         if isEmbedded {
             content(report)
-                .navigationTitle("Аналитика")
+                .navigationTitle(transactionFilter == nil ? "Аналитика" : "Аналитика выборки")
         } else {
             NavigationStack {
                 content(report)

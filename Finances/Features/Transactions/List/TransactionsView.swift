@@ -29,6 +29,12 @@ struct TransactionsView: View {
     @State private var path = NavigationPath()
 
     @State private var selectedFilter: TransactionKindFilter = .all
+    /// Период, счёт, категория, метка и валюта покупки.
+    @State private var filter = TransactionFilter()
+    @State private var isShowingFilter = false
+
+    @Query(sort: \TransactionTag.createdAt, order: .reverse)
+    private var tags: [TransactionTag]
     @State private var searchText: String = ""
     @State private var isShowingAddTransaction = false
     @State private var isShowingImporter = false
@@ -48,9 +54,20 @@ struct TransactionsView: View {
         settingsList.first
     }
 
-    /// Переход из сводки в аналитику месяца.
+    /// Переход из сводки в аналитику месяца (или выборки по фильтру).
     private struct MonthAnalyticsRoute: Hashable {
         let month: Date
+        var filter: TransactionFilter? = nil
+    }
+
+    /// Валюты покупок, которые есть в операциях, — для фильтра.
+    private var purchaseCurrencies: [String] {
+        Array(Set(transactions.map(TransactionFilter.purchaseCurrency(of:)))).sorted()
+    }
+
+    /// Поиск или фильтр сужают список — тогда вместо сводки месяца итог выборки.
+    private var isNarrowed: Bool {
+        searchQuery != nil || filter.isActive
     }
 
     /// Курсовые разницы, приписанные к своим покупкам: отдельной строкой не показываются.
@@ -62,9 +79,12 @@ struct TransactionsView: View {
     private func filteredTransactions(folded: FoldedExchangeRateDifferences) -> [Transaction] {
         let hidden = folded.foldedIDs
         let query = searchQuery
+        let filter = filter
+        let interval = filter.dateInterval()
         return transactions.filter { transaction in
             !hidden.contains(transaction.persistentModelID)
                 && selectedFilter.matches(transaction)
+                && filter.matches(transaction, interval: interval)
                 && matchesSearch(transaction, query: query)
         }
     }
@@ -76,10 +96,26 @@ struct TransactionsView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
-                    // При поиске сводка не нужна — на экране только найденное.
-                    if searchQuery == nil {
+                    // При поиске и фильтре сводка месяца не нужна — на экране только найденное.
+                    if !isNarrowed {
                         monthSummary(folded: folded)
                             .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+
+                    if filter.isActive {
+                        TransactionFilterChips(filter: $filter, accounts: accounts) {
+                            isShowingFilter = true
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+
+                    if isNarrowed {
+                        filterSummary(visible, folded: folded)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
@@ -123,10 +159,30 @@ struct TransactionsView: View {
                 }
             }
             .navigationDestination(for: MonthAnalyticsRoute.self) { route in
-                AnalyticsView(month: route.month)
+                AnalyticsView(month: route.month, filter: route.filter)
+            }
+            .sheet(isPresented: $isShowingFilter) {
+                TransactionFilterSheet(
+                    filter: $filter,
+                    accounts: accounts,
+                    categories: categories,
+                    tags: tags,
+                    currencies: purchaseCurrencies
+                )
             }
             .searchable(text: $searchText, prompt: "Поиск по деталям, категории, счетам")
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isShowingFilter = true
+                    } label: {
+                        Image(systemName: filter.isActive
+                              ? "line.3.horizontal.decrease.circle.fill"
+                              : "line.3.horizontal.decrease.circle")
+                    }
+                    .accessibilityLabel("Фильтры")
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
@@ -241,6 +297,29 @@ struct TransactionsView: View {
         .buttonStyle(.plain)
     }
 
+    /// Итог найденного; касание открывает аналитику выборки (только при фильтре:
+    /// текстовый поиск в аналитику не переносится).
+    @ViewBuilder
+    private func filterSummary(_ visible: [Transaction], folded: FoldedExchangeRateDifferences) -> some View {
+        let totals = TransactionFilterTotals.make(
+            visible,
+            settings: settings,
+            trackedRates: trackedRates,
+            folded: folded
+        )
+        if filter.isActive {
+            Button {
+                let start = filter.dateInterval()?.start ?? .now
+                path.append(MonthAnalyticsRoute(month: start, filter: filter))
+            } label: {
+                TransactionFilterSummary(totals: totals, showsAnalyticsLink: true)
+            }
+            .buttonStyle(.plain)
+        } else {
+            TransactionFilterSummary(totals: totals)
+        }
+    }
+
     private func monthSnapshot(anchor: Date, folded: FoldedExchangeRateDifferences) -> AnalyticsSnapshot {
         AnalyticsSnapshotBuilder.build(
             transactions: transactions,
@@ -274,11 +353,11 @@ struct TransactionsView: View {
     }
 
     private var emptyTitle: String {
-        searchText.isEmpty ? "Пока нет транзакций" : "Ничего не найдено"
+        isNarrowed ? "Ничего не найдено" : "Пока нет транзакций"
     }
 
     private var emptySubtitle: String {
-        if !searchText.isEmpty {
+        if isNarrowed {
             return "Попробуй изменить запрос или фильтр"
         }
 
