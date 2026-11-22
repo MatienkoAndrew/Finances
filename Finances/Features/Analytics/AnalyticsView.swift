@@ -88,6 +88,8 @@ struct AnalyticsView: View {
         let scope: AnalyticsScope
         /// Траты метки по дням (начало дня → ₽) — для клеток в строках недель.
         var tagDailyTotals: [Date: Double] = [:]
+        /// «Что изменилось»: разница с прошлым периодом по категориям (режим времени).
+        var comparison: AnalyticsPeriodComparison? = nil
     }
 
     private func makeReport() -> Report {
@@ -130,6 +132,14 @@ struct AnalyticsView: View {
                     title: page.displayTitle,
                     matches: { tx in page.contains(tx.date) },
                     containsDate: { date in page.contains(date) }
+                ),
+                comparison: AnalyticsPeriodComparisonBuilder.build(
+                    transactions: transactions,
+                    scale: selectedScale,
+                    page: page,
+                    settings: settings,
+                    trackedRates: trackedRates,
+                    folded: folded
                 )
             )
 
@@ -291,6 +301,7 @@ struct AnalyticsView: View {
             LazyVStack(alignment: .leading, spacing: 24) {
                 if selectedMode == .time {
                     periodHeroCard(report)
+                    comparisonSection(report)
                     breakdownSections(report)
                 } else {
                     // В режиме меток период задан самой меткой, поэтому
@@ -749,6 +760,21 @@ struct AnalyticsView: View {
         Text(title)
             .font(.title3.weight(.semibold))
             .padding(.horizontal, 4)
+    }
+
+    // MARK: - Comparison
+
+    @ViewBuilder
+    private func comparisonSection(_ report: Report) -> some View {
+        if let comparison = report.comparison {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Что изменилось")
+                AnalyticsComparisonCard(
+                    comparison: comparison,
+                    categoryItem: { categoryItem(for: $0) }
+                )
+            }
+        }
     }
 
     // MARK: - Expense chart
