@@ -215,12 +215,17 @@ enum AnalyticsSnapshotBuilder {
         let effectiveBinCount: Int
         switch scale {
         case .week, .month:
-            // Для недели и месяца считаем только дни до текущей даты (включительно)
-            let startOfDay = calendar.startOfDay(for: page.startDate)
-            let currentDay = calendar.startOfDay(for: min(now, page.endDateExclusive))
-            // +1 потому что нужно включить текущий день
-            let daysPassed = calendar.dateComponents([.day], from: startOfDay, to: currentDay).day ?? 0
-            effectiveBinCount = max(daysPassed + 1, 1) // +1 для включения текущего дня
+            if now >= page.endDateExclusive {
+                // Завершённый период — все его дни. Раньше сюда попадал и первый
+                // день следующего периода: у 30-дневного месяца выходило 31.
+                effectiveBinCount = page.binCount
+            } else {
+                // Текущий период — дни до сегодня включительно.
+                let startOfDay = calendar.startOfDay(for: page.startDate)
+                let currentDay = calendar.startOfDay(for: now)
+                let daysPassed = calendar.dateComponents([.day], from: startOfDay, to: currentDay).day ?? 0
+                effectiveBinCount = min(max(daysPassed + 1, 1), max(page.binCount, 1))
+            }
             
         case .year:
             // Для года считаем только месяцы до текущего (включительно)
@@ -263,6 +268,24 @@ enum AnalyticsSnapshotBuilder {
             topMerchantByCategory: topMerchantByCategory,
             effectiveBinCount: effectiveBinCount
         )
+    }
+
+    /// Сумма покупки в ₽ для аналитики расходов (с её курсовой разницей);
+    /// nil — операция не расход или её нельзя пересчитать в рубли.
+    static func expenseRub(
+        for transaction: Transaction,
+        settings: AppSettings?,
+        trackedRates: [TrackedExchangeRate],
+        folded: FoldedExchangeRateDifferences
+    ) -> Double? {
+        guard transaction.kind == .expense, !transaction.isExchangeRateDifference,
+              let rub = TransactionRubConverter.displayRubAmount(
+                for: transaction,
+                settings: settings,
+                trackedRates: trackedRates
+              )
+        else { return nil }
+        return rub + folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
     }
 
     static func makePage(for scale: AnalyticsTimeScale, anchorDate: Date) -> AnalyticsPeriodPage {
