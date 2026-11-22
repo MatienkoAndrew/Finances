@@ -206,20 +206,15 @@ enum TagAnalyticsBuilder {
             guard transaction.date >= period.start && transaction.date < period.endExclusive else {
                 continue
             }
-            // Курсовая разница считается внутри своей покупки, отдельно — нет.
-            if transaction.isExchangeRateDifference { continue }
-
-            guard var rub = TransactionRubConverter.displayRubAmount(
+            if let rub = AnalyticsSnapshotBuilder.expenseRub(
                 for: transaction,
                 settings: settings,
-                trackedRates: trackedRates
-            ) else { continue }
-
-            switch transaction.kind {
-            case .expense:
-                rub += folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
+                trackedRates: trackedRates,
+                folded: folded
+            ) {
+                let isPurchase = transaction.countsAsPurchaseInAnalytics
                 totalExpensesRub += rub
-                expenseCount += 1
+                if isPurchase { expenseCount += 1 }
 
                 if let idx = bins.firstIndex(where: {
                     transaction.date >= $0.start && transaction.date < $0.endExclusive
@@ -227,19 +222,19 @@ enum TagAnalyticsBuilder {
                     chartTotals[idx] += rub
                 }
 
-                categoryTotals.addExpense(transaction, rub: rub)
+                categoryTotals.addExpense(transaction, rub: rub, isPurchase: isPurchase)
                 let category = CategoryTotalsAccumulator.categoryName(of: transaction)
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] += rub
                 merchantByCategory[category, default: [:]][merchant, default: 0] += rub
-
-            case .income:
+            } else if let rub = AnalyticsSnapshotBuilder.incomeRub(
+                for: transaction,
+                settings: settings,
+                trackedRates: trackedRates
+            ) {
                 totalIncomeRub += rub
                 incomeCount += 1
-
-            case .transfer:
-                break
             }
         }
 

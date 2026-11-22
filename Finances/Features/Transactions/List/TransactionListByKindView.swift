@@ -21,9 +21,18 @@ struct TransactionListByKindView: View {
         ExchangeRateDifferenceMatcher.fold(transactions)
     }
 
+    /// Как в аналитике: в расходах — и оплаты переводом, и возвраты, в доходах — без них.
+    private func matchesKind(_ transaction: Transaction) -> Bool {
+        switch kind {
+        case .expense: return transaction.countsAsExpenseInAnalytics
+        case .income: return transaction.countsAsIncomeInAnalytics
+        case .transfer: return transaction.kind == .transfer
+        }
+    }
+
     private func filteredTransactions(hiding hidden: Set<PersistentIdentifier>) -> [Transaction] {
         transactions.filter {
-            !hidden.contains($0.persistentModelID) && $0.kind == kind && scope.matches($0)
+            !hidden.contains($0.persistentModelID) && matchesKind($0) && scope.matches($0)
         }
     }
 

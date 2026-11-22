@@ -105,12 +105,13 @@ enum AnalyticsPeriodComparisonBuilder {
             ) else { continue }
 
             let category = CategoryTotalsAccumulator.categoryName(of: transaction)
+            let count = transaction.countsAsPurchaseInAnalytics ? 1 : 0
             if inCurrent {
                 currentTotals[category, default: .init()].total += rub
-                currentTotals[category, default: .init()].count += 1
+                currentTotals[category, default: .init()].count += count
             } else {
                 previousTotals[category, default: .init()].total += rub
-                previousTotals[category, default: .init()].count += 1
+                previousTotals[category, default: .init()].count += count
             }
         }
 

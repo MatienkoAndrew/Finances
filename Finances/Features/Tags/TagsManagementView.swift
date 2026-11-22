@@ -170,16 +170,19 @@ struct TagStats {
     ) -> [PersistentIdentifier: TagStats] {
         let idsByName = Dictionary(tags.map { ($0.name, $0.persistentModelID) }, uniquingKeysWith: { first, _ in first })
         var result: [PersistentIdentifier: TagStats] = [:]
+        let folded = ExchangeRateDifferenceMatcher.fold(transactions)
         for transaction in transactions {
             for name in transaction.tagNames ?? [] {
                 guard let id = idsByName[name] else { continue }
                 result[id, default: .empty].count += 1
-                if transaction.kind == .expense {
-                    result[id, default: .empty].spentRub += TransactionRubConverter.displayRubAmount(
-                        for: transaction,
-                        settings: settings,
-                        trackedRates: trackedRates
-                    ) ?? 0
+                // Как в аналитике: оплаты переводом — расход, возвраты уменьшают покупки.
+                if let rub = AnalyticsSnapshotBuilder.expenseRub(
+                    for: transaction,
+                    settings: settings,
+                    trackedRates: trackedRates,
+                    folded: folded
+                ) {
+                    result[id, default: .empty].spentRub += rub
                 }
             }
         }

@@ -39,6 +39,47 @@ struct TransactionDetailView: View {
     @State private var isShowingCategoryPicker = false
     @State private var isShowingNoteEditor = false
     @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingPurchasePicker = false
+
+    @AllTransactions
+    private var allTransactions: [Transaction]
+
+    /// Категория нужна расходу, оплате переводом и возврату (он уменьшает её траты).
+    private var showsCategory: Bool {
+        transaction.kind == .expense || transaction.isTransferPayment || transaction.isRefund
+    }
+
+    /// Покупка, к которой привязан этот возврат.
+    private var linkedPurchase: Transaction? {
+        guard let key = transaction.refundOfLinkKey else { return nil }
+        return allTransactions.first { $0.linkKey == key }
+    }
+
+    /// Возвраты, привязанные к этой покупке.
+    private var linkedRefunds: [Transaction] {
+        guard let key = transaction.linkKey else { return [] }
+        return allTransactions.filter { $0.isRefund && $0.refundOfLinkKey == key }
+    }
+
+    private var defaultPurposeTitle: String {
+        transaction.kind == .income ? "Доход" : "Обычный перевод"
+    }
+
+    private func setPurpose(_ purpose: TransactionPurpose?) {
+        guard purpose != transaction.purpose else { return }
+        transaction.purpose = purpose
+        if purpose != .refund {
+            transaction.unlinkRefund()
+        }
+        if purpose == .refund, transaction.refundOfLinkKey == nil {
+            if let purchase = RefundLinker.automaticPurchase(for: transaction, among: allTransactions) {
+                transaction.linkRefund(to: purchase)
+            } else {
+                isShowingPurchasePicker = true
+            }
+        }
+        try? modelContext.save()
+    }
 
     private var settings: AppSettings? {
         settingsList.first
@@ -83,6 +124,9 @@ struct TransactionDetailView: View {
         }
         .sheet(isPresented: $showingTagPicker) {
             TagPickerView(transaction: transaction)
+        }
+        .sheet(isPresented: $isShowingPurchasePicker) {
+            RefundPurchasePickerView(refund: transaction)
         }
         .alert("Заметка", isPresented: $isShowingNoteEditor) {
             TextField("Например, ужин с друзьями", text: $editedNote)
@@ -359,7 +403,7 @@ struct TransactionDetailView: View {
                 }
             }
 
-            if transaction.kind == .expense {
+            if showsCategory {
                 Section("Категория") {
                     Button {
                         isShowingCategoryPicker = true
@@ -543,7 +587,30 @@ struct TransactionDetailView: View {
 
     private var managementCard: some View {
         VStack(spacing: 0) {
-            if transaction.kind == .expense {
+            if !transaction.availablePurposes.isEmpty, !transaction.isExchangeRateDifference {
+                purposeRow
+
+                Divider().padding(.leading, 16)
+            }
+
+            if transaction.isRefund {
+                managementRow("Покупка") {
+                    isShowingPurchasePicker = true
+                } value: {
+                    if let linkedPurchase {
+                        Text("\(linkedPurchase.details) · \(RefundLinker.formattedAmount(linkedPurchase))")
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Привязать")
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Divider().padding(.leading, 16)
+            }
+
+            if showsCategory {
                 managementRow("Категория") {
                     isShowingCategoryPicker = true
                 } value: {
@@ -581,6 +648,44 @@ struct TransactionDetailView: View {
             }
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    /// Назначение: возврат, оплата, перемещение между своими счетами.
+    private var purposeRow: some View {
+        Menu {
+            Picker(
+                "Назначение",
+                selection: Binding(
+                    get: { transaction.purpose },
+                    set: { setPurpose($0) }
+                )
+            ) {
+                Text(defaultPurposeTitle).tag(nil as TransactionPurpose?)
+                ForEach(transaction.availablePurposes) { purpose in
+                    Label(purpose.title, systemImage: purpose.systemImage).tag(Optional(purpose))
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Text("Назначение")
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 12)
+
+                Text(transaction.purpose?.title ?? defaultPurposeTitle)
+                    .font(.subheadline)
+                    .foregroundStyle(transaction.purpose == nil ? .tertiary : .primary)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -633,6 +738,15 @@ struct TransactionDetailView: View {
     private var footerCard: some View {
         VStack(spacing: 8) {
             footerRow("Счёт", accountSummary)
+
+            let refunds = linkedRefunds
+            if !refunds.isEmpty {
+                let refunded = refunds.reduce(0) { $0 + ($1.rubAmount ?? 0) }
+                footerRow("Возвраты", "−\(TagFormatting.rub(refunded)) · \(refunds.count) шт.")
+                if let rubAmount {
+                    footerRow("В расходах", TagFormatting.rub(rubAmount - refunded))
+                }
+            }
 
             if transaction.isAwaitingStatement {
                 footerRow("Источник", "Apple Pay · ждёт выписку")

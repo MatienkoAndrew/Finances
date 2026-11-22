@@ -136,40 +136,24 @@ enum AnalyticsSnapshotBuilder {
         let calendar = Calendar.current
 
         for transaction in filtered {
-            // Курсовая разница считается внутри своей покупки (см. ниже), отдельно — нет.
-            if transaction.isExchangeRateDifference { continue }
-
-            guard var rub = TransactionRubConverter.displayRubAmount(
-                for: transaction,
-                settings: settings,
-                trackedRates: trackedRates
-            ) else {
-                continue
-            }
-
-            switch transaction.kind {
-            case .expense:
-                rub += folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
+            if let rub = expenseRub(for: transaction, settings: settings, trackedRates: trackedRates, folded: folded) {
+                let isPurchase = transaction.countsAsPurchaseInAnalytics
                 totalExpensesRub += rub
-                expenseCount += 1
+                if isPurchase { expenseCount += 1 }
 
                 if let binIndex = binIndexForDate(transaction.date, scale: scale, page: page, calendar: calendar) {
                     chartTotals[binIndex] += rub
                 }
 
-                categoryTotals.addExpense(transaction, rub: rub)
+                categoryTotals.addExpense(transaction, rub: rub, isPurchase: isPurchase)
                 let category = CategoryTotalsAccumulator.categoryName(of: transaction)
 
                 let merchant = normalizedMerchantName(transaction.details)
                 merchantMap[merchant, default: 0] += rub
                 merchantByCategory[category, default: [:]][merchant, default: 0] += rub
-
-            case .income:
+            } else if let rub = incomeRub(for: transaction, settings: settings, trackedRates: trackedRates) {
                 totalIncomeRub += rub
                 incomeCount += 1
-
-            case .transfer:
-                break
             }
         }
 
@@ -270,22 +254,38 @@ enum AnalyticsSnapshotBuilder {
         )
     }
 
-    /// Сумма покупки в ₽ для аналитики расходов (с её курсовой разницей);
-    /// nil — операция не расход или её нельзя пересчитать в рубли.
+    /// Вклад операции в расходы, ₽; nil — в расходах она не участвует.
+    ///
+    /// Покупка (и оплата переводом) — со своими курсовыми разницами и привязанными
+    /// возвратами. Возврат без покупки — минус в своей категории. Курсовая разница
+    /// и привязанный возврат уже посчитаны внутри покупки.
     static func expenseRub(
         for transaction: Transaction,
         settings: AppSettings?,
         trackedRates: [TrackedExchangeRate],
         folded: FoldedExchangeRateDifferences
     ) -> Double? {
-        guard transaction.kind == .expense, !transaction.isExchangeRateDifference,
+        let isPurchase = transaction.countsAsPurchaseInAnalytics
+        let isStandaloneRefund = transaction.isRefund && !folded.isLinkedRefund(transaction)
+        guard isPurchase || isStandaloneRefund,
               let rub = TransactionRubConverter.displayRubAmount(
                 for: transaction,
                 settings: settings,
                 trackedRates: trackedRates
               )
         else { return nil }
+        guard isPurchase else { return -rub }
         return rub + folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
+    }
+
+    /// Доход в ₽; nil — операция не доход (возврат, свои счета, курсовая разница).
+    static func incomeRub(
+        for transaction: Transaction,
+        settings: AppSettings?,
+        trackedRates: [TrackedExchangeRate]
+    ) -> Double? {
+        guard transaction.countsAsIncomeInAnalytics else { return nil }
+        return TransactionRubConverter.displayRubAmount(for: transaction, settings: settings, trackedRates: trackedRates)
     }
 
     static func makePage(for scale: AnalyticsTimeScale, anchorDate: Date) -> AnalyticsPeriodPage {

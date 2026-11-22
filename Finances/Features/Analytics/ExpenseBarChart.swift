@@ -106,18 +106,16 @@ struct ExpenseTimelineData {
         var earliest = now
 
         for transaction in transactions {
-            // Курсовая разница считается внутри своей покупки, как и в снапшоте.
-            guard transaction.kind == .expense, !transaction.isExchangeRateDifference else { continue }
-
-            guard var rub = TransactionRubConverter.displayRubAmount(
+            // Те же правила, что и в снапшоте: разницы и возвраты — внутри своих покупок.
+            guard let rub = AnalyticsSnapshotBuilder.expenseRub(
                 for: transaction,
                 settings: settings,
-                trackedRates: trackedRates
+                trackedRates: trackedRates,
+                folded: folded
             ), let interval = calendar.dateInterval(of: unit, for: transaction.date) else {
                 continue
             }
 
-            rub += folded.rubAdjustment(for: transaction, settings: settings, trackedRates: trackedRates)
             totals[interval.start, default: 0] += rub
             earliest = min(earliest, transaction.date)
         }

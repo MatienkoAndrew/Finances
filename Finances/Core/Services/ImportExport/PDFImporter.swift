@@ -161,6 +161,8 @@ enum PDFImporter {
             throw PDFImporterError.noNewTransactionsFound
         }
 
+        linkRefunds(newTransactions, existing: existingTransactions)
+
         let transactionsByRow = Dictionary(uniqueKeysWithValues: zip(newRowIndices, newTransactions))
         let walletConfirmations = walletMatches.compactMap { match in
             transactionsByRow[match.rowIndex].map { WalletConfirmation(payment: match.payment, statementTransaction: $0) }
@@ -288,10 +290,9 @@ enum PDFImporter {
                 transaction.kind = .income
                 transaction.toAccount = transaction.fromAccount ?? context.kaspiAccount
                 transaction.fromAccount = nil
-                // Курсовая разница остаётся в категории покупки — в аналитике она её уменьшает.
-                if transaction.isCategoryManuallySet != true, !row.isExchangeRateDifference {
-                    transaction.categoryName = nil
-                    transaction.subcategoryName = nil
+                // Курсовая разница и возврат остаются в категории покупки — в аналитике они её уменьшают.
+                if isRefund(row), transaction.purpose == nil {
+                    transaction.purpose = .refund
                 }
                 outcome.repaired = true
             } else if row.amount < 0, transaction.kind == .income {
@@ -305,6 +306,17 @@ enum PDFImporter {
                 }
                 outcome.repaired = true
             }
+        }
+
+        // Возврат, который раньше импортировался обычным доходом.
+        if isRefund(row), transaction.kind == .income, transaction.purpose == nil {
+            transaction.purpose = .refund
+            if transaction.categoryName == nil {
+                let match = matchCategory(for: row, context: context)
+                transaction.categoryName = match?.category
+                transaction.subcategoryName = match?.subcategory
+            }
+            outcome.repaired = true
         }
 
         if row.isExchangeRateDifference, (transaction.note ?? "").isEmpty {
@@ -377,8 +389,8 @@ enum PDFImporter {
         case (_, true):
             kind = .income
             toAccount = kaspiAccount
-            // Курсовая разница «в плюс» уменьшает расходы своей категории — нужна категория покупки.
-            if row.isExchangeRateDifference {
+            // Курсовая разница «в плюс» и возврат уменьшают расходы своей категории — нужна категория покупки.
+            if row.isExchangeRateDifference || isRefund(row) {
                 category = matchCategory(for: row, context: context)
             }
 
@@ -388,7 +400,7 @@ enum PDFImporter {
             category = matchCategory(for: row, context: context)
         }
 
-        return Transaction(
+        let transaction = Transaction(
             date: row.date,
             kindRaw: kind.rawValue,
             amount: absoluteAmount,
@@ -414,6 +426,28 @@ enum PDFImporter {
             fromAccount: fromAccount,
             toAccount: toAccount
         )
+        if isRefund(row) {
+            transaction.purpose = .refund
+        }
+        return transaction
+    }
+
+    /// Зачисление по покупке, кроме курсовой разницы, — возврат от магазина.
+    private static func isRefund(_ row: ParsedStatementRow) -> Bool {
+        row.operationType == .purchase && row.amount > 0 && !row.isExchangeRateDifference
+    }
+
+    /// Возвраты из выписки привязываются к покупке, если она однозначна:
+    /// тот же магазин и валюта, сумма не меньше возврата, за полгода до него.
+    private static func linkRefunds(_ newTransactions: [Transaction], existing: [Transaction]) {
+        let refunds = newTransactions.filter { $0.isRefund && $0.refundOfLinkKey == nil }
+        guard !refunds.isEmpty else { return }
+        let pool = existing + newTransactions
+        for refund in refunds {
+            if let purchase = RefundLinker.automaticPurchase(for: refund, among: pool) {
+                refund.linkRefund(to: purchase)
+            }
+        }
     }
 
     private static func matchCategory(for row: ParsedStatementRow, context: ImportContext) -> CategoryMatch? {

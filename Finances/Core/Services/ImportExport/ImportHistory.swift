@@ -14,6 +14,8 @@ struct TransactionFieldValues: Codable, Equatable {
     var note: String?
     var fromAccountKey: String?
     var toAccountKey: String?
+    /// Optional — история старых импортов без этого поля читается как раньше.
+    var purposeRaw: String?
 
     init(_ transaction: Transaction) {
         kindRaw = transaction.kindRaw
@@ -26,6 +28,7 @@ struct TransactionFieldValues: Codable, Equatable {
         note = transaction.note
         fromAccountKey = transaction.fromAccount.map(ImportHistory.key(of:))
         toAccountKey = transaction.toAccount.map(ImportHistory.key(of:))
+        purposeRaw = transaction.purposeRaw
     }
 
     func apply(to transaction: Transaction, accountsByKey: [String: Account]) {
@@ -33,6 +36,7 @@ struct TransactionFieldValues: Codable, Equatable {
         transaction.amount = amount
         transaction.toAmount = toAmount
         transaction.rubAmount = rubAmount
+        transaction.purposeRaw = purposeRaw
         transaction.categoryName = categoryName
         transaction.subcategoryName = subcategoryName
         transaction.isCategoryManuallySet = isCategoryManuallySet

@@ -28,14 +28,16 @@ struct CategoryTotalsAccumulator {
         transaction.subcategoryName ?? DefaultSubcategoryDefinitions.defaultSubcategory(for: transaction.categoryName)
     }
 
-    mutating func addExpense(_ transaction: Transaction, rub: Double) {
+    /// - Parameter isPurchase: false — возврат: уменьшает сумму, но не число покупок.
+    mutating func addExpense(_ transaction: Transaction, rub: Double, isPurchase: Bool = true) {
         let category = Self.categoryName(of: transaction)
+        let count = isPurchase ? 1 : 0
         totals[category, default: 0] += rub
-        counts[category, default: 0] += 1
+        counts[category, default: 0] += count
 
         guard let subcategory = Self.subcategoryName(of: transaction) else { return }
         subcategoryTotals[category, default: [:]][subcategory, default: 0] += rub
-        subcategoryCounts[category, default: [:]][subcategory, default: 0] += 1
+        subcategoryCounts[category, default: [:]][subcategory, default: 0] += count
     }
 
     func result() -> [AnalyticsCategoryTotal] {
