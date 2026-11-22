@@ -18,6 +18,8 @@ struct TransactionListByCategoryView: View {
     @AllTransactions
     private var transactions: [Transaction]
 
+    @AppStorage(TransactionListSort.storageKey) private var sort: TransactionListSort = .date
+
     /// Курсовые разницы, привязанные к своим покупкам, отдельной строкой не показываются.
     private var foldedDifferences: FoldedExchangeRateDifferences {
         ExchangeRateDifferenceMatcher.fold(transactions)
@@ -37,11 +39,13 @@ struct TransactionListByCategoryView: View {
         let folded = foldedDifferences
 
         List {
-            TransactionDaySections(
+            SortedTransactionSections(
                 transactions: filteredTransactions(hiding: folded.foldedIDs),
-                folded: folded
+                folded: folded,
+                sort: sort
             )
         }
+        .transactionSortToolbar($sort)
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
         .navigationTitle(subcategoryTitle.map { "\(categoryTitle) · \($0)" } ?? categoryTitle)
