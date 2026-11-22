@@ -65,6 +65,15 @@ struct TransactionsView: View {
         Array(Set(transactions.map(TransactionFilter.purchaseCurrency(of:)))).sorted()
     }
 
+    /// По какой день сверены выписки и что ждёт проверки.
+    private var reconciliationStatus: ReconciliationStatus {
+        ReconciliationStatus.make(
+            coverages: StatementCoverageStore.load(),
+            legacyBatches: ImportHistory.batches(in: transactions),
+            transactions: transactions
+        )
+    }
+
     /// Поиск или фильтр сужают список — тогда вместо сводки месяца итог выборки.
     private var isNarrowed: Bool {
         searchQuery != nil || filter.isActive
@@ -102,6 +111,17 @@ struct TransactionsView: View {
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+
+                        let status = reconciliationStatus
+                        NavigationLink {
+                            ReconciliationDetailView(status: status)
+                        } label: {
+                            ReconciliationStatusRow(status: status)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
 
                     if filter.isActive {
@@ -490,6 +510,10 @@ struct TransactionsView: View {
                 rubRates: RubRateTable.load(context: modelContext)
             )
 
+            if let coverage = StatementCoverage(statement: statement, fileName: fileName, importedAt: importResult.importedAt) {
+                StatementCoverageStore.add(coverage)
+            }
+
             for account in importResult.accountsToCreate {
                 modelContext.insert(account)
             }
@@ -539,6 +563,12 @@ struct TransactionsView: View {
             Task {
                 await AICategorizer.runIfEnabled(context: modelContext)
             }
+        } catch PDFImporterError.noNewTransactionsFound {
+            // Выписка прочитана и всё в ней уже есть — её дни тоже сверены.
+            if let coverage = StatementCoverage(statement: statement, fileName: fileName, importedAt: .now) {
+                StatementCoverageStore.add(coverage)
+            }
+            importErrorMessage = PDFImporterError.noNewTransactionsFound.localizedDescription
         } catch {
             importErrorMessage = error.localizedDescription
         }

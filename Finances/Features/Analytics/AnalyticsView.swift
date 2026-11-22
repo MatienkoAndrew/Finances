@@ -102,6 +102,27 @@ struct AnalyticsView: View {
         var tagDailyTotals: [Date: Double] = [:]
         /// «Что изменилось»: разница с прошлым периодом по категориям (режим времени).
         var comparison: AnalyticsPeriodComparison? = nil
+        /// «Kaspi сверена по 18 ноября · 3 оплаты Apple Pay ждут выписку» —
+        /// когда данные периода могут быть неполными; nil — период сверен целиком.
+        var coverageNote: String? = nil
+    }
+
+    private func coverageNote(for page: AnalyticsPeriodPage) -> String? {
+        let status = ReconciliationStatus.make(
+            coverages: StatementCoverageStore.load(),
+            legacyBatches: ImportHistory.batches(in: allTransactions),
+            transactions: allTransactions
+        )
+        let awaiting = status.awaitingStatement.filter { page.contains($0.date) }.count
+        guard !status.isFullyCovered(start: page.startDate, endExclusive: page.endDateExclusive) || awaiting > 0 else {
+            return nil
+        }
+        var parts = [status.coverageLine]
+        if awaiting > 0 {
+            let word = ReconciliationStatus.word(awaiting, "оплата", "оплаты", "оплат")
+            parts.append("\(awaiting) \(word) Apple Pay \(awaiting == 1 ? "ждёт" : "ждут") выписку")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func makeReport() -> Report {
@@ -156,7 +177,8 @@ struct AnalyticsView: View {
                     trackedRates: trackedRates,
                     folded: folded,
                     restrict: transactionFilter == nil ? nil : filterMatches
-                )
+                ),
+                coverageNote: coverageNote(for: page)
             )
 
         case .tags:
@@ -685,6 +707,12 @@ struct AnalyticsView: View {
                     value: snapshot.peakChartPoint.flatMap { $0.total > 0 ? TagFormatting.rub($0.total) : nil } ?? "—",
                     title: "максимум"
                 )
+            }
+
+            if let note = report.coverageNote {
+                Label(note, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             NavigationLink {
