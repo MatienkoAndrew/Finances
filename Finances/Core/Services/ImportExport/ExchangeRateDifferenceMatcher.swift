@@ -12,6 +12,21 @@ struct FoldedExchangeRateDifferences {
     /// Покупка → приписанные к ней курсовые разницы.
     let differencesByPurchase: [PersistentIdentifier: [Transaction]]
 
+    /// Покупка → привязанные к ней возвраты. В аналитике возврат уменьшает
+    /// покупку в её дне и категории, а в списке остаётся зачислением в свой день.
+    var refundsByPurchase: [PersistentIdentifier: [Transaction]] = [:]
+
+    /// Возвраты, у которых нашлась покупка: отдельно в аналитике они не считаются.
+    var linkedRefundIDs: Set<PersistentIdentifier> = []
+
+    func refunds(for purchase: Transaction) -> [Transaction] {
+        refundsByPurchase[purchase.persistentModelID] ?? []
+    }
+
+    func isLinkedRefund(_ transaction: Transaction) -> Bool {
+        linkedRefundIDs.contains(transaction.persistentModelID)
+    }
+
     /// Курсовые разницы, для которых нашлась покупка: отдельной строкой их не показываем.
     var foldedIDs: Set<PersistentIdentifier> {
         Set(differencesByPurchase.values.flatMap { $0.map(\.persistentModelID) })
@@ -46,7 +61,7 @@ struct FoldedExchangeRateDifferences {
         settings: AppSettings?,
         trackedRates: [TrackedExchangeRate]
     ) -> Double {
-        differences(for: purchase).reduce(0) { total, difference in
+        let differences = differences(for: purchase).reduce(0) { total, difference in
             let rub = TransactionRubConverter.displayRubAmount(
                 for: difference,
                 settings: settings,
@@ -55,6 +70,14 @@ struct FoldedExchangeRateDifferences {
             let sign = ExchangeRateDifferenceMatcher.signedCharge(of: difference) < 0 ? -1.0 : 1.0
             return total + sign * rub
         }
+        let refunds = refunds(for: purchase).reduce(0) { total, refund in
+            total + (TransactionRubConverter.displayRubAmount(
+                for: refund,
+                settings: settings,
+                trackedRates: trackedRates
+            ) ?? 0)
+        }
+        return differences - refunds
     }
 }
 
@@ -106,6 +129,31 @@ enum ExchangeRateDifferenceMatcher {
     }
 
     static func fold(_ transactions: [Transaction]) -> FoldedExchangeRateDifferences {
+        var folded = foldDifferences(transactions)
+        linkRefunds(transactions, into: &folded)
+        return folded
+    }
+
+    /// Возвраты, привязанные к покупкам по `refundOfLinkKey`.
+    private static func linkRefunds(_ transactions: [Transaction], into folded: inout FoldedExchangeRateDifferences) {
+        let refunds = transactions.filter { $0.isRefund && $0.refundOfLinkKey != nil }
+        guard !refunds.isEmpty else { return }
+
+        var purchasesByKey: [String: Transaction] = [:]
+        for transaction in transactions where transaction.countsAsPurchaseInAnalytics {
+            if let key = transaction.linkKey {
+                purchasesByKey[key] = transaction
+            }
+        }
+
+        for refund in refunds {
+            guard let key = refund.refundOfLinkKey, let purchase = purchasesByKey[key] else { continue }
+            folded.refundsByPurchase[purchase.persistentModelID, default: []].append(refund)
+            folded.linkedRefundIDs.insert(refund.persistentModelID)
+        }
+    }
+
+    private static func foldDifferences(_ transactions: [Transaction]) -> FoldedExchangeRateDifferences {
         let relevant = transactions.filter { $0.isExchangeRateDifference || isForeignPurchase($0) }
         guard relevant.contains(where: \.isExchangeRateDifference) else { return .empty }
 
