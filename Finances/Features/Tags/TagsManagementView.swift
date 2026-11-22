@@ -52,6 +52,16 @@ struct TagsManagementView: View {
         .navigationTitle("Метки")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if tags.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        TripComparisonView()
+                    } label: {
+                        Image(systemName: "rectangle.split.2x1")
+                    }
+                    .accessibilityLabel("Сравнить поездки")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     editorTarget = .new
