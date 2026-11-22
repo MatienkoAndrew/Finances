@@ -348,8 +348,8 @@ struct AnalyticsView: View {
             LazyVStack(alignment: .leading, spacing: 24) {
                 if selectedMode == .time {
                     periodHeroCard(report)
-                    comparisonSection(report)
                     breakdownSections(report)
+                    comparisonSection(report)
                 } else {
                     // В режиме меток период задан самой меткой, поэтому
                     // W/M/Y и стрелки скрыты: сверху лента меток и карточка

@@ -16,22 +16,77 @@ struct TransactionFilterSheet: View {
     let categories: [ExpenseCategoryItem]
     let tags: [TransactionTag]
     let currencies: [String]
+    /// Дни с операциями — точки в календаре.
+    var activeDays: Set<Date> = []
 
     @State private var draft = TransactionFilter()
+    /// Период в календаре: начало и конец (включительно); nil — всё время.
+    @State private var rangeStart: Date?
+    @State private var rangeEnd: Date?
+
+    private var hasChanges: Bool {
+        draft.isActive || rangeStart != nil
+    }
+
+    /// Быстрый выбор: этот и прошлый месяц.
+    private func selectMonth(offset: Int) {
+        let calendar = Calendar.current
+        guard let base = calendar.date(byAdding: .month, value: offset, to: .now),
+              let interval = calendar.dateInterval(of: .month, for: base),
+              let last = calendar.date(byAdding: .day, value: -1, to: interval.end) else { return }
+        withAnimation(.snappy(duration: 0.2)) {
+            rangeStart = interval.start
+            rangeEnd = min(last, calendar.startOfDay(for: .now))
+        }
+    }
+
+    private var rangeTitle: String {
+        guard let rangeStart else { return "Всё время" }
+        var filter = TransactionFilter()
+        filter.period = .custom
+        filter.customStart = rangeStart
+        filter.customEnd = rangeEnd ?? rangeStart
+        return filter.periodTitle()
+    }
+
+    private func apply() {
+        var result = draft
+        if let rangeStart {
+            result.period = .custom
+            result.customStart = rangeStart
+            result.customEnd = rangeEnd ?? rangeStart
+        } else {
+            result.period = .all
+        }
+        filter = result
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Период") {
-                    Picker("Период", selection: $draft.period) {
-                        ForEach(TransactionFilter.Period.allCases) { period in
-                            Text(period.title).tag(period)
+                Section {
+                    HStack(spacing: 8) {
+                        presetButton("Всё время", isSelected: rangeStart == nil) {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                rangeStart = nil
+                                rangeEnd = nil
+                            }
                         }
+                        presetButton("Этот месяц", isSelected: false) { selectMonth(offset: 0) }
+                        presetButton("Прошлый", isSelected: false) { selectMonth(offset: -1) }
                     }
-                    if draft.period == .custom {
-                        DatePicker("С", selection: $draft.customStart, displayedComponents: .date)
-                        DatePicker("По", selection: $draft.customEnd, displayedComponents: .date)
+
+                    RangeCalendarView(start: $rangeStart, end: $rangeEnd, activeDays: activeDays)
+                } header: {
+                    HStack {
+                        Text("Период")
+                        Spacer()
+                        Text(rangeTitle)
+                            .textCase(nil)
+                            .foregroundStyle(Color.accentColor)
                     }
+                } footer: {
+                    Text("Коснись дня — начало периода, второго — конец. Касание названия месяца выбирает его целиком.")
                 }
 
                 Section {
@@ -69,10 +124,12 @@ struct TransactionFilterSheet: View {
                     Text("Валюта покупки — валюта магазина: у оплаты картой в тенге за границей это валюта страны.")
                 }
 
-                if draft.isActive {
+                if hasChanges {
                     Section {
                         Button("Сбросить фильтры", role: .destructive) {
                             draft = TransactionFilter()
+                            rangeStart = nil
+                            rangeEnd = nil
                         }
                     }
                 }
@@ -85,14 +142,32 @@ struct TransactionFilterSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Готово") {
-                        filter = draft
+                        apply()
                         dismiss()
                     }
                 }
             }
-            .onAppear { draft = filter }
+            .onAppear {
+                draft = filter
+                if let interval = filter.dateInterval() {
+                    rangeStart = interval.start
+                    rangeEnd = Calendar.current.date(byAdding: .day, value: -1, to: interval.end)
+                }
+            }
         }
     }
+}
+
+private func presetButton(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+        Text(title)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor : Color(.tertiarySystemFill), in: Capsule())
+    }
+    .buttonStyle(.plain)
 }
 
 /// Активные фильтры капсулами: касание открывает выбор, крестик — снимает фильтр.
