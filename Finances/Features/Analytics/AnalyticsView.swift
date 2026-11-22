@@ -105,6 +105,8 @@ struct AnalyticsView: View {
         /// «Kaspi сверена по 18 ноября · 3 оплаты Apple Pay ждут выписку» —
         /// когда данные периода могут быть неполными; nil — период сверен целиком.
         var coverageNote: String? = nil
+        /// Цифры поездки: полная стоимость и траты в день за дни пребывания (режим меток).
+        var tripStats: TripStats? = nil
     }
 
     private func coverageNote(for page: AnalyticsPeriodPage) -> String? {
@@ -247,7 +249,14 @@ struct AnalyticsView: View {
                 tagGranularity: granularity,
                 availableTagGranularities: available,
                 scope: tagScope(for: tag, taggedTransactions: tagged),
-                tagDailyTotals: dailyTotals
+                tagDailyTotals: dailyTotals,
+                tripStats: TripStats.make(
+                    tag: tag,
+                    transactions: tagged,
+                    settings: settings,
+                    trackedRates: trackedRates,
+                    folded: folded
+                )
             )
         }
     }
@@ -540,8 +549,11 @@ struct AnalyticsView: View {
     private func tagHeroCard(_ tag: TransactionTag, report: Report) -> some View {
         let snapshot = report.snapshot
         let color = tagColor(tag)
-        let days = tagPeriodDays(snapshot)
-        let perDay = days > 0 ? snapshot.totalExpensesRub / Double(days) : 0
+        // Дни и траты в день — только за дни пребывания: заранее купленный билет
+        // входит в полную стоимость, но не растягивает поездку.
+        let trip = report.tripStats
+        let days = trip?.stayDays ?? tagPeriodDays(snapshot)
+        let perDay = trip?.perDayOnSite ?? (days > 0 ? snapshot.totalExpensesRub / Double(days) : 0)
 
         return VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
@@ -579,9 +591,15 @@ struct AnalyticsView: View {
                 heroAmount(snapshot.totalExpensesRub)
             }
 
+            if let trip, trip.beforeRub >= 0.5 {
+                Text("Включая \(TagFormatting.rub(trip.beforeRub)) до поездки — билеты и брони")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 8) {
                 AnalyticsMetricTile(value: "\(snapshot.expenseCount)", title: operationsWord(snapshot.expenseCount))
-                AnalyticsMetricTile(value: TagFormatting.rub(perDay), title: "в день")
+                AnalyticsMetricTile(value: TagFormatting.rub(perDay), title: "в день на месте")
                 AnalyticsMetricTile(value: "\(days)", title: daysWord(days))
             }
 
@@ -594,6 +612,15 @@ struct AnalyticsView: View {
                 heroLinkLabel("Все расходы по метке", color: color)
             }
             .buttonStyle(.plain)
+
+            if tags.count > 1 {
+                NavigationLink {
+                    TripComparisonView(initialTagName: tag.name)
+                } label: {
+                    heroLinkLabel("Сравнить с другой поездкой", color: color)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(16)
         .background(heroBackground(color))
