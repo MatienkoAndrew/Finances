@@ -50,7 +50,52 @@ enum ApplePayExpenses {
         guard let paid = WalletAmountParser.parse(amountText) else {
             throw RecordError.unreadableAmount(amountText)
         }
+        return try record(
+            paid: paid,
+            amountText: amountText.trimmingCharacters(in: .whitespacesAndNewlines),
+            merchant: merchant,
+            card: card,
+            at: date,
+            context: context
+        )
+    }
 
+    /// Сумма из «Команд» числом и кодом валюты — без перевода в текст.
+    /// «Команды» падают, когда переводят в текст сумму в чужой валюте
+    /// (оплата в долларах с тенговой карты), поэтому действие берёт сумму так.
+    @MainActor
+    static func record(
+        value: Decimal,
+        currencyCode: String?,
+        merchant: String,
+        card: String?,
+        at date: Date = .now,
+        context: ModelContext
+    ) throws -> Recorded {
+        let number = abs(NSDecimalNumber(decimal: value).doubleValue)
+        let code = currencyCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let paid = WalletAmountParser.Amount(value: number, currencyCode: code?.isEmpty == false ? code : nil)
+        guard paid.value > 0 else { throw RecordError.unreadableAmount("") }
+        return try record(
+            paid: paid,
+            amountText: paid.currencyCode.map { "\(paid.value.formatted(.number.locale(Locale(identifier: "ru_RU")))) \($0)" }
+                ?? paid.value.formatted(.number.locale(Locale(identifier: "ru_RU"))),
+            merchant: merchant,
+            card: card,
+            at: date,
+            context: context
+        )
+    }
+
+    @MainActor
+    private static func record(
+        paid: WalletAmountParser.Amount,
+        amountText: String,
+        merchant: String,
+        card: String?,
+        at date: Date,
+        context: ModelContext
+    ) throws -> Recorded {
         let trimmedMerchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         let merchantName = trimmedMerchant.isEmpty ? "Apple Pay" : trimmedMerchant
 
@@ -104,7 +149,7 @@ enum ApplePayExpenses {
             categoryName: category?.category,
             subcategoryName: category?.subcategory,
             walletMerchant: merchantName,
-            walletAmountText: amountText.trimmingCharacters(in: .whitespacesAndNewlines),
+            walletAmountText: amountText,
             fromAccount: fromAccount
         )
 
