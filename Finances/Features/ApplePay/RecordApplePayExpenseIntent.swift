@@ -18,8 +18,10 @@ struct RecordApplePayExpenseIntent: AppIntent {
         "Добавляет расход в Finances. Подставь сумму и продавца из автоматизации «Транзакция»: тогда каждая оплата телефоном будет появляться в приложении сама."
     )
 
-    @Parameter(title: "Сумма", description: "Сумма оплаты, например «2 450 ₸».")
-    var amount: String
+    /// Сумма с валютой, а не текст: «Команды» падают, когда переводят в текст
+    /// сумму в чужой валюте (оплата в долларах с тенговой карты).
+    @Parameter(title: "Сумма", description: "Сумма оплаты из автоматизации «Транзакция».")
+    var amount: IntentCurrencyAmount
 
     @Parameter(title: "Магазин", description: "Продавец из автоматизации «Транзакция».")
     var merchant: String
@@ -36,7 +38,8 @@ struct RecordApplePayExpenseIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let recorded = try ApplePayExpenses.record(
-            amountText: amount,
+            value: amount.amount,
+            currencyCode: amount.currencyCode,
             merchant: merchant,
             card: card,
             context: AppModelContainer.shared.mainContext
