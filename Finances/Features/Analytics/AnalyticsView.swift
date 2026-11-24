@@ -42,7 +42,9 @@ struct AnalyticsView: View {
 
     @State private var categoryNavigationTarget: String?
     /// Свёрнут ли раздел «По дням / неделям / месяцам» (запоминается).
-    @AppStorage("analytics.dailySectionCollapsed") private var isDailySectionCollapsed = false
+    /// Нижний раздел режима времени по неделям вместо дней (месяц) или месяцев (год).
+    /// Переключается касанием заголовка и запоминается.
+    @AppStorage("analytics.lowerSectionWeeks") private var showsWeeks = false
     /// Вид графика по категориям (выбор запоминается между запусками).
     @AppStorage("analytics.categoryChartStyle") private var categoryChartStyle: CategoryChartStyle = .bars
     /// Порядок строк в списке категорий (запоминается).
@@ -112,8 +114,10 @@ struct AnalyticsView: View {
         let availableTagGranularities: [TagBinGranularity]
         /// Какие операции показывают списки по ссылкам: все расходы, категория, место.
         let scope: AnalyticsScope
-        /// Траты метки по дням (начало дня → ₽) — для клеток в строках недель.
+        /// Траты по дням (начало дня → ₽) — для клеток в строках недель.
         var tagDailyTotals: [Date: Double] = [:]
+        /// Недели месяца или года для раздела «По неделям» (режим времени).
+        var timeWeeks: [AnalyticsChartPoint] = []
         /// «Что изменилось»: разница с прошлым периодом по категориям (режим времени).
         var comparison: AnalyticsPeriodComparison? = nil
         /// «Kaspi сверена по 18 ноября · 3 оплаты Apple Pay ждут выписку» —
@@ -177,6 +181,8 @@ struct AnalyticsView: View {
                     matches: { tx in page.contains(tx.date) && filterMatches(tx) },
                     containsDate: { date in page.contains(date) }
                 ),
+                tagDailyTotals: showsWeeks ? index.dailyExpense : [:],
+                timeWeeks: showsWeeks ? Self.weeks(in: page, dailyExpense: index.dailyExpense) : [],
                 comparison: AnalyticsPeriodComparisonBuilder.build(
                     index: index,
                     scale: selectedScale,
@@ -377,9 +383,6 @@ struct AnalyticsView: View {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if showsSectionBar {
                         AnalyticsSectionBar(dailyTitle: dailySectionTitle(report)) { section in
-                            if section == .daily, isDailySectionCollapsed {
-                                isDailySectionCollapsed = false
-                            }
                             // Ленивый стек не знает высот непостроенных разделов: первый
                             // переход их строит и встаёт примерно, второй — точно на раздел.
                             // Без анимации: во время анимированной прокрутки ленивый
@@ -641,11 +644,13 @@ struct AnalyticsView: View {
     private func tagHeroCard(_ tag: TransactionTag, report: Report) -> some View {
         let snapshot = report.snapshot
         let color = tagColor(tag)
-        // Дни и траты в день — только за дни пребывания: заранее купленный билет
-        // входит в полную стоимость, но не растягивает поездку.
+        // Дни — дни пребывания (заранее купленный билет не растягивает поездку).
+        // Среднее в день — как в «Динамике»: все траты метки на все дни её
+        // периода, вместе с днями покупки билетов и броней.
         let trip = report.tripStats
         let days = trip?.stayDays ?? tagPeriodDays(snapshot)
-        let perDay = trip?.perDayOnSite ?? (days > 0 ? snapshot.totalExpensesRub / Double(days) : 0)
+        let periodDays = tagPeriodDays(snapshot)
+        let perDay = periodDays > 0 ? snapshot.totalExpensesRub / Double(periodDays) : 0
 
         return VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
@@ -691,7 +696,7 @@ struct AnalyticsView: View {
 
             HStack(spacing: 8) {
                 AnalyticsMetricTile(value: "\(snapshot.expenseCount)", title: operationsWord(snapshot.expenseCount))
-                AnalyticsMetricTile(value: TagFormatting.rub(perDay), title: "в день на месте")
+                AnalyticsMetricTile(value: TagFormatting.rub(perDay), title: "в среднем в день")
                 AnalyticsMetricTile(value: "\(days)", title: daysWord(days))
             }
 
@@ -1037,69 +1042,133 @@ struct AnalyticsView: View {
         let snapshot = report.snapshot
 
         return VStack(alignment: .leading, spacing: 10) {
+            dailySectionHeader(report)
+
+            Group {
+                if snapshot.chartPoints.isEmpty {
+                    emptyText("Нет расходов для выбранного периода")
+                        .analyticsCard()
+                } else if selectedMode == .time && showsWeeks {
+                    weekRows(
+                        report.timeWeeks,
+                        periodStart: snapshot.page.startDate,
+                        periodEnd: snapshot.page.endDateExclusive,
+                        dailyTotals: report.tagDailyTotals,
+                        scope: timeWeekScope
+                    )
+                    .analyticsCard(padding: 12)
+                } else if selectedMode == .time && selectedScale != .year {
+                    dailyCalendar(snapshot)
+                        .analyticsCard(padding: 12)
+                } else if selectedMode == .tags,
+                          report.tagGranularity == .daily,
+                          let tag = selectedTag {
+                    // Метка по дням — тот же календарь, но только траты с меткой.
+                    dailyCalendar(snapshot, tag: tag)
+                        .analyticsCard(padding: 12)
+                } else if selectedMode == .tags,
+                          report.tagGranularity == .weekly,
+                          let tag = selectedTag {
+                    weekRows(
+                        snapshot.chartPoints,
+                        periodStart: snapshot.page.startDate,
+                        periodEnd: snapshot.page.endDateExclusive,
+                        dailyTotals: report.tagDailyTotals,
+                        scope: { week in
+                            tagBinScope(
+                                for: AnalyticsTimeTotal(id: week.id, date: week.date, title: week.title, total: week.total),
+                                tag: tag,
+                                granularity: .weekly
+                            )
+                        }
+                    )
+                    .analyticsCard(padding: 12)
+                } else if (selectedMode == .tags && report.tagGranularity == .monthly)
+                            || (selectedMode == .time && selectedScale == .year) {
+                    monthTiles(snapshot, tag: selectedMode == .tags ? selectedTag : nil)
+                        .analyticsCard(padding: 12)
+                } else {
+                    timeTotalsList(report)
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+
+    /// Заголовок раздела. В режиме времени он же переключатель:
+    /// «По дням» ⇄ «По неделям» в месяце, «По месяцам» ⇄ «По неделям» в году.
+    @ViewBuilder
+    private func dailySectionHeader(_ report: Report) -> some View {
+        let title = Text(dailySectionTitle(report))
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.primary)
+            .contentTransition(.opacity)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        if selectedMode == .time {
             Button {
                 withAnimation(.snappy(duration: 0.25)) {
-                    isDailySectionCollapsed.toggle()
+                    showsWeeks.toggle()
                 }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(dailySectionTitle(report))
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    // В свёрнутом виде — самый дорогой день/неделя/месяц.
-                    if isDailySectionCollapsed, let peak = snapshot.peakChartPoint, peak.total > 0 {
-                        Text("макс. \(TagFormatting.rub(peak.total))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-
-                    Image(systemName: "chevron.down")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isDailySectionCollapsed ? -90 : 0))
-                }
-                .padding(.horizontal, 4)
-                .contentShape(Rectangle())
+                title.contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(isDailySectionCollapsed ? "Развернуть" : "Свернуть")
-
-            if !isDailySectionCollapsed {
-                Group {
-                    if snapshot.chartPoints.isEmpty {
-                        emptyText("Нет расходов для выбранного периода")
-                            .analyticsCard()
-                    } else if selectedMode == .time && selectedScale != .year {
-                        // Неделя — одна строка той же сетки, что и у месяца.
-                        dailyCalendar(snapshot)
-                            .analyticsCard(padding: 12)
-                    } else if selectedMode == .tags,
-                              report.tagGranularity == .daily,
-                              let tag = selectedTag {
-                        // Метка по дням — тот же календарь, но только траты с меткой.
-                        dailyCalendar(snapshot, tag: tag)
-                            .analyticsCard(padding: 12)
-                    } else if selectedMode == .tags,
-                              report.tagGranularity == .weekly,
-                              let tag = selectedTag {
-                        weekRows(report, tag: tag)
-                            .analyticsCard(padding: 12)
-                    } else if (selectedMode == .tags && report.tagGranularity == .monthly)
-                                || (selectedMode == .time && selectedScale == .year) {
-                        monthTiles(snapshot, tag: selectedMode == .tags ? selectedTag : nil)
-                            .analyticsCard(padding: 12)
-                    } else {
-                        // Год, недели и месяцы метки — список строк.
-                        timeTotalsList(report)
-                    }
-                }
-                .transition(.opacity)
-            }
+            .accessibilityHint(showsWeeks
+                ? (selectedScale == .year ? "Показать по месяцам" : "Показать по дням")
+                : "Показать по неделям")
+        } else {
+            title
         }
+    }
+
+    /// Недели Пн–Вс внутри периода (крайние обрезаны по его границам), до сегодня.
+    private static func weeks(in page: AnalyticsPeriodPage, dailyExpense: [Date: Double]) -> [AnalyticsChartPoint] {
+        let calendar = TagAnalyticsBuilder.weekCalendar
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: .now)) ?? .now
+        let end = min(page.endDateExclusive, tomorrow)
+        var result: [AnalyticsChartPoint] = []
+        var current = page.startDate
+        while current < end {
+            let weekEnd = min(
+                calendar.dateInterval(of: .weekOfYear, for: current)?.end
+                    ?? calendar.date(byAdding: .day, value: 7, to: current) ?? end,
+                page.endDateExclusive
+            )
+            var total = 0.0
+            var day = current
+            while day < weekEnd {
+                total += dailyExpense[day] ?? 0
+                day = calendar.date(byAdding: .day, value: 1, to: day) ?? weekEnd
+            }
+            let lastDay = calendar.date(byAdding: .day, value: -1, to: weekEnd) ?? current
+            result.append(AnalyticsChartPoint(
+                id: "week-\(current.timeIntervalSince1970)",
+                index: result.count,
+                date: current,
+                axisLabel: "",
+                title: "\(AnalyticsDateFormat.dayMonth.string(from: current))–\(AnalyticsDateFormat.dayMonth.string(from: lastDay))",
+                total: total,
+                showsGridline: false
+            ))
+            current = weekEnd
+        }
+        return result
+    }
+
+    /// Операции недели в режиме времени — с учётом фильтра.
+    private func timeWeekScope(_ week: AnalyticsChartPoint) -> AnalyticsScope {
+        let calendar = TagAnalyticsBuilder.weekCalendar
+        let start = week.date
+        let end = calendar.dateInterval(of: .weekOfYear, for: start)?.end
+            ?? calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        let matches = filterMatches
+        return AnalyticsScope(
+            title: week.title,
+            matches: { tx in tx.date >= start && tx.date < end && matches(tx) },
+            containsDate: { date in date >= start && date < end }
+        )
     }
 
     // Неделя и месяц: сетка-календарь с суммой по дням и подсветкой по интенсивности трат.
@@ -1222,11 +1291,16 @@ struct AnalyticsView: View {
 
     /// Недели метки: строка на неделю — даты, семь клеток Пн–Вс
     /// с подсветкой по тратам дня и сумма за неделю.
-    private func weekRows(_ report: Report, tag: TransactionTag) -> some View {
+    /// Строки недель: подпись, клетки Пн–Вс по интенсивности трат и сумма.
+    private func weekRows(
+        _ weeks: [AnalyticsChartPoint],
+        periodStart: Date,
+        periodEnd: Date,
+        dailyTotals: [Date: Double],
+        scope: @escaping (AnalyticsChartPoint) -> AnalyticsScope
+    ) -> some View {
         let calendar = TagAnalyticsBuilder.weekCalendar
-        let weeks = report.snapshot.chartPoints
-        let page = report.snapshot.page
-        let maxDay = max(report.tagDailyTotals.values.max() ?? 0, 1)
+        let maxDay = max(weeks.isEmpty ? 0 : dailyTotals.filter { $0.key >= periodStart && $0.key < periodEnd }.values.max() ?? 0, 1)
         let maxWeek = weeks.map(\.total).max() ?? 0
 
         return VStack(spacing: 4) {
@@ -1245,19 +1319,13 @@ struct AnalyticsView: View {
 
             ForEach(weeks) { week in
                 NavigationLink {
-                    TransactionListByKindView(
-                        kind: .expense,
-                        scope: tagBinScope(
-                            for: AnalyticsTimeTotal(id: week.id, date: week.date, title: week.title, total: week.total),
-                            tag: tag,
-                            granularity: .weekly
-                        )
-                    )
+                    TransactionListByKindView(kind: .expense, scope: scope(week))
                 } label: {
                     weekRow(
                         week,
-                        page: page,
-                        dailyTotals: report.tagDailyTotals,
+                        periodStart: periodStart,
+                        periodEnd: periodEnd,
+                        dailyTotals: dailyTotals,
                         maxDay: maxDay,
                         isPeak: week.total > 0 && week.total == maxWeek,
                         calendar: calendar
@@ -1270,7 +1338,8 @@ struct AnalyticsView: View {
 
     private func weekRow(
         _ week: AnalyticsChartPoint,
-        page: AnalyticsPeriodPage,
+        periodStart: Date,
+        periodEnd: Date,
         dailyTotals: [Date: Double],
         maxDay: Double,
         isPeak: Bool,
@@ -1278,7 +1347,7 @@ struct AnalyticsView: View {
     ) -> some View {
         let weekInterval = calendar.dateInterval(of: .weekOfYear, for: week.date)
         let weekStart = weekInterval?.start ?? week.date
-        let weekEnd = min(weekInterval?.end ?? week.date, page.endDateExclusive)
+        let weekEnd = min(weekInterval?.end ?? week.date, periodEnd)
         let lastDay = calendar.date(byAdding: .day, value: -1, to: weekEnd) ?? week.date
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
 
@@ -1292,7 +1361,7 @@ struct AnalyticsView: View {
 
             HStack(spacing: 3) {
                 ForEach(days, id: \.self) { day in
-                    let inPeriod = day >= page.startDate && day < page.endDateExclusive
+                    let inPeriod = day >= periodStart && day < periodEnd
                     let total = dailyTotals[calendar.startOfDay(for: day)] ?? 0
                     let intensity = total > 0 ? min(total / maxDay, 1) : 0
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -1335,7 +1404,8 @@ struct AnalyticsView: View {
         if calendar.isDate(start, equalTo: end, toGranularity: .month) {
             return "\(startDay)–\(endDay) \(endMonth)"
         }
-        return "\(startDay) \(shortMonth(start)) – \(endDay) \(endMonth)"
+        // Через границу месяцев — трёхбуквенные месяцы, чтобы влезло в колонку.
+        return "\(startDay) \(shortMonth(start).prefix(3))–\(endDay) \(endMonth.prefix(3))"
     }
 
     private func shortMonth(_ date: Date) -> String {
@@ -1449,6 +1519,7 @@ struct AnalyticsView: View {
         if selectedMode == .tags, let granularity = report.tagGranularity {
             return granularity.sectionTitle
         }
+        if showsWeeks { return "По неделям" }
         return selectedScale == .year ? "По месяцам" : "По дням"
     }
 
