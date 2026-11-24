@@ -18,12 +18,13 @@ extension View {
     }
 }
 
-/// Переключатель неделя / месяц / год: капсула со скользящим выделением.
+/// Переключатель месяц / год: капсула со скользящим выделением. Недели —
+/// не отдельный масштаб, а вид раздела «По неделям» внутри месяца и года.
 struct AnalyticsScaleTabs: View {
     @Binding var selection: AnalyticsTimeScale
 
     var body: some View {
-        CapsuleTabs(options: AnalyticsTimeScale.allCases, selection: $selection, title: \.tabTitle)
+        CapsuleTabs(options: [AnalyticsTimeScale.month, .year], selection: $selection, title: \.tabTitle)
     }
 }
 
