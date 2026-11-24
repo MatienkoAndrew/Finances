@@ -315,8 +315,6 @@ struct AnalyticsView: View {
         let calendar = Calendar.current
 
         switch selectedScale {
-        case .week:
-            return calendar.date(byAdding: .weekOfYear, value: -1, to: pageAnchorDate) ?? pageAnchorDate
         case .month:
             return calendar.date(byAdding: .month, value: -1, to: pageAnchorDate) ?? pageAnchorDate
         case .year:
@@ -938,7 +936,6 @@ struct AnalyticsView: View {
 
     private var trendCaption: String {
         switch selectedScale {
-        case .week: return "в день к прошлой неделе"
         case .month: return "в день к прошлому месяцу"
         case .year: return "в месяц к прошлому году"
         }
@@ -2082,7 +2079,7 @@ struct AnalyticsView: View {
         let calendar = Calendar.current
 
         switch scale {
-        case .week, .month:
+        case .month:
             return calendar.startOfDay(for: date)
 
         case .year:
@@ -2097,8 +2094,6 @@ struct AnalyticsView: View {
         let nextAnchor: Date
         
         switch selectedScale {
-        case .week:
-            nextAnchor = calendar.date(byAdding: .weekOfYear, value: 1, to: pageAnchorDate) ?? pageAnchorDate
         case .month:
             nextAnchor = calendar.date(byAdding: .month, value: 1, to: pageAnchorDate) ?? pageAnchorDate
         case .year:
@@ -2113,8 +2108,6 @@ struct AnalyticsView: View {
         
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
             switch selectedScale {
-            case .week:
-                pageAnchorDate = calendar.date(byAdding: .weekOfYear, value: -1, to: pageAnchorDate) ?? pageAnchorDate
             case .month:
                 pageAnchorDate = calendar.date(byAdding: .month, value: -1, to: pageAnchorDate) ?? pageAnchorDate
             case .year:
@@ -2130,8 +2123,6 @@ struct AnalyticsView: View {
         
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
             switch selectedScale {
-            case .week:
-                pageAnchorDate = calendar.date(byAdding: .weekOfYear, value: 1, to: pageAnchorDate) ?? pageAnchorDate
             case .month:
                 pageAnchorDate = calendar.date(byAdding: .month, value: 1, to: pageAnchorDate) ?? pageAnchorDate
             case .year:
@@ -2172,21 +2163,6 @@ struct AnalyticsView: View {
 
     private func formattedRubAmount(_ value: Double) -> String {
         AnalyticsFormat.rub(value)
-    }
-
-    private func signedFormattedRubAmount(_ value: Double) -> String {
-        let sign = value < 0 ? "-" : "+"
-        return "\(sign) \(formattedRubAmount(abs(value)))"
-    }
-
-    private func shortAmount(_ value: Double) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM ₽", value / 1_000_000)
-        } else if value >= 1_000 {
-            return String(format: "%.0fK ₽", value / 1_000)
-        } else {
-            return String(format: "%.0f ₽", value)
-        }
     }
 }
 

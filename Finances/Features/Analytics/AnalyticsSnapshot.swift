@@ -247,7 +247,7 @@ enum AnalyticsSnapshotBuilder {
         // Вычисляем эффективное количество бинов для расчета среднего
         let effectiveBinCount: Int
         switch scale {
-        case .week, .month:
+        case .month:
             if now >= page.endDateExclusive {
                 // Завершённый период — все его дни. Раньше сюда попадал и первый
                 // день следующего периода: у 30-дневного месяца выходило 31.
@@ -341,17 +341,6 @@ enum AnalyticsSnapshotBuilder {
         let calendar = Calendar.current
 
         switch scale {
-        case .week:
-            let interval = calendar.dateInterval(of: .weekOfYear, for: anchorDate)!
-            let endInclusive = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.start
-
-            return AnalyticsPeriodPage(
-                startDate: interval.start,
-                endDateExclusive: interval.end,
-                displayTitle: formattedWeekRange(start: interval.start, end: endInclusive),
-                binCount: 7
-            )
-
         case .month:
             let interval = calendar.dateInterval(of: .month, for: anchorDate)!
             let days = calendar.range(of: .day, in: .month, for: interval.start)?.count ?? 30
@@ -386,15 +375,6 @@ enum AnalyticsSnapshotBuilder {
         let calendar = Calendar.current
 
         switch scale {
-        case .week:
-            return strideDates(from: page.startDate, to: page.endDateExclusive, component: .day).map { date in
-                BinDescriptor(
-                    date: date,
-                    axisLabel: AnalyticsDateFormat.weekdayShort.string(from: date),
-                    title: formattedShortDate(date)
-                )
-            }
-
         case .month:
             let dates = strideDates(from: page.startDate, to: page.endDateExclusive, component: .day)
 
@@ -447,7 +427,7 @@ enum AnalyticsSnapshotBuilder {
         calendar: Calendar
     ) -> Int? {
         switch scale {
-        case .week, .month:
+        case .month:
             let start = calendar.startOfDay(for: page.startDate)
             let current = calendar.startOfDay(for: date)
             let delta = calendar.dateComponents([.day], from: start, to: current).day ?? 0
@@ -473,26 +453,6 @@ enum AnalyticsSnapshotBuilder {
         if uppercased.hasPrefix("VNPAY XLIII COFFEE") { return "VNPAY XLIII COFFEE" }
 
         return uppercased
-    }
-
-    private static func formattedWeekRange(start: Date, end: Date) -> String {
-        let calendar = Calendar.current
-        let startMonth = calendar.component(.month, from: start)
-        let endMonth = calendar.component(.month, from: end)
-        let startYear = calendar.component(.year, from: start)
-        let endYear = calendar.component(.year, from: end)
-
-        if startMonth == endMonth && startYear == endYear {
-            let startDay = AnalyticsDateFormat.day.string(from: start)
-            let endPart = AnalyticsDateFormat.dayMonthYear.string(from: end)
-
-            return "\(startDay)–\(endPart)"
-        } else {
-            let startPart = AnalyticsDateFormat.dayMonth.string(from: start)
-            let endPart = AnalyticsDateFormat.dayMonthYear.string(from: end)
-
-            return "\(startPart)–\(endPart)"
-        }
     }
 
     private static func formattedMonthYear(_ date: Date) -> String {
@@ -524,7 +484,6 @@ enum AnalyticsDateFormat {
     static let dayMonthYear = formatter("d MMM yyyy")
     /// «18 ноября».
     static let dayMonthLong = formatter("d MMMM")
-    static let weekdayShort = formatter("EEE")
     static let monthShort = formatter("MMM")
     static let monthFull = formatter("MMMM")
     static let monthShortYear = formatter("LLL yyyy")

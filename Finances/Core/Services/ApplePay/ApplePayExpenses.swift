@@ -17,17 +17,17 @@ enum ApplePayExpenses {
     }
 
     enum RecordError: LocalizedError {
-        case unreadableAmount(String)
+        case missingAmount
 
         var errorDescription: String? {
-            switch self {
-            case .unreadableAmount(let text):
-                let shown = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return shown.isEmpty
-                    ? "«Команды» не передали сумму. В действии «Записать оплату Apple Pay» в поле «Сумма» должна стоять сумма из входных данных автоматизации."
-                    : "Не удалось прочитать сумму «\(shown)». Трата не записана."
-            }
+            "«Команды» не передали сумму. В действии «Записать оплату Apple Pay» в поле «Сумма» должна стоять сумма из входных данных автоматизации."
         }
+    }
+
+    private struct PaidAmount {
+        let value: Double
+        /// ISO-код валюты; nil — валюта счёта.
+        let currencyCode: String?
     }
 
     /// Повторный запуск автоматизации для той же оплаты не создаёт вторую трату.
@@ -39,30 +39,10 @@ enum ApplePayExpenses {
     /// Если оплата была в другой валюте, чем счёт, сумма в валюте счёта считается
     /// по курсу — примерно; точную даст выписка. Если курса ещё нет, трата
     /// записывается в валюте оплаты без счёта, чтобы не исказить его остаток.
-    @MainActor
-    static func record(
-        amountText: String,
-        merchant: String,
-        card: String?,
-        at date: Date = .now,
-        context: ModelContext
-    ) throws -> Recorded {
-        guard let paid = WalletAmountParser.parse(amountText) else {
-            throw RecordError.unreadableAmount(amountText)
-        }
-        return try record(
-            paid: paid,
-            amountText: amountText.trimmingCharacters(in: .whitespacesAndNewlines),
-            merchant: merchant,
-            card: card,
-            at: date,
-            context: context
-        )
-    }
-
-    /// Сумма из «Команд» числом — без перевода в текст: «Команды» падают, когда
-    /// переводят в текст сумму в чужой валюте (оплата в долларах с тенговой карты).
-    /// Валюта приходит отдельно (местная по часовому поясу); nil — валюта счёта.
+    ///
+    /// Сумма из «Команд» приходит числом — без перевода в текст: «Команды» падают,
+    /// когда переводят в текст сумму в чужой валюте (оплата в долларах с тенговой
+    /// карты). Валюта — отдельно (местная по часовому поясу); nil — валюта счёта.
     @MainActor
     static func record(
         value: Decimal,
@@ -74,8 +54,8 @@ enum ApplePayExpenses {
     ) throws -> Recorded {
         let number = abs(NSDecimalNumber(decimal: value).doubleValue)
         let code = currencyCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let paid = WalletAmountParser.Amount(value: number, currencyCode: code?.isEmpty == false ? code : nil)
-        guard paid.value > 0 else { throw RecordError.unreadableAmount("") }
+        let paid = PaidAmount(value: number, currencyCode: code?.isEmpty == false ? code : nil)
+        guard paid.value > 0 else { throw RecordError.missingAmount }
         return try record(
             paid: paid,
             amountText: paid.currencyCode.map { "\(paid.value.formatted(.number.locale(Locale(identifier: "ru_RU")))) \($0)" }
@@ -89,7 +69,7 @@ enum ApplePayExpenses {
 
     @MainActor
     private static func record(
-        paid: WalletAmountParser.Amount,
+        paid: PaidAmount,
         amountText: String,
         merchant: String,
         card: String?,

@@ -9,7 +9,6 @@
 import Foundation
 
 enum AnalyticsTimeScale: String, CaseIterable, Identifiable {
-    case week = "W"
     case month = "M"
     case year = "Y"
 
@@ -18,7 +17,6 @@ enum AnalyticsTimeScale: String, CaseIterable, Identifiable {
     // Подпись для верхних вкладок (стиль Alipay).
     var tabTitle: String {
         switch self {
-        case .week: return "Неделя"
         case .month: return "Месяц"
         case .year: return "Год"
         }
@@ -26,7 +24,7 @@ enum AnalyticsTimeScale: String, CaseIterable, Identifiable {
 
     var averageTitle: String {
         switch self {
-        case .week, .month:
+        case .month:
             return "СРЕДНЕЕ В ДЕНЬ"
         case .year:
             return "СРЕДНЕЕ В МЕСЯЦ"
@@ -35,7 +33,7 @@ enum AnalyticsTimeScale: String, CaseIterable, Identifiable {
 
     var selectedPointTitle: String {
         switch self {
-        case .week, .month:
+        case .month:
             return "ДЕНЬ"
         case .year:
             return "МЕСЯЦ"

@@ -45,11 +45,6 @@ struct RootTabView: View {
                 }
                 .tag(RootTab.accounts)
             
-//            ContentView()
-//                .tabItem {
-//                    Label("Операции", systemImage: "list.bullet.rectangle")
-//                }
-
             AnalyticsView()
                 .environment(\.isTabVisible, selectedTab == .analytics)
                 .tabItem {

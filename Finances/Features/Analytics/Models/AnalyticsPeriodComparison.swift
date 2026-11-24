@@ -202,7 +202,7 @@ enum AnalyticsPeriodComparisonBuilder {
 
         let previousEndUnclamped: Date?
         switch scale {
-        case .week, .month:
+        case .month:
             // Столько же дней от начала: у короткого месяца отрезок упрётся в его конец.
             let days = calendar.dateComponents([.day], from: page.startDate, to: currentEnd).day ?? 0
             previousEndUnclamped = calendar.date(byAdding: .day, value: days, to: previousPage.startDate)
@@ -238,7 +238,6 @@ extension AnalyticsTimeScale {
     /// Шаг календаря, на который листается страница этого масштаба.
     var calendarComponent: Calendar.Component {
         switch self {
-        case .week: return .weekOfYear
         case .month: return .month
         case .year: return .year
         }
