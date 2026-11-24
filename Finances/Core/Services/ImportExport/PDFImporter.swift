@@ -45,26 +45,6 @@ enum PDFImporter {
         return KaspiStatementParser.parse(lines: lines)
     }
 
-    /// Читает PDF и сразу импортирует — синхронно, на главном потоке.
-    static func importTransactions(
-        from url: URL,
-        existingTransactions: [Transaction],
-        accounts: [Account],
-        rules: [CategoryRule],
-        categories: [ExpenseCategoryItem],
-        rubRates: RubRateTable
-    ) throws -> PDFImportResult {
-        try importStatement(
-            readStatement(from: url),
-            fileName: url.lastPathComponent,
-            existingTransactions: existingTransactions,
-            accounts: accounts,
-            rules: rules,
-            categories: categories,
-            rubRates: rubRates
-        )
-    }
-
     /// Импортирует разобранную выписку Kaspi Gold.
     ///
     /// Новые операции возвращаются в `transactions` — их нужно вставить в контекст.

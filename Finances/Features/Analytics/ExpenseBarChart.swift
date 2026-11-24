@@ -514,8 +514,6 @@ struct ExpenseBarChart: View {
 
             let label: String?
             switch scale {
-            case .week:
-                label = ExpenseChartFormat.weekday(current)
             case .month:
                 // Подписи и линии — только по понедельникам, как раньше.
                 label = calendar.component(.weekday, from: current) == calendar.firstWeekday
@@ -553,7 +551,7 @@ extension AnalyticsTimeScale {
     /// Ширина одного столбика.
     var barUnit: Calendar.Component {
         switch self {
-        case .week, .month: return .day
+        case .month: return .day
         case .year: return .month
         }
     }
@@ -561,7 +559,6 @@ extension AnalyticsTimeScale {
     /// Страница, к границе которой доводится прокрутка.
     var pageUnit: Calendar.Component {
         switch self {
-        case .week: return .weekOfYear
         case .month: return .month
         case .year: return .year
         }
@@ -569,7 +566,6 @@ extension AnalyticsTimeScale {
 
     var pageStartComponents: DateComponents {
         switch self {
-        case .week: return DateComponents(hour: 0, weekday: Calendar.current.firstWeekday)
         case .month: return DateComponents(day: 1, hour: 0)
         case .year: return DateComponents(month: 1, day: 1, hour: 0)
         }
@@ -589,7 +585,6 @@ enum ExpenseChartFormat {
     private static let dayMonthYear = formatter("d MMM yyyy")
     private static let dayMonth = formatter("d MMM")
     private static let day = formatter("d")
-    private static let weekdayShort = formatter("EEE")
     private static let monthFull = formatter("LLLL")
     private static let monthYear = formatter("LLLL yyyy")
     private static let monthShort = formatter("LLL")
@@ -598,10 +593,6 @@ enum ExpenseChartFormat {
 
     static func title(for start: Date, unit: Calendar.Component) -> String {
         unit == .month ? monthYear.string(from: start).capitalized : dayMonthYear.string(from: start)
-    }
-
-    static func weekday(_ date: Date) -> String {
-        weekdayShort.string(from: date)
     }
 
     static func dayNumber(_ date: Date) -> String {

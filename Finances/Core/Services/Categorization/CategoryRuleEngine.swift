@@ -1,20 +1,6 @@
 import Foundation
 
 enum CategoryRuleEngine {
-    static func matchCategoryName(
-        operationType: String,
-        details: String,
-        rules: [CategoryRule],
-        existingCategories: [ExpenseCategoryItem]
-    ) -> String? {
-        match(
-            operationType: operationType,
-            details: details,
-            rules: rules,
-            existingCategories: existingCategories
-        )?.category
-    }
-
     /// Категория и подкатегория для операции. Порядок: правила пользователя →
     /// что пользователь сам выбирал для этого мерчанта → встроенный словарь →
     /// прошлая догадка нейросети → «Другое».

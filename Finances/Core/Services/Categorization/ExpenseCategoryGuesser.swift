@@ -1,10 +1,6 @@
 import Foundation
 
 enum ExpenseCategoryGuesser {
-    static func guessCategoryName(for operationType: String, details: String) -> String? {
-        guesses(for: operationType, details: details).first?.category
-    }
-
     /// Подходящие категории по убыванию уверенности. Первая может не существовать
     /// у пользователя («Красота») — тогда берётся следующая.
     static func guesses(for operationType: String, details: String) -> [CategoryMatch] {
